@@ -114,6 +114,7 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(90);
         });
         services.AddScoped<IReadOnlyPilotService, ReadOnlyPilotService>();
+        services.AddScoped<IBroaderValidationPilotService, BroaderValidationPilotService>();
         return services;
     }
 

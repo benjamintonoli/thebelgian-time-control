@@ -32,16 +32,28 @@ internal sealed class ReadOnlyPilotService(
         Validate(request);
         var plenion = await ReadPlenionAsync(request, cancellationToken);
         var powerfleet = await ReadPowerfleetAsync(request, cancellationToken);
+        var missingDriverTrips = powerfleet.NormalizedRecords
+            .Where(trip => string.IsNullOrWhiteSpace(trip.DriverId))
+            .Where(trip =>
+                DateOnly.FromDateTime(trip.StartDateTime.DateTime) >= request.FromDate &&
+                DateOnly.FromDateTime(trip.StartDateTime.DateTime) <= request.ThroughDate)
+            .ToArray();
         var matchedTrips = powerfleet.NormalizedRecords
             .Where(trip => MatchesPilot(trip, plenion.Technician, request))
             .OrderBy(trip => trip.StartDateTime)
             .ToArray();
         var issues = plenion.Issues.Concat(powerfleet.Issues).ToList();
-        AddAssignmentIssues(matchedTrips, plenion.Technician, request, issues);
+        AddAssignmentIssues(
+            matchedTrips,
+            missingDriverTrips,
+            plenion.Technician,
+            request,
+            issues);
         var stops = PilotLocationMatcher.ReconstructStops(matchedTrips, issues);
         var locationResolutions = await locationResolutionService.ResolveAsync(
             plenion.NormalizedRecords,
             stops,
+            request.ResolveAllLocations,
             cancellationToken);
         var performanceMatches = PilotLocationMatcher.Match(
             plenion.NormalizedRecords
@@ -51,14 +63,15 @@ internal sealed class ReadOnlyPilotService(
             stops,
             _matchingOptions);
 
-        var comparisons = Dates(request.FromDate, request.ThroughDate)
+        var comparisons = ResolveComparisonDates(request)
             .Select(date => CompareDay(
                 date,
                 plenion.Technician,
                 plenion.NormalizedRecords,
                 matchedTrips,
                 FindAbsence(request, date),
-                issues))
+                issues,
+                request.DriverOnlyLinking))
             .ToArray();
         return new ReadOnlyPilotResult
         {
@@ -162,7 +175,8 @@ internal sealed class ReadOnlyPilotService(
         IReadOnlyList<NormalizedPilotPerformance> performances,
         IReadOnlyList<NormalizedPilotTrip> trips,
         PilotAbsence? absence,
-        List<PilotIssue> issues)
+        List<PilotIssue> issues,
+        bool driverOnlyLinking)
     {
         var dailyPerformances = performances
             .Where(item => item.Date == date)
@@ -258,7 +272,9 @@ internal sealed class ReadOnlyPilotService(
 
         if (dailyTrips.Length == 0)
         {
-            quality.Add("Bestuurder ontbreekt");
+            quality.Add(driverOnlyLinking
+                ? "MissingDriver"
+                : "Bestuurder ontbreekt");
         }
 
         if (firstPerformance is not null && firstLocation is not { Reliable: true })
@@ -504,17 +520,32 @@ internal sealed class ReadOnlyPilotService(
 
     private static void AddAssignmentIssues(
         NormalizedPilotTrip[] matchedTrips,
+        NormalizedPilotTrip[] missingDriverTrips,
         Technician technician,
         ReadOnlyPilotRequest request,
         List<PilotIssue> issues)
     {
+        foreach (var trip in missingDriverTrips)
+        {
+            issues.Add(new PilotIssue(
+                "Powerfleet",
+                trip.ExternalId,
+                "MissingDriver",
+                "Rit zonder driverid; niet gebruikt voor automatische urenconclusies."));
+        }
+
         if (matchedTrips.Length == 0)
         {
             issues.Add(new PilotIssue(
                 "Koppeling",
                 null,
-                "Bestuurder ontbreekt",
+                "MissingDriver",
                 $"Geen Powerfleet-bestuurder kon betrouwbaar aan {technician.Name} worden gekoppeld."));
+            return;
+        }
+
+        if (request.DriverOnlyLinking)
+        {
             return;
         }
 
@@ -537,12 +568,24 @@ internal sealed class ReadOnlyPilotService(
         Technician technician,
         ReadOnlyPilotRequest request)
     {
-        if (!string.IsNullOrWhiteSpace(request.PowerfleetDriverId) &&
-            !request.PowerfleetDriverId.Equals(
-                trip.DriverId,
-                StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(trip.DriverId))
         {
             return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.PowerfleetDriverId))
+        {
+            return request.PowerfleetDriverId.Equals(
+                trip.DriverId,
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (request.DriverOnlyLinking)
+        {
+            var technicianTokens = NameTokens(technician.Name);
+            var driverTokens = NameTokens(trip.DriverName ?? string.Empty);
+            return technicianTokens.Count >= 2 &&
+                   technicianTokens.All(driverTokens.Contains);
         }
 
         if (!string.IsNullOrWhiteSpace(request.PowerfleetObjectId) &&
@@ -561,15 +604,10 @@ internal sealed class ReadOnlyPilotService(
             return false;
         }
 
-        if (!string.IsNullOrWhiteSpace(request.PowerfleetDriverId))
-        {
-            return true;
-        }
-
-        var technicianTokens = NameTokens(technician.Name);
-        var driverTokens = NameTokens(trip.DriverName ?? string.Empty);
-        return technicianTokens.Count >= 2 &&
-               technicianTokens.All(driverTokens.Contains);
+        var fallbackTechnicianTokens = NameTokens(technician.Name);
+        var fallbackDriverTokens = NameTokens(trip.DriverName ?? string.Empty);
+        return fallbackTechnicianTokens.Count >= 2 &&
+               fallbackTechnicianTokens.All(fallbackDriverTokens.Contains);
     }
 
     private static HashSet<string> NameTokens(string value)
@@ -635,15 +673,55 @@ internal sealed class ReadOnlyPilotService(
                 nameof(request));
         }
 
+        var maxWorkingDays = request.MaxWorkingDays is >= 1 and <= 5
+            ? request.MaxWorkingDays
+            : 3;
+        if (request.SelectedWorkdays is { Count: > 0 })
+        {
+            if (request.SelectedWorkdays.Count > maxWorkingDays)
+            {
+                throw new ArgumentException(
+                    $"Er zijn maximaal {maxWorkingDays} geselecteerde werkdagen toegestaan.",
+                    nameof(request));
+            }
+
+            if (request.SelectedWorkdays.Any(date =>
+                    date < request.FromDate || date > request.ThroughDate))
+            {
+                throw new ArgumentException(
+                    "Geselecteerde werkdagen vallen buiten de opgegeven periode.",
+                    nameof(request));
+            }
+
+            return;
+        }
+
+        var maxCalendarDays = request.DriverOnlyLinking ? 45 : 7;
         var dates = Dates(request.FromDate, request.ThroughDate).ToArray();
-        var workingDays = dates.Count(date =>
-            date.DayOfWeek is not DayOfWeek.Saturday and not DayOfWeek.Sunday);
-        if (workingDays is < 1 or > 3 || dates.Length > 7)
+        var workingDays = dates.Length;
+        if (workingDays is < 1 ||
+            workingDays > maxWorkingDays ||
+            (request.ThroughDate.DayNumber - request.FromDate.DayNumber + 1) > maxCalendarDays)
         {
             throw new ArgumentException(
-                "De pilotperiode moet één tot en met drie werkdagen bevatten.",
+                request.DriverOnlyLinking
+                    ? $"De bredere validatieperiode moet één tot en met {maxWorkingDays} werkdagen bevatten."
+                    : "De pilotperiode moet één tot en met drie werkdagen bevatten.",
                 nameof(request));
         }
+    }
+
+    private static IEnumerable<DateOnly> ResolveComparisonDates(ReadOnlyPilotRequest request)
+    {
+        if (request.SelectedWorkdays is { Count: > 0 })
+        {
+            return request.SelectedWorkdays
+                .Distinct()
+                .OrderBy(date => date)
+                .ToArray();
+        }
+
+        return Dates(request.FromDate, request.ThroughDate);
     }
 
     private static IEnumerable<DateOnly> Dates(

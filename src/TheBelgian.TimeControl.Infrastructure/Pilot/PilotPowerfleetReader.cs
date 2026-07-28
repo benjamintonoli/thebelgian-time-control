@@ -15,8 +15,10 @@ internal sealed class PilotPowerfleetReader(
     IOptions<PowerfleetOptions> options,
     ILogger<PilotPowerfleetReader> logger)
 {
-    private const int MaximumTrips = 200;
-    private const int MaximumResponseBytes = 10 * 1024 * 1024;
+    private const int DefaultMaximumTrips = 200;
+    private const int AbsoluteMaximumTrips = 1000;
+    private const int DefaultMaximumResponseBytes = 10 * 1024 * 1024;
+    private const int AbsoluteMaximumResponseBytes = 50 * 1024 * 1024;
     private readonly PowerfleetOptions _options = options.Value;
 
     public async Task<PowerfleetPilotReadResult> ReadAsync(
@@ -24,14 +26,17 @@ internal sealed class PilotPowerfleetReader(
         CancellationToken cancellationToken)
     {
         ValidateConfiguration();
+        var maximumTrips = ResolveMaximumTrips(pilotRequest.MaximumTrips);
+        var maximumResponseBytes = ResolveMaximumResponseBytes(pilotRequest.MaximumTrips);
         var observations = new List<string>();
         var issues = new List<PilotIssue>();
         var definition = await ResolveEndpointAsync(observations, cancellationToken);
         var reportXml = await GetReportAsync(
             definition,
             pilotRequest,
+            maximumResponseBytes,
             cancellationToken);
-        var parsed = ParseReport(reportXml, observations, issues);
+        var parsed = ParseReport(reportXml, observations, issues, maximumTrips);
         VerifyServerFilters(
             parsed.NormalizedRecords,
             definition,
@@ -77,7 +82,10 @@ internal sealed class PilotPowerfleetReader(
             }
 
             EnsureSuccess(response, "rapportconfiguratie");
-            var content = await ReadBoundedAsync(response, cancellationToken);
+            var content = await ReadBoundedAsync(
+                response,
+                DefaultMaximumResponseBytes,
+                cancellationToken);
             var reportEndpoint = new Uri(apiRoot, "Reports/getReport");
             var definition = AnalyzeConfiguration(reportEndpoint, content, observations);
             observations.Add(
@@ -92,6 +100,7 @@ internal sealed class PilotPowerfleetReader(
     private async Task<string> GetReportAsync(
         PowerfleetReportDefinition definition,
         ReadOnlyPilotRequest pilotRequest,
+        int maximumResponseBytes,
         CancellationToken cancellationToken)
     {
         var from = pilotRequest.FromDate.ToDateTime(TimeOnly.MinValue);
@@ -131,13 +140,14 @@ internal sealed class PilotPowerfleetReader(
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken);
         EnsureSuccess(response, "rapport");
-        return await ReadBoundedAsync(response, cancellationToken);
+        return await ReadBoundedAsync(response, maximumResponseBytes, cancellationToken);
     }
 
     private static PowerfleetPilotReadResult ParseReport(
         string xml,
         List<string> observations,
-        List<PilotIssue> issues)
+        List<PilotIssue> issues,
+        int maximumTrips)
     {
         XDocument document;
         try
@@ -168,7 +178,7 @@ internal sealed class PilotPowerfleetReader(
             .Where(element => !element.Elements().Any(child =>
                 !child.Name.LocalName.Equals("tripid", StringComparison.OrdinalIgnoreCase) &&
                 PilotXmlFields.Value(child, "tripid") is not null))
-            .Take(MaximumTrips + 1)
+            .Take(maximumTrips + 1)
             .ToArray();
 
         if (rows.Length == 0)
@@ -177,19 +187,19 @@ internal sealed class PilotPowerfleetReader(
                 "Powerfleet XML bevat geen herkenbare records met tripid.");
         }
 
-        if (rows.Length > MaximumTrips)
+        if (rows.Length > maximumTrips)
         {
             issues.Add(new PilotIssue(
                 "Powerfleet",
                 null,
                 "Onvoldoende gegevens",
-                $"De pilotlimiet van {MaximumTrips} ritten is bereikt."));
+                $"De pilotlimiet van {maximumTrips} ritten is bereikt."));
         }
 
         var rawRecords = new List<PilotRawRecord>();
         var normalized = new List<NormalizedPilotTrip>();
         var rejected = 0;
-        foreach (var row in rows.Take(MaximumTrips))
+        foreach (var row in rows.Take(maximumTrips))
         {
             var raw = CreateRawRecord(row);
             rawRecords.Add(raw);
@@ -221,6 +231,14 @@ internal sealed class PilotPowerfleetReader(
             rawRecords.Count,
             rejected);
     }
+
+    private static int ResolveMaximumTrips(int? requested) =>
+        Math.Clamp(requested ?? DefaultMaximumTrips, 1, AbsoluteMaximumTrips);
+
+    private static int ResolveMaximumResponseBytes(int? maximumTrips) =>
+        maximumTrips is > DefaultMaximumTrips
+            ? AbsoluteMaximumResponseBytes
+            : DefaultMaximumResponseBytes;
 
     private static NormalizedPilotTrip Normalize(
         XElement row,
@@ -363,9 +381,10 @@ internal sealed class PilotPowerfleetReader(
 
     private static async Task<string> ReadBoundedAsync(
         HttpResponseMessage response,
+        int maximumResponseBytes,
         CancellationToken cancellationToken)
     {
-        if (response.Content.Headers.ContentLength > MaximumResponseBytes)
+        if (response.Content.Headers.ContentLength > maximumResponseBytes)
         {
             throw new InvalidDataException("Powerfleet-response overschrijdt de pilotlimiet.");
         }
@@ -383,7 +402,7 @@ internal sealed class PilotPowerfleetReader(
             }
 
             builder.Append(buffer, 0, read);
-            if (builder.Length > MaximumResponseBytes)
+            if (builder.Length > maximumResponseBytes)
             {
                 throw new InvalidDataException("Powerfleet-response overschrijdt de pilotlimiet.");
             }

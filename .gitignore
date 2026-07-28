@@ -16,3 +16,7 @@ data/
 **/secrets.json
 TestResults/
 coverage/
+docs/broader-validation-report.md
+docs/broader-validation-report.json
+docs/coverage-gap-analysis.md
+docs/coverage-gap-analysis.json

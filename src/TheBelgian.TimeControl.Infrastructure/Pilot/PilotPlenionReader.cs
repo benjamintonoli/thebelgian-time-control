@@ -12,7 +12,8 @@ internal sealed class PilotPlenionReader(
     IOptions<PlenionOptions> options,
     ILogger<PilotPlenionReader> logger)
 {
-    private const int MaximumPerformances = 100;
+    private const int DefaultMaximumPerformances = 100;
+    private const int AbsoluteMaximumPerformances = 500;
     private readonly string _connectionString = options.Value.PlenionOdbc;
 
     public async Task<PlenionPilotReadResult> ReadAsync(
@@ -32,6 +33,7 @@ internal sealed class PilotPlenionReader(
             technician,
             request.FromDate,
             request.ThroughDate,
+            ResolveMaximumPerformances(request.MaximumPerformances),
             cancellationToken);
     }
 
@@ -77,6 +79,7 @@ internal sealed class PilotPlenionReader(
         Technician technician,
         DateOnly fromDate,
         DateOnly throughDate,
+        int maximumPerformances,
         CancellationToken cancellationToken)
     {
         const string sql = """
@@ -103,13 +106,13 @@ internal sealed class PilotPlenionReader(
         while (await reader.ReadAsync(cancellationToken))
         {
             readCount++;
-            if (readCount > MaximumPerformances)
+            if (readCount > maximumPerformances)
             {
                 issues.Add(new PilotIssue(
                     "Plenion",
                     null,
                     "Onvoldoende gegevens",
-                    $"De pilotlimiet van {MaximumPerformances} prestaties is bereikt."));
+                    $"De pilotlimiet van {maximumPerformances} prestaties is bereikt."));
                 break;
             }
 
@@ -146,7 +149,7 @@ internal sealed class PilotPlenionReader(
 
         logger.LogInformation(
             "Read-only Plenion-pilot las {ReadCount} prestaties; {RejectedCount} records afgewezen.",
-            Math.Min(readCount, MaximumPerformances),
+            Math.Min(readCount, maximumPerformances),
             rejectedCount);
         return new PlenionPilotReadResult(
             technician,
@@ -154,9 +157,12 @@ internal sealed class PilotPlenionReader(
             normalized,
             issues,
             observations.ToArray(),
-            Math.Min(readCount, MaximumPerformances),
+            Math.Min(readCount, maximumPerformances),
             rejectedCount);
     }
+
+    private static int ResolveMaximumPerformances(int? requested) =>
+        Math.Clamp(requested ?? DefaultMaximumPerformances, 1, AbsoluteMaximumPerformances);
 
     private static async Task<NormalizedPilotPerformance> EnrichPerformanceAsync(
         OdbcConnection connection,

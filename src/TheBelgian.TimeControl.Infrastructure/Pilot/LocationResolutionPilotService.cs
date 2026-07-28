@@ -19,10 +19,20 @@ internal sealed partial class LocationResolutionPilotService(
     public async Task<IReadOnlyList<PilotLocationResolution>> ResolveAsync(
         IReadOnlyList<NormalizedPilotPerformance> performances,
         IReadOnlyList<PilotStop> stops,
+        CancellationToken cancellationToken) =>
+        await ResolveAsync(performances, stops, resolveAllLocations: false, cancellationToken);
+
+    public async Task<IReadOnlyList<PilotLocationResolution>> ResolveAsync(
+        IReadOnlyList<NormalizedPilotPerformance> performances,
+        IReadOnlyList<PilotStop> stops,
+        bool resolveAllLocations,
         CancellationToken cancellationToken)
     {
         var uncertainPerformances = performances
-            .Where(IsUncertainPilotLocation)
+            .Where(performance =>
+                resolveAllLocations
+                    ? HasResolvableAddress(performance)
+                    : IsUncertainPilotLocation(performance))
             .OrderBy(item => item.Date)
             .ThenBy(item => item.StartDateTime)
             .ToArray();
@@ -336,6 +346,12 @@ internal sealed partial class LocationResolutionPilotService(
                street.Contains("kapucijnenstraat", StringComparison.Ordinal) ||
                customer.Contains("hoteleurope", StringComparison.Ordinal);
     }
+
+    private static bool HasResolvableAddress(NormalizedPilotPerformance performance) =>
+        !string.IsNullOrWhiteSpace(performance.DeliveryAddressExternalId) ||
+        !string.IsNullOrWhiteSpace(performance.Street) ||
+        !string.IsNullOrWhiteSpace(performance.PostalCode) ||
+        !string.IsNullOrWhiteSpace(performance.City);
 
     private static bool IsHome(PilotStop stop) =>
         (stop.Area?.Contains(

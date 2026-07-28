@@ -77,6 +77,13 @@ public interface IReadOnlyPilotService
         CancellationToken cancellationToken);
 }
 
+public interface IBroaderValidationPilotService
+{
+    Task<BroaderValidationResult> RunAsync(
+        BroaderValidationRequest request,
+        CancellationToken cancellationToken);
+}
+
 public interface ISourceDataRepository
 {
     Task UpsertTechniciansAsync(

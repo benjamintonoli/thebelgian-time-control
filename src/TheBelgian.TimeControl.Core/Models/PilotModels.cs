@@ -7,7 +7,13 @@ public sealed record ReadOnlyPilotRequest(
     string? PowerfleetDriverId = null,
     string? PowerfleetObjectId = null,
     string? VehiclePlate = null,
-    IReadOnlyList<PilotAbsence>? Absences = null);
+    IReadOnlyList<PilotAbsence>? Absences = null,
+    bool DriverOnlyLinking = false,
+    bool ResolveAllLocations = false,
+    int MaxWorkingDays = 3,
+    int? MaximumPerformances = null,
+    int? MaximumTrips = null,
+    IReadOnlyList<DateOnly>? SelectedWorkdays = null);
 
 public sealed record PilotAbsence(
     DateOnly Date,

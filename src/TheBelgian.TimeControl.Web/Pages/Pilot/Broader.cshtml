@@ -1,0 +1,187 @@
+@page "/Pilot/Broader"
+@model TheBelgian.TimeControl.Web.Pages.Pilot.BroaderModel
+@{
+    ViewData["Title"] = "Bredere validatie";
+}
+
+<h1>Bredere read-only validatie</h1>
+<p class="text-muted">
+    Development-only diagnostiek voor maximaal vijf techniekers en vijf representatieve
+    werkdagen. Koppeling gebeurt via Powerfleet <code>driverid</code>/<code>drivername</code>;
+    voertuiggegevens zijn uitsluitend informatief. Er is geen writeback, geen correctie
+    en geen reviewtool.
+</p>
+
+<form method="post" class="card card-body mb-4">
+    <div class="row g-3 mb-3">
+        <div class="col-md-3">
+            <label asp-for="FromDate" class="form-label">Startdatum zoekvenster</label>
+            <input asp-for="FromDate" class="form-control" type="date" required />
+        </div>
+        <div class="col-md-3">
+            <label asp-for="ThroughDate" class="form-label">Einddatum zoekvenster</label>
+            <input asp-for="ThroughDate" class="form-control" type="date" required />
+        </div>
+        <div class="col-md-3">
+            <label asp-for="MaxWorkingDaysPerTechnician" class="form-label">Max. werkdagen</label>
+            <input asp-for="MaxWorkingDaysPerTechnician" class="form-control" type="number" min="1" max="5" required />
+        </div>
+    </div>
+
+    <h2 class="h5">Techniekers</h2>
+    @for (var index = 0; index < Model.Technicians.Count; index++)
+    {
+        <div class="row g-3 mb-2">
+            <div class="col-md-6">
+                <label class="form-label" asp-for="Technicians[index].Name">Naam @(@index + 1)</label>
+                <input asp-for="Technicians[index].Name" class="form-control" />
+            </div>
+            <div class="col-md-6">
+                <label class="form-label" asp-for="Technicians[index].DriverId">Powerfleet driverid (optioneel)</label>
+                <input asp-for="Technicians[index].DriverId" class="form-control" placeholder="leeg = afleiden via drivername" />
+            </div>
+        </div>
+    }
+
+    <div class="mt-3">
+        <button class="btn btn-primary" type="submit">Bredere validatie uitvoeren</button>
+    </div>
+    <div asp-validation-summary="All" class="text-danger mt-2"></div>
+</form>
+
+@if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+{
+    <div class="alert alert-danger">
+        <strong>Validatie gestopt:</strong> @Model.ErrorMessage
+    </div>
+}
+
+@if (Model.Result is { } result)
+{
+    var summary = result.Summary;
+    <section class="card card-body mb-4">
+        <h2 class="h4">Samenvatting</h2>
+        <dl class="row mb-0">
+            <dt class="col-sm-4">Verwerkte techniekers</dt>
+            <dd class="col-sm-8">@summary.ProcessedTechnicianCount (overgeslagen: @summary.SkippedTechnicianCount)</dd>
+            <dt class="col-sm-4">Werkdagen</dt>
+            <dd class="col-sm-8">@summary.WorkdayCount</dd>
+            <dt class="col-sm-4">Prestaties</dt>
+            <dd class="col-sm-8">@summary.TotalPerformanceCount</dd>
+            <dt class="col-sm-4">Automatisch bevestigd</dt>
+            <dd class="col-sm-8">@summary.ConfirmedPercent% (@summary.ConfirmedLocationMatchCount)</dd>
+            <dt class="col-sm-4">Waarschijnlijk gekoppeld</dt>
+            <dd class="col-sm-8">@summary.ProbablePercent% (@summary.ProbableLocationMatchCount)</dd>
+            <dt class="col-sm-4">Manuele controle</dt>
+            <dd class="col-sm-8">@summary.ManualReviewPercent% (@summary.ManualReviewRequiredCount)</dd>
+            <dt class="col-sm-4">Betrouwbare matches</dt>
+            <dd class="col-sm-8">@summary.ReliableMatchPercent%</dd>
+            <dt class="col-sm-4">MissingDriver-ritten</dt>
+            <dd class="col-sm-8">@summary.MissingDriverTripCount</dd>
+            <dt class="col-sm-4">Mogelijke urenafwijkingen</dt>
+            <dd class="col-sm-8">
+                @summary.PossibleHourDeviationCount (&gt;3 min);
+                @summary.IndividualToleranceDeviationCount (≥15);
+                @summary.HighPriorityToleranceDeviationCount (≥30)
+            </dd>
+            <dt class="col-sm-4">Rapport</dt>
+            <dd class="col-sm-8"><code>docs/broader-validation-report.md</code></dd>
+        </dl>
+    </section>
+
+    @if (summary.RecurringAddressProblems.Count > 0)
+    {
+        <section class="mb-4">
+            <h2 class="h5">Terugkerende adresproblemen</h2>
+            <ul>
+            @foreach (var problem in summary.RecurringAddressProblems)
+            {
+                <li>@problem</li>
+            }
+            </ul>
+        </section>
+    }
+
+    @if (summary.SkippedTechnicians.Count > 0)
+    {
+        <section class="mb-4">
+            <h2 class="h5">Overgeslagen techniekers</h2>
+            <ul>
+            @foreach (var skipped in summary.SkippedTechnicians)
+            {
+                <li>@skipped</li>
+            }
+            </ul>
+        </section>
+    }
+
+    @foreach (var technician in result.Technicians.Where(item => item.Processed))
+    {
+        <section class="card card-body mb-4">
+            <h2 class="h4">
+                @technician.Technician?.Name
+                <small class="text-muted">driverid @technician.DriverId · @technician.DriverName</small>
+            </h2>
+            <div class="table-responsive">
+                <table class="table table-sm table-striped">
+                    <thead>
+                        <tr>
+                            <th>Datum</th>
+                            <th>Type</th>
+                            <th>Voertuigen (info)</th>
+                            <th>Eerste werklocatie</th>
+                            <th>Plenion start</th>
+                            <th>Plenion einde</th>
+                            <th>Vertrek laatste</th>
+                            <th>Δ start</th>
+                            <th>Δ einde</th>
+                            <th>Prestaties</th>
+                            <th>Klantstops</th>
+                            <th>Confirmed</th>
+                            <th>Probable</th>
+                            <th>Manual</th>
+                            <th>None</th>
+                            <th>Kwaliteit</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var day in technician.Days)
+                    {
+                        <tr>
+                            <td>@day.Date.ToString("dd/MM/yyyy")</td>
+                            <td>@day.DayType</td>
+                            <td>
+                                @foreach (var vehicle in day.Vehicles)
+                                {
+                                    <div>@vehicle.ObjectId / @vehicle.ObjectName / @vehicle.ObjectPlate</div>
+                                }
+                            </td>
+                            <td>
+                                @day.FirstWorkLocation?.Timestamp.ToString("HH:mm")
+                                <br />@day.FirstWorkLocation?.Address
+                            </td>
+                            <td>@day.FirstPlenionStart?.ToString("HH:mm")</td>
+                            <td>@day.LastPlenionEnd?.ToString("HH:mm")</td>
+                            <td>@day.LastWorkLocationDeparture?.ToString("HH:mm")</td>
+                            <td>@FormatDifference(day.StartDifferenceMinutes)</td>
+                            <td>@FormatDifference(day.EndDifferenceMinutes)</td>
+                            <td>@day.PlenionPerformanceCount</td>
+                            <td>@day.LinkedCustomerStopCount</td>
+                            <td>@day.ConfirmedLocationMatchCount</td>
+                            <td>@day.ProbableLocationMatchCount</td>
+                            <td>@day.ManualReviewRequiredCount</td>
+                            <td>@day.NoReliableMatchCount</td>
+                            <td>@day.DataQuality</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    }
+}
+
+@functions {
+    private static string FormatDifference(int? value) =>
+        value is null ? "—" : $"{value:+#;-#;0} min";
+}
