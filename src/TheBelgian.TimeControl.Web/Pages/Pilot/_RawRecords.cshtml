@@ -1,0 +1,36 @@
+@model (IReadOnlyList<TheBelgian.TimeControl.Core.Models.PilotRawRecord> Records, string[] Fields)
+
+@if (Model.Records.Count == 0)
+{
+    <p class="text-muted">Geen records om te tonen.</p>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-sm table-bordered">
+            <thead>
+                <tr>
+                @foreach (var field in Model.Fields)
+                {
+                    <th>@field</th>
+                }
+                </tr>
+            </thead>
+            <tbody>
+            @foreach (var record in Model.Records)
+            {
+                <tr>
+                @foreach (var field in Model.Fields)
+                {
+                    var value = record.Fields[field];
+                    <td>
+                        <div>@value.Text</div>
+                        <small class="text-muted">@value.SourceType</small>
+                    </td>
+                }
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+}

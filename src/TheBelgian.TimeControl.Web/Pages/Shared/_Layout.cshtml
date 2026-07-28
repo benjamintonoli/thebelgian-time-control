@@ -1,4 +1,5 @@
-﻿<!DOCTYPE html>
+﻿@inject IWebHostEnvironment HostEnvironment
+<!DOCTYPE html>
 <html lang="nl">
 <head>
     <meta charset="utf-8" />
@@ -25,6 +26,12 @@
                         <li class="nav-item">
                             <a class="nav-link text-dark" asp-area="" asp-page="/Exceptions/Index">Afwijkingen</a>
                         </li>
+                        @if (HostEnvironment.IsDevelopment())
+                        {
+                            <li class="nav-item">
+                                <a class="nav-link text-dark" asp-page="/Pilot/Index">Read-only pilot</a>
+                            </li>
+                        }
                     </ul>
                 </div>
             </div>

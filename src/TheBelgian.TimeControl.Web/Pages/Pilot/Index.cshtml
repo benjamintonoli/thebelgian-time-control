@@ -1,0 +1,395 @@
+@page "/Pilot"
+@model TheBelgian.TimeControl.Web.Pages.Pilot.IndexModel
+@{
+    ViewData["Title"] = "Read-only pilot";
+}
+
+<h1>Read-only pilot</h1>
+<p class="text-muted">
+    Development-only diagnostiek. Leest maximaal één technieker, drie werkdagen,
+    100 Plenion-prestaties en 200 vooraf gefilterde Powerfleet-ritten.
+    Er wordt niets naar een bronsysteem geschreven.
+</p>
+
+<form method="post" class="card card-body mb-4">
+    <div class="row g-3">
+        <div class="col-md-4">
+            <label asp-for="TechnicianQuery" class="form-label">Naam of RESCODE</label>
+            <input asp-for="TechnicianQuery" class="form-control" required />
+        </div>
+        <div class="col-md-2">
+            <label asp-for="FromDate" class="form-label">Startdatum</label>
+            <input asp-for="FromDate" class="form-control" type="date" required />
+        </div>
+        <div class="col-md-2">
+            <label asp-for="ThroughDate" class="form-label">Einddatum</label>
+            <input asp-for="ThroughDate" class="form-control" type="date" required />
+        </div>
+        <div class="col-md-2">
+            <label asp-for="PowerfleetDriverId" class="form-label">Driver ID</label>
+            <input asp-for="PowerfleetDriverId" class="form-control" required />
+        </div>
+        <div class="col-md-2">
+            <label asp-for="PowerfleetObjectId" class="form-label">Object ID</label>
+            <input asp-for="PowerfleetObjectId" class="form-control" required />
+        </div>
+        <div class="col-md-3">
+            <label asp-for="VehiclePlate" class="form-label">Kenteken</label>
+            <input asp-for="VehiclePlate" class="form-control" required />
+        </div>
+        <div class="col-md-3 d-flex align-items-end">
+            <button class="btn btn-primary" type="submit">Read-only pilot uitvoeren</button>
+        </div>
+    </div>
+    <div asp-validation-summary="All" class="text-danger mt-2"></div>
+</form>
+
+@if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+{
+    <div class="alert alert-danger">
+        <strong>Pilot gestopt:</strong> @Model.ErrorMessage
+    </div>
+}
+
+@if (Model.Result is { } result)
+{
+    <section class="card card-body mb-4">
+        <h2 class="h4">Samenvatting</h2>
+        <dl class="row mb-0">
+            <dt class="col-sm-3">Technieker</dt>
+            <dd class="col-sm-9">@result.Technician.Name (@result.Technician.Code)</dd>
+            <dt class="col-sm-3">Periode</dt>
+            <dd class="col-sm-9">@result.FromDate.ToString("dd/MM/yyyy") – @result.ThroughDate.ToString("dd/MM/yyyy")</dd>
+            <dt class="col-sm-3">Plenion</dt>
+            <dd class="col-sm-9">@result.PlenionReadCount gelezen, @result.PlenionRejectedCount afgewezen</dd>
+            <dt class="col-sm-3">Powerfleet</dt>
+            <dd class="col-sm-9">@result.PowerfleetReadCount gelezen, @result.PowerfleetMatchedCount gekoppeld, @result.PowerfleetRejectedCount afgewezen</dd>
+            <dt class="col-sm-3">Server-side filter</dt>
+            <dd class="col-sm-9">@result.PowerfleetFilterSummary</dd>
+            <dt class="col-sm-3">Algemene toleranties</dt>
+            <dd class="col-sm-9">
+                negeren @result.IgnoreDifferenceMinutes min;
+                patroon @result.PatternDifferenceMinutes min;
+                individueel @result.IndividualExceptionMinutes min;
+                hoge prioriteit @result.HighPriorityExceptionMinutes min
+            </dd>
+            <dt class="col-sm-3">Powerfleet-pad</dt>
+            <dd class="col-sm-9">@result.PowerfleetEndpoint</dd>
+        </dl>
+    </section>
+
+    <section class="mb-5">
+        <h2 class="h4">Dagvergelijking volgens werklocatieregel</h2>
+        <div class="table-responsive">
+            <table class="table table-sm table-striped">
+                <thead>
+                    <tr>
+                        <th>Datum</th>
+                        <th>Status</th>
+                        <th>Eerste Plenion</th>
+                        <th>Aankomst eerste werkplek</th>
+                        <th>Startafwijking</th>
+                        <th>Laatste Plenion</th>
+                        <th>Vertrek laatste werkplek</th>
+                        <th>Eindafwijking</th>
+                        <th>Mogelijk voordeel</th>
+                        <th>Kwaliteit</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var day in result.DayComparisons)
+                {
+                    <tr>
+                        <td>@day.Date.ToString("dd/MM/yyyy")</td>
+                        <td>@(day.IsAbsent ? day.AbsenceReason : "Werkdag")</td>
+                        <td>@day.FirstPlenionStart?.ToString("HH:mm")</td>
+                        <td>@day.FirstWorkLocation?.Timestamp.ToString("HH:mm")</td>
+                        <td>
+                            @FormatDifference(day.StartDifferenceMinutes)
+                            @if (day.StartDifferenceRelevant)
+                            {
+                                <span class="badge text-bg-warning">relevant</span>
+                            }
+                        </td>
+                        <td>@day.LastPlenionEnd?.ToString("HH:mm")</td>
+                        <td>@day.LastWorkLocation?.Timestamp.ToString("HH:mm")</td>
+                        <td>
+                            @FormatDifference(day.EndDifferenceMinutes)
+                            @if (day.EndDifferenceRelevant)
+                            {
+                                <span class="badge text-bg-warning">relevant</span>
+                            }
+                        </td>
+                        <td>@day.PossibleEmployeeBenefitMinutes min</td>
+                        <td>@day.DataQuality</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    @foreach (var day in result.DayComparisons)
+    {
+        <section class="card card-body mb-5">
+            <h2 class="h4">Dagdetail @day.Date.ToString("dd/MM/yyyy")</h2>
+            @if (day.IsAbsent)
+            {
+                <div class="alert alert-info mb-3">
+                    <strong>@day.AbsenceReason.</strong>
+                    Geen werkurenvergelijking. De Powerfleet-ritten hieronder zijn uitsluitend context.
+                </div>
+            }
+            else
+            {
+                <div class="row g-3 mb-3">
+                    <div class="col-md-6">
+                        <h3 class="h6">Eerste kandidaat-werklocatie</h3>
+                        @if (day.FirstWorkLocation is { } first)
+                        {
+                            <dl>
+                                <dt>Aankomst</dt><dd>@first.Timestamp.ToString("HH:mm:ss")</dd>
+                                <dt>Adres</dt><dd>@first.Address</dd>
+                                <dt>Gebied</dt><dd>@first.Area</dd>
+                                <dt>Gebiedsgroep</dt><dd>@first.AreaGroup</dd>
+                                <dt>Beoordeling</dt><dd>@first.Assessment</dd>
+                            </dl>
+                        }
+                        else
+                        {
+                            <p class="text-warning">Werklocatie nog niet betrouwbaar gekoppeld</p>
+                        }
+                    </div>
+                    <div class="col-md-6">
+                        <h3 class="h6">Laatste kandidaat-werklocatie</h3>
+                        @if (day.LastWorkLocation is { } last)
+                        {
+                            <dl>
+                                <dt>Vertrek</dt><dd>@last.Timestamp.ToString("HH:mm:ss")</dd>
+                                <dt>Adres</dt><dd>@last.Address</dd>
+                                <dt>Gebied</dt><dd>@last.Area</dd>
+                                <dt>Gebiedsgroep</dt><dd>@last.AreaGroup</dd>
+                                <dt>Beoordeling</dt><dd>@last.Assessment</dd>
+                            </dl>
+                        }
+                        else
+                        {
+                            <p class="text-warning">Werklocatie nog niet betrouwbaar gekoppeld</p>
+                        }
+                    </div>
+                </div>
+            }
+
+            <h3 class="h6">Thuiscontext</h3>
+            <p>
+                Vertrek thuis:
+                @(day.HomeDeparture is null ? "niet vastgesteld" : $"{day.HomeDeparture.Timestamp:HH:mm:ss} – {day.HomeDeparture.Address}");
+                aankomst thuis:
+                @(day.HomeArrival is null ? "niet vastgesteld" : $"{day.HomeArrival.Timestamp:HH:mm:ss} – {day.HomeArrival.Address}").
+            </p>
+
+            <h3 class="h6">Volledige Plenion-tijdlijn</h3>
+            <div class="table-responsive">
+                <table class="table table-sm">
+                    <thead>
+                        <tr><th>ID</th><th>Start</th><th>Einde</th><th>Pauze</th><th>Netto</th><th>Bon</th><th>Omschrijving</th></tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var item in result.PlenionRecords.Where(item => item.Date == day.Date))
+                    {
+                        <tr>
+                            <td>@item.ExternalId</td>
+                            <td>@item.StartDateTime.ToString("HH:mm:ss")</td>
+                            <td>@item.EndDateTime.ToString("HH:mm:ss")</td>
+                            <td>@item.PauseMinutes min</td>
+                            <td>@item.NetMinutes min</td>
+                            <td>@item.WorkOrderNumber</td>
+                            <td>@item.Description</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+
+            <h3 class="h6">Volledige Powerfleet-tijdlijn</h3>
+            <div class="table-responsive">
+                <table class="table table-sm">
+                    <thead>
+                        <tr>
+                            <th>tripid</th><th>Start</th><th>Startadres/-gebied</th>
+                            <th>Einde</th><th>Eindadres/-gebied</th><th>Rijtijd</th><th>Km</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var trip in result.PowerfleetRecords.Where(item =>
+                        DateOnly.FromDateTime(item.StartDateTime.DateTime) == day.Date))
+                    {
+                        <tr>
+                            <td>@trip.ExternalId</td>
+                            <td>@trip.StartDateTime.ToString("HH:mm:ss")</td>
+                            <td>@trip.StartAddress<br />@trip.StartArea (@trip.StartAreaGroup)</td>
+                            <td>@trip.EndDateTime.ToString("HH:mm:ss")</td>
+                            <td>@trip.EndAddress<br />@trip.EndArea (@trip.EndAreaGroup)</td>
+                            <td>@trip.DrivingMinutes min</td>
+                            <td>@trip.DistanceKilometres.ToString("0.###")</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+            <p class="text-muted">@day.Notes</p>
+        </section>
+    }
+
+    <section class="mb-5">
+        <h2 class="h4">Gereconstrueerde Powerfleet-stops</h2>
+        <div class="table-responsive">
+            <table class="table table-sm table-striped">
+                <thead>
+                    <tr>
+                        <th>Datum</th><th>Aankomst</th><th>Vertrek</th><th>Duur</th>
+                        <th>Adres</th><th>Coördinaten</th><th>Gebied</th>
+                        <th>Kenteken</th><th>Bestuurder</th><th>Continuïteit</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var stop in result.PowerfleetStops.Where(stop =>
+                    stop.Date >= new DateOnly(2026, 7, 23)))
+                {
+                    <tr>
+                        <td>@stop.Date.ToString("dd/MM/yyyy")</td>
+                        <td>@stop.Arrival.ToString("HH:mm:ss")</td>
+                        <td>@stop.Departure.ToString("HH:mm:ss")</td>
+                        <td>@stop.DurationMinutes min</td>
+                        <td>@stop.Address</td>
+                        <td>@FormatCoordinates(stop.Latitude, stop.Longitude)</td>
+                        <td>@stop.Area (@stop.AreaGroup)</td>
+                        <td>@stop.VehiclePlate</td>
+                        <td>@stop.DriverName (@stop.DriverId)</td>
+                        <td>@stop.ContinuityAssessment</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="mb-5">
+        <h2 class="h4">Plenion-prestatie naar Powerfleet-stop</h2>
+        <div class="table-responsive">
+            <table class="table table-sm table-striped">
+                <thead>
+                    <tr>
+                        <th>Prestatie</th><th>Geregistreerd</th><th>Project</th>
+                        <th>Verwacht adres</th><th>Joincontrole</th>
+                        <th>Gekoppelde stop</th><th>Werkelijk verblijf</th>
+                        <th>Adresvergelijking</th><th>Overlap</th>
+                        <th>Status</th><th>Score</th><th>Redenen</th><th>Alternatieven</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var match in result.PerformanceStopMatches)
+                {
+                    var performance = result.PlenionRecords.Single(item =>
+                        item.ExternalId == match.PerformanceId);
+                    <tr>
+                        <td>@match.PerformanceId</td>
+                        <td>
+                            @match.RegisteredStart.ToString("dd/MM HH:mm")–
+                            @match.RegisteredEnd.ToString("HH:mm")
+                        </td>
+                        <td>@performance.ProjectNumber – @performance.ProjectName</td>
+                        <td>
+                            @performance.CustomerOrSiteName<br />
+                            @match.ExpectedAddress
+                        </td>
+                        <td>
+                            @performance.JoinAssessment<br />
+                            PROJ @performance.ProjectCandidateCount;
+                            BON @performance.WorkOrderCandidateCount;
+                            LEVADR @performance.AddressCandidateCount
+                        </td>
+                        <td>@match.MatchedStop?.Address</td>
+                        <td>
+                            @if (match.MatchedStop is { } matchedStop)
+                            {
+                                @($"{matchedStop.Arrival:HH:mm:ss}–{matchedStop.Departure:HH:mm:ss}")
+                            }
+                        </td>
+                        <td>@match.AddressComparison</td>
+                        <td>@match.TimeOverlapMinutes min</td>
+                        <td>@match.Status</td>
+                        <td>@match.ConfidenceScore/100</td>
+                        <td>@match.Reasons</td>
+                        <td>
+                            @foreach (var alternative in match.Alternatives)
+                            {
+                                <div>
+                                    @alternative.Arrival.ToString("HH:mm")–
+                                    @alternative.Departure.ToString("HH:mm"):
+                                    @alternative.Address (@alternative.Score)
+                                </div>
+                            }
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="mb-5">
+        <h2 class="h4">Ruwe eerste tien Plenion-records</h2>
+        <partial name="_RawRecords" model='(result.RawPlenionRecords, new[] { "IDPROJ_PREST", "DATUM", "VAN", "TOT", "PAUZE", "KM", "IDRESOURCE", "IDPROJ", "IDHFDTAAK", "BONNR", "OMSCHR", "OPMERKING" })' />
+    </section>
+
+    <section class="mb-5">
+        <h2 class="h4">Ruwe eerste tien gefilterde Powerfleet-records</h2>
+        <partial name="_RawRecords" model='(result.RawPowerfleetRecords, new[] { "tripid", "objectid", "objectname", "objectPlate", "driverid", "drivername", "duration", "distance", "stoppedafter", "startdate", "starttime", "startlocation", "startaddress", "startarea", "startareagroup", "enddate", "endtime", "endlocation", "endaddress", "endarea", "endareagroup" })' />
+    </section>
+
+    <section class="mb-5">
+        <h2 class="h4">Parse- en koppelproblemen</h2>
+        @if (result.Issues.Count == 0)
+        {
+            <p class="text-success">Geen problemen geregistreerd.</p>
+        }
+        else
+        {
+            <table class="table table-sm">
+                <thead><tr><th>Bron</th><th>Record</th><th>Categorie</th><th>Melding</th></tr></thead>
+                <tbody>
+                @foreach (var issue in result.Issues)
+                {
+                    <tr>
+                        <td>@issue.Source</td>
+                        <td>@issue.RecordId</td>
+                        <td>@issue.Category</td>
+                        <td>@issue.Message</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    </section>
+
+    <section class="mb-5">
+        <h2 class="h4">Bron- en eenheidsobservaties</h2>
+        <ul>
+        @foreach (var observation in result.SourceObservations)
+        {
+            <li>@observation</li>
+        }
+        </ul>
+    </section>
+}
+
+@functions {
+    private static string FormatDifference(int? value) =>
+        value is null ? "—" : $"{value:+#;-#;0} min";
+
+    private static string FormatCoordinates(decimal? latitude, decimal? longitude) =>
+        latitude is null || longitude is null
+            ? "niet beschikbaar"
+            : $"{latitude:0.######}, {longitude:0.######}";
+}

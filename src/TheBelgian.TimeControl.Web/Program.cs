@@ -6,6 +6,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 builder.Logging.AddDebug();
+builder.Logging.AddFilter("System.Net.Http.HttpClient", LogLevel.Warning);
 
 var dataProtectionDirectory = Path.Combine(
     builder.Environment.ContentRootPath,

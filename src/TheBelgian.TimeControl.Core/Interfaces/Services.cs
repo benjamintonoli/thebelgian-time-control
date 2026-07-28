@@ -66,6 +66,13 @@ public interface ISynchronizationService
         CancellationToken cancellationToken);
 }
 
+public interface IReadOnlyPilotService
+{
+    Task<ReadOnlyPilotResult> RunAsync(
+        ReadOnlyPilotRequest request,
+        CancellationToken cancellationToken);
+}
+
 public interface ISourceDataRepository
 {
     Task UpsertTechniciansAsync(

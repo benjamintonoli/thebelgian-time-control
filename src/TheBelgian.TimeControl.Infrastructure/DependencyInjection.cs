@@ -7,6 +7,7 @@ using TheBelgian.TimeControl.Core.Interfaces;
 using TheBelgian.TimeControl.Core.Services;
 using TheBelgian.TimeControl.Infrastructure.Configuration;
 using TheBelgian.TimeControl.Infrastructure.Persistence;
+using TheBelgian.TimeControl.Infrastructure.Pilot;
 using TheBelgian.TimeControl.Infrastructure.Plenion;
 using TheBelgian.TimeControl.Infrastructure.Powerfleet;
 using TheBelgian.TimeControl.Infrastructure.Synchronization;
@@ -42,7 +43,6 @@ public static class DependencyInjection
                 options => string.IsNullOrWhiteSpace(options.BaseUrl) ||
                            Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out _),
                 "Powerfleet:BaseUrl moet leeg of een absolute URL zijn.");
-
         var sqliteConnection = configuration.GetConnectionString("TimeControl")
             ?? "Data Source=data/time-control.db";
         services.AddDbContextFactory<TimeControlDbContext>(options =>
@@ -62,6 +62,12 @@ public static class DependencyInjection
         services.AddScoped<IExceptionRepository, ExceptionRepository>();
         services.AddScoped<ISourceDataRepository, SourceDataRepository>();
         services.AddScoped<ISynchronizationService, SynchronizationService>();
+        services.AddScoped<PilotPlenionReader>();
+        services.AddHttpClient<PilotPowerfleetReader>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(90);
+        });
+        services.AddScoped<IReadOnlyPilotService, ReadOnlyPilotService>();
         return services;
     }
 
