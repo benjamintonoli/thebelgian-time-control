@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<report>
+  <rows>
+    <row>
+      <tripid>trip-1001</tripid>
+      <objectid>vehicle-7</objectid>
+      <objectname>Bestelwagen 7</objectname>
+      <objectPlate>1-ABC-123</objectPlate>
+      <driverid>tech-42</driverid>
+      <drivername>Voorbeeld Technieker</drivername>
+      <duration>00:37:00</duration>
+      <distance>24.5</distance>
+      <startdate>2026-07-20</startdate>
+      <starttime>07:30:00</starttime>
+      <startlocation>Depot</startlocation>
+      <startaddress>Voorbeeldstraat 1</startaddress>
+      <enddate>2026-07-20</enddate>
+      <endtime>08:07:00</endtime>
+      <endlocation>Klant</endlocation>
+      <endaddress>Testlaan 2</endaddress>
+    </row>
+  </rows>
+</report>

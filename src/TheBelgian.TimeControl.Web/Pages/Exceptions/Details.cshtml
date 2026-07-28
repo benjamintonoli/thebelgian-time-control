@@ -1,0 +1,68 @@
+@page "/Exceptions/{id:int}"
+@model TheBelgian.TimeControl.Web.Pages.Exceptions.DetailsModel
+@using TheBelgian.TimeControl.Core.Models
+@{
+    ViewData["Title"] = "Afwijking";
+}
+
+<a asp-page="/Exceptions/Index">&larr; Terug naar overzicht</a>
+<h1 class="mt-2">@Model.Exception.TechnicianName – @Model.Exception.Date.ToString("dd/MM/yyyy")</h1>
+<p><strong>@Model.Exception.Type.ToDisplayName()</strong> · @Model.Exception.Reason</p>
+
+<div class="row g-4">
+    <section class="col-lg-4">
+        <div class="card h-100"><div class="card-body">
+            <h2 class="h5">Plenion</h2>
+            <dl>
+                <dt>Geregistreerde start</dt><dd>@Model.Exception.PlenionStart?.ToString("HH:mm")</dd>
+                <dt>Geregistreerd einde</dt><dd>@Model.Exception.PlenionEnd?.ToString("HH:mm")</dd>
+                <dt>Pauze</dt><dd>@Model.Exception.BreakMinutes min</dd>
+                <dt>Totaal geregistreerde tijd</dt><dd>@Model.Exception.RegisteredMinutes min</dd>
+            </dl>
+        </div></div>
+    </section>
+    <section class="col-lg-4">
+        <div class="card h-100"><div class="card-body">
+            <h2 class="h5">Powerfleet</h2>
+            <dl>
+                <dt>Eerste rit</dt><dd>@Model.Exception.FirstTripStart?.ToString("HH:mm")</dd>
+                <dt>Laatste rit</dt><dd>@Model.Exception.LastTripEnd?.ToString("HH:mm")</dd>
+                <dt>Totale rijtijd</dt><dd>@Model.Exception.DrivingMinutes min</dd>
+                <dt>Totale afstand</dt><dd>@Model.Exception.PowerfleetDistanceKilometres.ToString("0.0") km</dd>
+            </dl>
+        </div></div>
+    </section>
+    <section class="col-lg-4">
+        <div class="card h-100"><div class="card-body">
+            <h2 class="h5">Berekening</h2>
+            <dl>
+                <dt>Startverschil</dt><dd>@Model.Exception.StartDifferenceMinutes min</dd>
+                <dt>Eindverschil</dt><dd>@Model.Exception.EndDifferenceMinutes min</dd>
+                <dt>Verschil verplaatsing</dt><dd>@Model.Exception.TravelDifferenceMinutes min</dd>
+                <dt>Toleranties</dt>
+                <dd>Negeren ≤ @Model.Exception.IgnoreToleranceMinutes min · individueel ≥ @Model.Exception.IndividualToleranceMinutes min · hoog ≥ @Model.Exception.HighPriorityToleranceMinutes min</dd>
+            </dl>
+        </div></div>
+    </section>
+</div>
+
+<section class="card mt-4">
+    <div class="card-body">
+        <h2 class="h5">Lokale review</h2>
+        <form method="post" class="row g-2">
+            <div class="col-md-5">
+                <select asp-for="Decision" class="form-select">
+                    <option value="@ReviewDecision.CorrectRegistration">Correcte registratie</option>
+                    <option value="@ReviewDecision.ManualReviewRequired">Manuele controle nodig</option>
+                    <option value="@ReviewDecision.InsufficientGpsData">Onvoldoende GPS-data</option>
+                    <option value="@ReviewDecision.VehicleChange">Autowissel</option>
+                    <option value="@ReviewDecision.ExceptionConfirmed">Afwijking bevestigd</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <button class="btn btn-primary" type="submit">Review opslaan</button>
+            </div>
+        </form>
+        <p class="small text-muted mt-2 mb-0">Deze actie wijzigt uitsluitend de lokale SQLite-database.</p>
+    </div>
+</section>

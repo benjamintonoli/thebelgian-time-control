@@ -1,0 +1,115 @@
+@page
+@model TheBelgian.TimeControl.Web.Pages.Exceptions.IndexModel
+@using TheBelgian.TimeControl.Core.Models
+@{
+    ViewData["Title"] = "Afwijkingen";
+    var today = DateOnly.FromDateTime(DateTime.Today);
+}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h1>Afwijkingen</h1>
+        <p class="text-muted mb-0">Lokale, read-only vergelijking van Plenion met Powerfleet.</p>
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(Model.Message))
+{
+    <div class="alert alert-success">@Model.Message</div>
+}
+@if (!string.IsNullOrWhiteSpace(Model.Error))
+{
+    <div class="alert alert-danger">@Model.Error</div>
+}
+
+<section class="card mb-4">
+    <div class="card-body">
+        <h2 class="h5">Handmatige lokale synchronisatie</h2>
+        <p class="small text-muted">Leest de geconfigureerde bronnen; schrijft uitsluitend naar SQLite.</p>
+        <form method="post" asp-page-handler="Synchronize" class="row g-2">
+            <div class="col-md-3">
+                <label class="form-label" for="synchronizationFrom">Van</label>
+                <input class="form-control" id="synchronizationFrom" name="synchronizationFrom"
+                       type="date" value="@today.AddDays(-7).ToString("yyyy-MM-dd")" required />
+            </div>
+            <div class="col-md-3">
+                <label class="form-label" for="synchronizationThrough">Tot en met</label>
+                <input class="form-control" id="synchronizationThrough" name="synchronizationThrough"
+                       type="date" value="@today.ToString("yyyy-MM-dd")" required />
+            </div>
+            <div class="col-md-3 d-flex align-items-end">
+                <button class="btn btn-primary" type="submit">Synchroniseren</button>
+            </div>
+        </form>
+    </div>
+</section>
+
+<form method="get" class="card card-body mb-4">
+    <div class="row g-2">
+        <div class="col-md-2">
+            <label asp-for="FromDate" class="form-label">Vanaf</label>
+            <input asp-for="FromDate" class="form-control" type="date" />
+        </div>
+        <div class="col-md-2">
+            <label asp-for="ThroughDate" class="form-label">Tot en met</label>
+            <input asp-for="ThroughDate" class="form-control" type="date" />
+        </div>
+        <div class="col-md-3">
+            <label asp-for="Technician" class="form-label">Technieker</label>
+            <input asp-for="Technician" class="form-control" />
+        </div>
+        <div class="col-md-2">
+            <label asp-for="Priority" class="form-label">Prioriteit</label>
+            <select asp-for="Priority" asp-items="Html.GetEnumSelectList<ExceptionPriority>()"
+                    class="form-select">
+                <option value="">Alle</option>
+            </select>
+        </div>
+        <div class="col-md-2">
+            <label asp-for="Status" class="form-label">Status</label>
+            <select asp-for="Status" asp-items="Html.GetEnumSelectList<ReviewDecision>()"
+                    class="form-select">
+                <option value="">Alle</option>
+            </select>
+        </div>
+        <div class="col-md-1 d-flex align-items-end">
+            <button class="btn btn-outline-primary" type="submit">Filter</button>
+        </div>
+    </div>
+</form>
+
+<div class="table-responsive">
+    <table class="table table-striped align-middle">
+        <thead>
+            <tr>
+                <th>Technieker</th>
+                <th>Datum</th>
+                <th>Soort</th>
+                <th>Verschil</th>
+                <th>Prioriteit</th>
+                <th>Reden</th>
+                <th>Status</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+        @foreach (var item in Model.Exceptions)
+        {
+            <tr>
+                <td>@item.TechnicianName</td>
+                <td>@item.Date.ToString("dd/MM/yyyy")</td>
+                <td>@item.Type.ToDisplayName()</td>
+                <td>@item.DifferenceMinutes min</td>
+                <td>@item.Priority.ToDisplayName()</td>
+                <td>@item.Reason</td>
+                <td>@item.ReviewDecision.ToDisplayName()</td>
+                <td><a asp-page="/Exceptions/Details" asp-route-id="@item.Id">Detail</a></td>
+            </tr>
+        }
+        @if (Model.Exceptions.Count == 0)
+        {
+            <tr><td colspan="8" class="text-center text-muted">Geen resultaten.</td></tr>
+        }
+        </tbody>
+    </table>
+</div>

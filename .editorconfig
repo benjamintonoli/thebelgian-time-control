@@ -1,0 +1,13 @@
+root = true
+
+[*.cs]
+# De domeinnaam DetectedException is expliciet onderdeel van de functionele specificatie.
+dotnet_diagnostic.CA1711.severity = none
+# Parserinstanties blijven injecteerbaar; logging blijft gestructureerd zonder boilerplate.
+dotnet_diagnostic.CA1822.severity = none
+dotnet_diagnostic.CA1848.severity = none
+dotnet_diagnostic.CA1873.severity = none
+
+[tests/**/*.cs]
+# xUnit-testnamen gebruiken Method_Scenario_Result voor leesbare testrapporten.
+dotnet_diagnostic.CA1707.severity = none
