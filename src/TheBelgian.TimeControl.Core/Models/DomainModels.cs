@@ -1,3 +1,5 @@
+using TheBelgian.TimeControl.Core.Interfaces;
+
 namespace TheBelgian.TimeControl.Core.Models;
 
 public sealed class Technician
@@ -119,4 +121,49 @@ public enum CustomerLocationType
     Customer,
     Depot,
     Home,
+}
+
+public enum GeocodingStatus
+{
+    NotConfigured,
+    NotProcessed,
+    Geocoded,
+    LowConfidence,
+    Ambiguous,
+    InvalidAddress,
+    ProviderError,
+}
+
+public sealed record GeocodingCandidate(
+    GeoCoordinate Coordinate,
+    string? FormattedAddress,
+    string? Confidence,
+    string? EntityType,
+    IReadOnlyList<string> MatchCodes);
+
+public sealed record GeocodingResult(
+    GeocodingStatus Status,
+    string Provider,
+    GeocodingCandidate? Primary,
+    IReadOnlyList<GeocodingCandidate> Alternatives,
+    string? ErrorMessage = null,
+    bool FromCache = false);
+
+public sealed class LocationResolutionCacheEntry
+{
+    public int Id { get; set; }
+    public string? DeliveryAddressExternalId { get; set; }
+    public string OriginalAddress { get; set; } = string.Empty;
+    public string NormalizedAddress { get; set; } = string.Empty;
+    public string AddressHash { get; set; } = string.Empty;
+    public double? Latitude { get; set; }
+    public double? Longitude { get; set; }
+    public string? ResolvedAddress { get; set; }
+    public string? Confidence { get; set; }
+    public string Provider { get; set; } = string.Empty;
+    public GeocodingStatus Status { get; set; } = GeocodingStatus.NotProcessed;
+    public string? ErrorMessage { get; set; }
+    public string? AlternativesJson { get; set; }
+    public DateTimeOffset? LastAttemptAt { get; set; }
+    public DateTimeOffset? LastSuccessfulResolutionAt { get; set; }
 }

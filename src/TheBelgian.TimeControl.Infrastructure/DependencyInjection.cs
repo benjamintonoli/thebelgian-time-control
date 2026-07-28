@@ -6,6 +6,7 @@ using TheBelgian.TimeControl.Core.Configuration;
 using TheBelgian.TimeControl.Core.Interfaces;
 using TheBelgian.TimeControl.Core.Services;
 using TheBelgian.TimeControl.Infrastructure.Configuration;
+using TheBelgian.TimeControl.Infrastructure.Geocoding;
 using TheBelgian.TimeControl.Infrastructure.Persistence;
 using TheBelgian.TimeControl.Infrastructure.Pilot;
 using TheBelgian.TimeControl.Infrastructure.Plenion;
@@ -43,6 +44,23 @@ public static class DependencyInjection
                 options => string.IsNullOrWhiteSpace(options.BaseUrl) ||
                            Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out _),
                 "Powerfleet:BaseUrl moet leeg of een absolute URL zijn.");
+        services.AddOptions<GeocodingOptions>()
+            .Bind(configuration.GetSection(GeocodingOptions.SectionName));
+        services.AddOptions<LocationMatchingOptions>()
+            .Bind(configuration.GetSection(LocationMatchingOptions.SectionName))
+            .Validate(options =>
+            {
+                try
+                {
+                    options.Validate();
+                    return true;
+                }
+                catch (InvalidOperationException)
+                {
+                    return false;
+                }
+            }, "Locatieafstandsgrenzen moeten positief en oplopend zijn.")
+            .ValidateOnStart();
         var sqliteConnection = configuration.GetConnectionString("TimeControl")
             ?? "Data Source=data/time-control.db";
         services.AddDbContextFactory<TimeControlDbContext>(options =>
@@ -51,6 +69,8 @@ public static class DependencyInjection
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton(provider =>
             provider.GetRequiredService<IOptions<MatchingOptions>>().Value);
+        services.AddSingleton(provider =>
+            provider.GetRequiredService<IOptions<LocationMatchingOptions>>().Value);
         services.AddSingleton<IDistanceCalculator, HaversineDistanceCalculator>();
         services.AddScoped<ITimeControlMatchingService, TimeControlMatchingService>();
         services.AddScoped<IPlenionReader, OdbcPlenionReader>();
@@ -63,6 +83,32 @@ public static class DependencyInjection
         services.AddScoped<ISourceDataRepository, SourceDataRepository>();
         services.AddScoped<ISynchronizationService, SynchronizationService>();
         services.AddScoped<PilotPlenionReader>();
+        services.AddHttpClient<AzureMapsGeocodingService>(
+            client =>
+            {
+                client.BaseAddress = new Uri("https://atlas.microsoft.com/");
+                client.Timeout = TimeSpan.FromSeconds(30);
+            });
+        services.AddHttpClient<GeoapifyGeocodingService>(
+            client =>
+            {
+                client.BaseAddress = new Uri("https://api.geoapify.com/");
+                client.Timeout = TimeSpan.FromSeconds(30);
+            });
+        services.AddScoped<IGeocodingService>(provider =>
+        {
+            var providerName = provider
+                .GetRequiredService<IOptions<GeocodingOptions>>()
+                .Value
+                .Provider;
+            return providerName.Equals(
+                "Geoapify",
+                StringComparison.OrdinalIgnoreCase)
+                ? provider.GetRequiredService<GeoapifyGeocodingService>()
+                : provider.GetRequiredService<AzureMapsGeocodingService>();
+        });
+        services.AddScoped<LocationGeocodingCache>();
+        services.AddScoped<LocationResolutionPilotService>();
         services.AddHttpClient<PilotPowerfleetReader>(client =>
         {
             client.Timeout = TimeSpan.FromSeconds(90);
@@ -87,5 +133,28 @@ public static class DependencyInjection
         }
 
         await context.Database.EnsureCreatedAsync(cancellationToken);
+        await context.Database.ExecuteSqlRawAsync(
+            """
+            CREATE TABLE IF NOT EXISTS "LocationResolutionCacheEntries" (
+                "Id" INTEGER NOT NULL CONSTRAINT "PK_LocationResolutionCacheEntries" PRIMARY KEY AUTOINCREMENT,
+                "DeliveryAddressExternalId" TEXT NULL,
+                "OriginalAddress" TEXT NOT NULL,
+                "NormalizedAddress" TEXT NOT NULL,
+                "AddressHash" TEXT NOT NULL,
+                "Latitude" REAL NULL,
+                "Longitude" REAL NULL,
+                "ResolvedAddress" TEXT NULL,
+                "Confidence" TEXT NULL,
+                "Provider" TEXT NOT NULL,
+                "Status" INTEGER NOT NULL,
+                "ErrorMessage" TEXT NULL,
+                "AlternativesJson" TEXT NULL,
+                "LastAttemptAt" TEXT NULL,
+                "LastSuccessfulResolutionAt" TEXT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_LocationResolutionCacheEntries_AddressHash"
+                ON "LocationResolutionCacheEntries" ("AddressHash");
+            """,
+            cancellationToken);
     }
 }

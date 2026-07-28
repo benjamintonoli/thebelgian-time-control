@@ -48,7 +48,11 @@ public sealed record ExceptionFilter(
 
 public interface IGeocodingService
 {
-    Task<GeoCoordinate?> GeocodeAsync(string address, CancellationToken cancellationToken);
+    bool IsConfigured { get; }
+    string Provider { get; }
+    Task<GeocodingResult> GeocodeAsync(
+        string address,
+        CancellationToken cancellationToken);
 }
 
 public interface IDistanceCalculator

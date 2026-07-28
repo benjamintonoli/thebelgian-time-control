@@ -39,6 +39,11 @@ public sealed class ReadOnlyPilotResult
     public int PatternDifferenceMinutes { get; init; }
     public int IndividualExceptionMinutes { get; init; }
     public int HighPriorityExceptionMinutes { get; init; }
+    public required IReadOnlyList<PilotLocationResolution> LocationResolutions { get; init; }
+    public double StrongLocationMatchMeters { get; init; }
+    public double PossibleLocationMatchMeters { get; init; }
+    public required string GeocodingProvider { get; init; }
+    public bool GeocodingConfigured { get; init; }
 }
 
 public sealed record PilotRawRecord(
@@ -202,3 +207,51 @@ public sealed record PilotIssue(
     string? RecordId,
     string Category,
     string Message);
+
+public enum PilotDistanceClassification
+{
+    StrongLocationMatch,
+    PossibleLocationMatch,
+    LocationMismatch,
+}
+
+public enum PilotLocationResolutionStatus
+{
+    ConfirmedLocationMatch,
+    ProbableLocationMatch,
+    ManualReviewRequired,
+    AddressDataIssue,
+    NoReliableMatch,
+}
+
+public sealed record PilotLocationCandidateScore(
+    PilotStop Stop,
+    double? DistanceMeters,
+    PilotDistanceClassification? DistanceClassification,
+    int TimeOverlapMinutes,
+    int StartDifferenceMinutes,
+    int EndDifferenceMinutes,
+    int AddressScore,
+    int DistanceScore,
+    int TimeScore,
+    int TotalScore,
+    PilotLocationResolutionStatus MatchStatus,
+    string Explanation);
+
+public sealed record PilotLocationResolution(
+    long PerformanceId,
+    DateOnly Date,
+    string? ProjectNumber,
+    string? ProjectName,
+    string? WorkOrderNumber,
+    DateTimeOffset RegisteredStart,
+    DateTimeOffset RegisteredEnd,
+    string? DeliveryAddressExternalId,
+    string OriginalAddress,
+    string NormalizedAddress,
+    string AddressHash,
+    GeocodingResult Geocoding,
+    IReadOnlyList<PilotLocationCandidateScore> Candidates,
+    PilotLocationResolutionStatus MatchStatus,
+    string DiagnosticCategory,
+    string Assessment);

@@ -15,10 +15,15 @@ internal sealed class ReadOnlyPilotService(
     PilotPowerfleetReader powerfleetReader,
     IOptions<PowerfleetOptions> powerfleetOptions,
     MatchingOptions matchingOptions,
+    LocationMatchingOptions locationMatchingOptions,
+    IGeocodingService geocodingService,
+    LocationResolutionPilotService locationResolutionService,
     ILogger<ReadOnlyPilotService> logger) : IReadOnlyPilotService
 {
     private readonly PowerfleetOptions _powerfleetOptions = powerfleetOptions.Value;
     private readonly MatchingOptions _matchingOptions = matchingOptions;
+    private readonly LocationMatchingOptions _locationMatchingOptions =
+        locationMatchingOptions;
 
     public async Task<ReadOnlyPilotResult> RunAsync(
         ReadOnlyPilotRequest request,
@@ -34,6 +39,10 @@ internal sealed class ReadOnlyPilotService(
         var issues = plenion.Issues.Concat(powerfleet.Issues).ToList();
         AddAssignmentIssues(matchedTrips, plenion.Technician, request, issues);
         var stops = PilotLocationMatcher.ReconstructStops(matchedTrips, issues);
+        var locationResolutions = await locationResolutionService.ResolveAsync(
+            plenion.NormalizedRecords,
+            stops,
+            cancellationToken);
         var performanceMatches = PilotLocationMatcher.Match(
             plenion.NormalizedRecords
                 .Where(performance =>
@@ -79,6 +88,13 @@ internal sealed class ReadOnlyPilotService(
             PatternDifferenceMinutes = _matchingOptions.PatternDifferenceMinutes,
             IndividualExceptionMinutes = _matchingOptions.IndividualExceptionMinutes,
             HighPriorityExceptionMinutes = _matchingOptions.HighPriorityExceptionMinutes,
+            LocationResolutions = locationResolutions,
+            StrongLocationMatchMeters =
+                _locationMatchingOptions.StrongMatchMeters,
+            PossibleLocationMatchMeters =
+                _locationMatchingOptions.PossibleMatchMeters,
+            GeocodingProvider = geocodingService.Provider,
+            GeocodingConfigured = geocodingService.IsConfigured,
         };
     }
 

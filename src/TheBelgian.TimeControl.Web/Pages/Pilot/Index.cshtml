@@ -1,5 +1,6 @@
 @page "/Pilot"
 @model TheBelgian.TimeControl.Web.Pages.Pilot.IndexModel
+@using TheBelgian.TimeControl.Core.Models
 @{
     ViewData["Title"] = "Read-only pilot";
 }
@@ -75,8 +76,28 @@
             </dd>
             <dt class="col-sm-3">Powerfleet-pad</dt>
             <dd class="col-sm-9">@result.PowerfleetEndpoint</dd>
+            <dt class="col-sm-3">Geocoding</dt>
+            <dd class="col-sm-9">
+                @result.GeocodingProvider –
+                @(result.GeocodingConfigured ? "Configured" : "NotConfigured")
+            </dd>
+            <dt class="col-sm-3">Locatiegrenzen</dt>
+            <dd class="col-sm-9">
+                sterk ≤ @result.StrongLocationMatchMeters.ToString("0") m;
+                mogelijk ≤ @result.PossibleLocationMatchMeters.ToString("0") m
+            </dd>
         </dl>
     </section>
+
+    @if (!result.GeocodingConfigured)
+    {
+        <div class="alert alert-warning">
+            <strong>Geocodingstatus: NotConfigured.</strong>
+            Er is geen externe geocodingaanvraag uitgevoerd.
+            Stel de sleutel lokaal in met:
+            <code>dotnet user-secrets set "Geocoding:ApiKey" "&lt;AZURE_MAPS_API_KEY&gt;" --project src/TheBelgian.TimeControl.Web</code>
+        </div>
+    }
 
     <section class="mb-5">
         <h2 class="h4">Dagvergelijking volgens werklocatieregel</h2>
@@ -242,6 +263,131 @@
     }
 
     <section class="mb-5">
+        <h2 class="h4">Begrensde locatie-resolutiepilot</h2>
+        <p class="text-muted">
+            Uitsluitend de drie eerder onzekere Plenion-adressen worden onderzocht.
+            Er worden geen adressen of uren gecorrigeerd.
+        </p>
+        @if (result.LocationResolutions.Count == 0)
+        {
+            <p>Geen van de drie pilotadressen werd in deze uitvoering aangetroffen.</p>
+        }
+        @foreach (var resolution in result.LocationResolutions)
+        {
+            <article class="card card-body mb-4">
+                <h3 class="h5">
+                    Prestatie @resolution.PerformanceId –
+                    @resolution.MatchStatus
+                </h3>
+                <div class="row">
+                    <div class="col-lg-6">
+                        <h4 class="h6">Plenion</h4>
+                        <dl>
+                            <dt>Project</dt>
+                            <dd>@resolution.ProjectNumber – @resolution.ProjectName</dd>
+                            <dt>Bon</dt>
+                            <dd>@resolution.WorkOrderNumber</dd>
+                            <dt>Begin en einde</dt>
+                            <dd>
+                                @resolution.RegisteredStart.ToString("dd/MM/yyyy HH:mm:ss")–
+                                @resolution.RegisteredEnd.ToString("HH:mm:ss")
+                            </dd>
+                            <dt>LACLEUNIK</dt>
+                            <dd>@resolution.DeliveryAddressExternalId</dd>
+                            <dt>Origineel adres</dt>
+                            <dd>@resolution.OriginalAddress</dd>
+                            <dt>Genormaliseerd adres</dt>
+                            <dd>@resolution.NormalizedAddress</dd>
+                            <dt>Adres-hash</dt>
+                            <dd><code>@resolution.AddressHash</code></dd>
+                        </dl>
+                    </div>
+                    <div class="col-lg-6">
+                        <h4 class="h6">Geocodingresultaat</h4>
+                        <dl>
+                            <dt>Status</dt>
+                            <dd>@resolution.Geocoding.Status</dd>
+                            <dt>Provider/cache</dt>
+                            <dd>
+                                @resolution.Geocoding.Provider /
+                                @(resolution.Geocoding.FromCache ? "cache" : "provider")
+                            </dd>
+                            <dt>Gevonden adres</dt>
+                            <dd>@resolution.Geocoding.Primary?.FormattedAddress</dd>
+                            <dt>Coördinaten</dt>
+                            <dd>@FormatCoordinates(resolution.Geocoding.Primary)</dd>
+                            <dt>Confidence</dt>
+                            <dd>@resolution.Geocoding.Primary?.Confidence</dd>
+                            <dt>Alternatieven</dt>
+                            <dd>
+                                @if (resolution.Geocoding.Alternatives.Count == 0)
+                                {
+                                    <span>geen</span>
+                                }
+                                @foreach (var alternative in resolution.Geocoding.Alternatives)
+                                {
+                                    <div>
+                                        @alternative.FormattedAddress –
+                                        @alternative.Coordinate.Latitude.ToString("0.######"),
+                                        @alternative.Coordinate.Longitude.ToString("0.######")
+                                        (@alternative.Confidence)
+                                    </div>
+                                }
+                            </dd>
+                        </dl>
+                        <p>
+                            <strong>Diagnose:</strong> @resolution.DiagnosticCategory<br />
+                            @resolution.Assessment
+                        </p>
+                    </div>
+                </div>
+
+                <h4 class="h6">Powerfleet-kandidaten</h4>
+                <div class="table-responsive">
+                    <table class="table table-sm table-striped">
+                        <thead>
+                            <tr>
+                                <th>Stopadres</th><th>Aankomst</th><th>Vertrek</th>
+                                <th>Duur</th><th>Coördinaten</th><th>Afstand</th>
+                                <th>Overlap</th><th>Δ begin</th><th>Δ einde</th>
+                                <th>Adres</th><th>Afstand</th><th>Tijd</th>
+                                <th>Totaal</th><th>Status</th><th>Reden</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        @foreach (var candidate in resolution.Candidates)
+                        {
+                            <tr>
+                                <td>@candidate.Stop.Address</td>
+                                <td>@candidate.Stop.Arrival.ToString("HH:mm:ss")</td>
+                                <td>@candidate.Stop.Departure.ToString("HH:mm:ss")</td>
+                                <td>@candidate.Stop.DurationMinutes min</td>
+                                <td>@FormatCoordinates(candidate.Stop.Latitude, candidate.Stop.Longitude)</td>
+                                <td>
+                                    @(candidate.DistanceMeters is null
+                                        ? "niet beschikbaar"
+                                        : $"{candidate.DistanceMeters:0} m")
+                                    <br />@candidate.DistanceClassification
+                                </td>
+                                <td>@candidate.TimeOverlapMinutes min</td>
+                                <td>@FormatDifference(candidate.StartDifferenceMinutes)</td>
+                                <td>@FormatDifference(candidate.EndDifferenceMinutes)</td>
+                                <td>@candidate.AddressScore</td>
+                                <td>@candidate.DistanceScore</td>
+                                <td>@candidate.TimeScore</td>
+                                <td>@candidate.TotalScore/100</td>
+                                <td>@candidate.MatchStatus</td>
+                                <td>@candidate.Explanation</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            </article>
+        }
+    </section>
+
+    <section class="mb-5">
         <h2 class="h4">Gereconstrueerde Powerfleet-stops</h2>
         <div class="table-responsive">
             <table class="table table-sm table-striped">
@@ -392,4 +538,9 @@
         latitude is null || longitude is null
             ? "niet beschikbaar"
             : $"{latitude:0.######}, {longitude:0.######}";
+
+    private static string FormatCoordinates(GeocodingCandidate? candidate) =>
+        candidate is null
+            ? "niet beschikbaar"
+            : $"{candidate.Coordinate.Latitude:0.######}, {candidate.Coordinate.Longitude:0.######}";
 }

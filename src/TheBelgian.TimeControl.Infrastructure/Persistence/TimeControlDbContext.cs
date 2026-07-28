@@ -14,6 +14,8 @@ public sealed class TimeControlDbContext(DbContextOptions<TimeControlDbContext> 
     public DbSet<CustomerLocation> CustomerLocations => Set<CustomerLocation>();
     public DbSet<DetectedException> DetectedExceptions => Set<DetectedException>();
     public DbSet<SynchronizationRun> SynchronizationRuns => Set<SynchronizationRun>();
+    public DbSet<LocationResolutionCacheEntry> LocationResolutionCacheEntries =>
+        Set<LocationResolutionCacheEntry>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -23,6 +25,9 @@ public sealed class TimeControlDbContext(DbContextOptions<TimeControlDbContext> 
         modelBuilder.Entity<PowerfleetTrip>().HasIndex(item => item.ExternalId).IsUnique();
         modelBuilder.Entity<CustomerLocation>().HasIndex(item => item.ExternalId).IsUnique();
         modelBuilder.Entity<DetectedException>().HasIndex(item => item.ExternalKey).IsUnique();
+        modelBuilder.Entity<LocationResolutionCacheEntry>()
+            .HasIndex(item => item.AddressHash)
+            .IsUnique();
         modelBuilder.Entity<VehicleAssignment>()
             .HasIndex(item => new { item.TechnicianId, item.VehicleId, item.ValidFrom })
             .IsUnique();
