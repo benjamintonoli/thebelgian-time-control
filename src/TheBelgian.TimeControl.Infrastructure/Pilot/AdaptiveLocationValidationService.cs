@@ -7,6 +7,10 @@ using TheBelgian.TimeControl.Core.Services;
 
 namespace TheBelgian.TimeControl.Infrastructure.Pilot;
 
+/// <summary>
+/// Adaptive matching analysis on live broader-validation observations.
+/// Must never read location-matching-holdout.json for parameter optimization.
+/// </summary>
 internal static class AdaptiveLocationValidationService
 {
     private static readonly JsonSerializerOptions SampleJsonOptions = new()

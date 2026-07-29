@@ -127,6 +127,102 @@ public sealed class AdaptiveLocationMatchingTests
         Assert.Equal("near", result.Selected?.Stop.MergedStopId);
     }
 
+    [Fact]
+    public void Hybrid_RecoversStrongUnresolved_WithPositiveOverlap()
+    {
+        var options = new AdaptiveLocationMatchingOptions();
+        // Short performance: 4 min overlap is positive but below adaptive strongTime (5 min).
+        var performance = new NormalizedPilotPerformance(
+            279763,
+            "1",
+            new DateOnly(2026, 7, 23),
+            DateTimeOffset.Parse("2026-07-23T12:00:00+02:00", System.Globalization.CultureInfo.InvariantCulture),
+            DateTimeOffset.Parse("2026-07-23T12:10:00+02:00", System.Globalization.CultureInfo.InvariantCulture),
+            0,
+            10,
+            10,
+            0,
+            "p",
+            "5",
+            "b",
+            "Onderhoud",
+            null,
+            "P1",
+            "Project",
+            "L1",
+            "Klant",
+            "Teststraat 1",
+            "9000",
+            "Gent",
+            "BE",
+            1,
+            1,
+            1,
+            "ok",
+            "ok");
+        var resolution = Resolution(performance, 51.05, 3.72, "street", 0.8, 0.0);
+        var near = Merged(
+            "recover",
+            51.0504m,
+            3.7204m,
+            DateTimeOffset.Parse("2026-07-23T12:06:00+02:00", System.Globalization.CultureInfo.InvariantCulture),
+            DateTimeOffset.Parse("2026-07-23T13:04:00+02:00", System.Globalization.CultureInfo.InvariantCulture));
+
+        var adaptive = AdaptiveLocationMatcher.Match(
+            performance,
+            "Tech",
+            resolution,
+            [near],
+            [performance],
+            new Dictionary<string, HistoricalLocationCluster>(StringComparer.Ordinal),
+            options,
+            new HaversineDistanceCalculator(),
+            enableLearning: false);
+        var hybrid = PrecisionPreservingHybridMatcher.Match(
+            performance,
+            "Tech",
+            resolution,
+            [near],
+            [performance],
+            new Dictionary<string, HistoricalLocationCluster>(StringComparer.Ordinal),
+            options,
+            new HaversineDistanceCalculator());
+
+        Assert.Equal(AdaptiveMatchDecision.Unresolved, adaptive.Decision);
+        Assert.Equal(AdaptiveMatchDecision.Probable, hybrid.Decision);
+        Assert.True(hybrid.UsedRecovery);
+        Assert.Equal("recover", hybrid.Selected?.Stop.MergedStopId);
+        Assert.Contains("Recovery:", hybrid.RecoveryReason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Hybrid_RejectsStopStartingAfterPerformanceEnd()
+    {
+        var options = new AdaptiveLocationMatchingOptions();
+        var performance = Performance(280198);
+        var resolution = Resolution(performance, 51.05, 3.72, "building", 0.99, 0.95);
+        var afterEnd = Merged(
+            "late",
+            51.0505m,
+            3.7205m,
+            performance.EndDateTime.AddMinutes(3),
+            performance.EndDateTime.AddMinutes(23));
+
+        var hybrid = PrecisionPreservingHybridMatcher.Match(
+            performance,
+            "Tech",
+            resolution,
+            [afterEnd],
+            [performance],
+            new Dictionary<string, HistoricalLocationCluster>(StringComparer.Ordinal),
+            options,
+            new HaversineDistanceCalculator());
+
+        Assert.False(hybrid.UsedRecovery);
+        Assert.True(
+            hybrid.Decision is AdaptiveMatchDecision.Unresolved or AdaptiveMatchDecision.Ambiguous);
+    }
+
     private static PilotStop Stop(
         string id,
         decimal lat,

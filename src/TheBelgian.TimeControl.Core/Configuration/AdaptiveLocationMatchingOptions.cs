@@ -23,6 +23,41 @@ public sealed class AdaptiveLocationMatchingOptions
     public double StopMergeDistanceMeters { get; init; } = 60;
     public string CalculationVersion { get; init; } = "adaptive-v1";
 
+    /// <summary>
+    /// When adaptive leaves a strong candidate Unresolved, allow precision-preserving recovery.
+    /// </summary>
+    public bool EnablePrecisionPreservingRecovery { get; init; } = true;
+
+    /// <summary>
+    /// Recovery never accepts candidates farther than this (keeps Learned251To500 out without clusters).
+    /// </summary>
+    public double RecoveryMaximumDistanceMeters { get; init; } = 250;
+
+    /// <summary>
+    /// Minimum positive overlap minutes OR percent required for recovery (OR-combined).
+    /// </summary>
+    public double RecoveryMinimumOverlapMinutes { get; init; } = 4;
+
+    /// <summary>
+    /// Minimum overlap percent OR minutes required for recovery (OR-combined).
+    /// </summary>
+    public double RecoveryMinimumOverlapPercent { get; init; } = 30;
+
+    /// <summary>
+    /// Strong temporal support for Probable101To250 recovery with weaker geocode (StreetOnly).
+    /// </summary>
+    public double RecoveryStrongOverlapMinutes { get; init; } = 30;
+
+    /// <summary>
+    /// Strong temporal support percent for Probable101To250 recovery with weaker geocode.
+    /// </summary>
+    public double RecoveryStrongOverlapPercent { get; init; } = 50;
+
+    /// <summary>
+    /// Top candidate must beat the runner-up by at least this score margin.
+    /// </summary>
+    public double RecoveryMinimumScoreMargin { get; init; } = 8;
+
     public void Validate()
     {
         if (StrongDistanceMeters <= 0 ||
@@ -31,6 +66,17 @@ public sealed class AdaptiveLocationMatchingOptions
         {
             throw new InvalidOperationException(
                 "Adaptieve afstandsgrenzen moeten positief en oplopend zijn.");
+        }
+
+        if (RecoveryMaximumDistanceMeters < StrongDistanceMeters ||
+            RecoveryMinimumOverlapMinutes < 0 ||
+            RecoveryMinimumOverlapPercent < 0 ||
+            RecoveryStrongOverlapMinutes < RecoveryMinimumOverlapMinutes ||
+            RecoveryStrongOverlapPercent < RecoveryMinimumOverlapPercent ||
+            RecoveryMinimumScoreMargin < 0)
+        {
+            throw new InvalidOperationException(
+                "Recovery-drempels moeten niet-negatief zijn en sterke overlap >= minimum overlap.");
         }
     }
 }

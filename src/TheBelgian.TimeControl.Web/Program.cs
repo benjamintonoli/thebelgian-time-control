@@ -10,8 +10,33 @@ var isBroader = args.Contains("--broader-validation", StringComparer.OrdinalIgno
 var isCoverageGap = args.Contains("--coverage-gap", StringComparer.OrdinalIgnoreCase);
 var isActivity = args.Contains("--activity-classification", StringComparer.OrdinalIgnoreCase);
 var isAdaptive = args.Contains("--adaptive-location-matching", StringComparer.OrdinalIgnoreCase);
+var isBenchmark = args.Contains("--location-matching-benchmark", StringComparer.OrdinalIgnoreCase);
+var isBenchmarkResample = args.Contains(
+    "--location-matching-benchmark-resample",
+    StringComparer.OrdinalIgnoreCase);
+var isBenchmarkPurify = args.Contains(
+    "--location-matching-benchmark-purify",
+    StringComparer.OrdinalIgnoreCase);
+var isExportCalibration = args.Contains(
+    "--export-calibration-review",
+    StringComparer.OrdinalIgnoreCase);
+var importCalibrationIndex = Array.FindIndex(
+    args,
+    static item => string.Equals(item, "--import-calibration-labels", StringComparison.OrdinalIgnoreCase));
+var isImportCalibration = importCalibrationIndex >= 0;
+var resetReviewerIndex = Array.FindIndex(
+    args,
+    static item => string.Equals(item, "--reset-calibration-reviewer", StringComparison.OrdinalIgnoreCase));
+var isResetCalibrationReviewer = resetReviewerIndex >= 0;
 
-if (isBroader || isCoverageGap || isActivity || isAdaptive)
+var isCalibrationEval = args.Contains(
+    "--calibration-single-reviewer-eval",
+    StringComparer.OrdinalIgnoreCase);
+
+if (isBroader || isCoverageGap || isActivity || isAdaptive ||
+    isBenchmark || isBenchmarkResample || isBenchmarkPurify ||
+    isExportCalibration || isImportCalibration || isResetCalibrationReviewer ||
+    isCalibrationEval)
 {
     var builder = WebApplication.CreateBuilder(args);
     builder.Logging.ClearProviders();
@@ -21,6 +46,200 @@ if (isBroader || isCoverageGap || isActivity || isAdaptive)
     await using var host = builder.Build();
     await host.Services.InitializeTimeControlDatabaseAsync();
     await using var scope = host.Services.CreateAsyncScope();
+    var docsPath = Path.GetFullPath(
+        Path.Combine(builder.Environment.ContentRootPath, "..", "..", "docs"));
+    Directory.CreateDirectory(docsPath);
+    if (isCalibrationEval)
+    {
+        var evaluationService = scope.ServiceProvider
+            .GetRequiredService<CalibrationSingleReviewerEvaluationService>();
+        var evaluation = await evaluationService.EvaluateAsync(docsPath, CancellationToken.None);
+        Console.WriteLine($"ReferenceSet={evaluation.ReferenceSet}");
+        Console.WriteLine($"CaseCount={evaluation.CaseCount}");
+        Console.WriteLine($"HighConfidenceCaseCount={evaluation.HighConfidenceCaseCount}");
+        Console.WriteLine($"LearnedClusters={evaluation.LearnedClusterCount}");
+        Console.WriteLine($"BestVariant={evaluation.BestVariant}");
+        Console.WriteLine($"HybridAcceptanceCriteriaMet={evaluation.HybridAcceptanceCriteriaMet}");
+        Console.WriteLine($"HybridAcceptanceNotes={evaluation.HybridAcceptanceNotes}");
+        Console.WriteLine($"RecoveredPerformanceIds={string.Join(',', evaluation.RecoveredPerformanceIds)}");
+        foreach (var gap in evaluation.GapAnalysis)
+        {
+            Console.WriteLine(
+                $"Gap={gap.PerformanceId}|Label={gap.Label}|BaselineAccepted={gap.BaselineAccepted}|AdaptiveUnresolved={gap.AdaptiveUnresolved}|Recoverable={gap.IsRecoverableGap}|Dist={gap.DistanceMeters}|OverlapMin={gap.OverlapMinutes}|OverlapPct={gap.OverlapPercent}|ArrDiff={gap.ArrivalVersusStartMinutes}|DepDiff={gap.DepartureVersusEndMinutes}|Geo={gap.GeocodeQuality}|Competitors={gap.CompetingCandidateCount}|Margin={gap.ScoreMarginVsSecond}|Prev={gap.PreviousPerformance}|Next={gap.NextPerformance}|Abstention={gap.AdaptiveAbstentionReason}|HybridRecovered={gap.HybridRecovered}|RecoveryReason={gap.HybridRecoveryReason}");
+        }
+
+        var sanity = evaluation.DevelopmentSanityCheck;
+        Console.WriteLine(
+            $"DevSanity=Cases={sanity.CaseCount}|Accepted={sanity.Accepted}|Unresolved={sanity.Unresolved}|Ambiguous={sanity.Ambiguous}|RecoveryOnly={sanity.RecoveryOnlyMatches}");
+        foreach (var pair in sanity.RecoveryByDistanceZone.OrderBy(item => item.Key, StringComparer.Ordinal))
+        {
+            Console.WriteLine($"DevRecoveryDistance={pair.Key}:{pair.Value}");
+        }
+
+        foreach (var pair in sanity.RecoveryByOverlapZone.OrderBy(item => item.Key, StringComparer.Ordinal))
+        {
+            Console.WriteLine($"DevRecoveryOverlap={pair.Key}:{pair.Value}");
+        }
+
+        foreach (var risk in sanity.NotableRiskPatterns)
+        {
+            Console.WriteLine($"DevRisk={risk}");
+        }
+
+        foreach (var variant in evaluation.Variants)
+        {
+            var all = variant.AllCases;
+            var high = variant.HighConfidenceOnly;
+            Console.WriteLine(
+                $"Variant={variant.Name}|AllAccepted={all.AcceptedMatches}|AllCorrectAccepted={all.CorrectAcceptedMatches}|AllPrecision={all.Precision}|AllCoverage={all.Coverage}|AllFP={all.FalsePositives}|AllFN={all.FalseNegatives}|AllWrongStop={all.WrongStopIdChoices}|HighAccepted={high.AcceptedMatches}|HighCorrectAccepted={high.CorrectAcceptedMatches}|HighPrecision={high.Precision}|HighCoverage={high.Coverage}|HighFP={high.FalsePositives}|HighFN={high.FalseNegatives}|HighWrongStop={high.WrongStopIdChoices}");
+            foreach (var error in variant.Errors)
+            {
+                Console.WriteLine(
+                    $"Error={variant.Name}|{error.PerformanceId}|{error.Label}|{error.ReviewerConfidence}|{error.PredictedDecision}|{error.PredictedStopId}|{error.Reason}");
+            }
+        }
+
+        foreach (var cause in evaluation.MainErrorCauses)
+        {
+            Console.WriteLine($"MainErrorCause={cause}");
+        }
+
+        Console.WriteLine($"NextStep={evaluation.RecommendedNextStep}");
+        return;
+    }
+
+    if (isResetCalibrationReviewer)
+    {
+        if (resetReviewerIndex + 1 >= args.Length ||
+            !int.TryParse(args[resetReviewerIndex + 1], out var resetReviewer) ||
+            resetReviewer is not (1 or 2))
+        {
+            Console.Error.WriteLine("Gebruik: --reset-calibration-reviewer 1|2");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        var reset = LocationMatchingCalibrationBatchService.ResetReviewerLabels(
+            docsPath,
+            resetReviewer);
+        var templatePath = resetReviewer == 2
+            ? LocationMatchingCalibrationBatchService.WriteEmptyReviewerTemplate(
+                docsPath,
+                "calibration-labels-reviewer2.json")
+            : LocationMatchingCalibrationBatchService.WriteEmptyReviewerTemplate(
+                docsPath,
+                "calibration-labels.json");
+        var cases = LocationMatchingBenchmarkService.LoadCalibrationCases(docsPath);
+        var reviewer1 = cases.Count(item => !string.IsNullOrWhiteSpace(item.Label));
+        var reviewer2 = cases.Count(item => !string.IsNullOrWhiteSpace(item.SecondReviewLabel));
+        var conflicts = cases.Count(item =>
+            string.Equals(item.AdjudicationStatus, "Disagreement", StringComparison.Ordinal));
+        Console.WriteLine($"ResetReviewer={reset.Reviewer}");
+        Console.WriteLine($"Reviewer1={reviewer1}");
+        Console.WriteLine($"Reviewer2={reviewer2}");
+        Console.WriteLine($"Conflicts={conflicts}");
+        Console.WriteLine($"Template={templatePath}");
+        return;
+    }
+
+    if (isExportCalibration)
+    {
+        var exported = LocationMatchingCalibrationBatchService.ExportReviewPack(docsPath);
+        Console.WriteLine($"Markdown={exported.MarkdownPath}");
+        Console.WriteLine($"Json={exported.JsonPath}");
+        Console.WriteLine($"Template={exported.TemplatePath}");
+        Console.WriteLine($"CaseCount={exported.CaseCount}");
+        return;
+    }
+
+    if (isImportCalibration)
+    {
+        if (importCalibrationIndex + 1 >= args.Length)
+        {
+            Console.Error.WriteLine(
+                "Gebruik: --import-calibration-labels <bestand> --reviewer 1|2");
+            return;
+        }
+
+        var labelsPath = Path.GetFullPath(args[importCalibrationIndex + 1]);
+        var reviewer = ParseReviewer(args);
+        try
+        {
+            var imported = LocationMatchingCalibrationBatchService.ImportLabels(
+                docsPath,
+                labelsPath,
+                reviewer);
+            Console.WriteLine($"Reviewer={imported.Reviewer}");
+            Console.WriteLine($"ImportedCount={imported.ImportedCount}");
+            Console.WriteLine($"Labels={imported.LabelsPath}");
+            Console.WriteLine($"Calibration={imported.CalibrationPath}");
+            Console.WriteLine($"AgreementStatus={imported.Agreement.Status}");
+            Console.WriteLine($"ExactLabelAgreement={imported.Agreement.ExactLabelAgreementCount}");
+            Console.WriteLine($"ExpectedStopIdAgreement={imported.Agreement.ExpectedStopIdAgreementCount}");
+            Console.WriteLine($"Conflicts={imported.Agreement.ConflictCount}");
+            Console.WriteLine($"CohensKappa={imported.Agreement.CohensKappa}");
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            Console.Error.WriteLine(exception.Message);
+            Environment.ExitCode = 1;
+        }
+
+        return;
+    }
+
+    if (isBenchmark || isBenchmarkResample || isBenchmarkPurify)
+    {
+        var benchmarkService = scope.ServiceProvider
+            .GetRequiredService<LocationMatchingBenchmarkService>();
+        if (isBenchmarkPurify)
+        {
+            var purified = await benchmarkService.PurifyAndCalibrateAsync(
+                docsPath,
+                CancellationToken.None);
+            foreach (var finding in purified.PriorLeakage.Findings)
+            {
+                Console.WriteLine($"Leakage={finding}");
+            }
+
+            Console.WriteLine($"DevelopmentRole={purified.DevelopmentRole}");
+            Console.WriteLine($"ChallengeRole={purified.ChallengeRole}");
+            Console.WriteLine($"HoldoutPeriod={purified.HoldoutPeriod}");
+            Console.WriteLine($"PureHoldoutCaseCount={purified.PureHoldoutCaseCount}");
+            Console.WriteLine($"HoldoutUniqueLocations={purified.HoldoutUniqueLocationCount}");
+            Console.WriteLine($"CalibrationCaseCount={purified.CalibrationCaseCount}");
+            Console.WriteLine($"CalibrationReviewer={purified.CalibrationReviewerPath}");
+            Console.WriteLine($"HoldoutSha256={purified.HoldoutContentSha256}");
+            Console.WriteLine($"DevelopmentCaseCount={purified.DevelopmentCaseCount}");
+            Console.WriteLine($"ChallengeCaseCount={purified.ChallengeCaseCount}");
+            return;
+        }
+
+        var benchmark = isBenchmarkResample
+            ? benchmarkService.ResampleFromSavedPool(docsPath)
+            : await benchmarkService.RunAsync(docsPath, CancellationToken.None);
+        var markdownPath = Path.Combine(docsPath, "location-matching-benchmark.md");
+        var jsonPath = Path.Combine(docsPath, "location-matching-benchmark-report.json");
+        await File.WriteAllTextAsync(
+            markdownPath,
+            LocationMatchingBenchmarkReportWriter.ToMarkdown(benchmark),
+            Encoding.UTF8);
+        await File.WriteAllTextAsync(
+            jsonPath,
+            LocationMatchingBenchmarkReportWriter.ToJson(benchmark),
+            Encoding.UTF8);
+        Console.WriteLine($"CompleteMonths={string.Join(',', benchmark.CompleteMonths)}");
+        Console.WriteLine($"DevelopmentCaseCount={benchmark.DevelopmentCaseCount}");
+        Console.WriteLine($"HoldoutCaseCount={benchmark.HoldoutCaseCount}");
+        Console.WriteLine($"HoldoutUniqueLocations={benchmark.HoldoutUniqueLocationCount}");
+        Console.WriteLine($"ChallengeCaseCount={benchmark.ChallengeCaseCount}");
+        Console.WriteLine($"SeenLocation={benchmark.SeenLocationCount}");
+        Console.WriteLine($"UnseenLocation={benchmark.UnseenLocationCount}");
+        Console.WriteLine($"BlindReviewer={benchmark.BlindReviewerPath}");
+        Console.WriteLine($"Report={markdownPath}");
+        return;
+    }
+
     var service = scope.ServiceProvider.GetRequiredService<IBroaderValidationPilotService>();
     var from = ParseDate(args, "--from", new DateOnly(2026, 7, 1));
     var through = ParseDate(args, "--through", new DateOnly(2026, 7, 28));
@@ -33,9 +252,6 @@ if (isBroader || isCoverageGap || isActivity || isAdaptive)
             through,
             5),
         CancellationToken.None);
-    var docsPath = Path.GetFullPath(
-        Path.Combine(builder.Environment.ContentRootPath, "..", "..", "docs"));
-    Directory.CreateDirectory(docsPath);
     var cachePath = BroaderValidationCache.DefaultPath(docsPath);
     if (broader.Summary.ProcessedTechnicianCount > 0)
     {
@@ -268,4 +484,19 @@ static DateOnly ParseDate(string[] arguments, string name, DateOnly fallback)
     return DateOnly.TryParse(arguments[index + 1], out var parsed)
         ? parsed
         : fallback;
+}
+
+static int ParseReviewer(string[] arguments)
+{
+    var index = Array.FindIndex(
+        arguments,
+        item => item.Equals("--reviewer", StringComparison.OrdinalIgnoreCase));
+    if (index < 0 || index + 1 >= arguments.Length ||
+        !int.TryParse(arguments[index + 1], out var reviewer) ||
+        reviewer is not (1 or 2))
+    {
+        throw new ArgumentException("Gebruik --reviewer 1 of --reviewer 2.");
+    }
+
+    return reviewer;
 }

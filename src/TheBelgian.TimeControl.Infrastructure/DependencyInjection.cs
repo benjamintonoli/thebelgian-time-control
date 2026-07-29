@@ -130,6 +130,8 @@ public static class DependencyInjection
         });
         services.AddScoped<IReadOnlyPilotService, ReadOnlyPilotService>();
         services.AddScoped<IBroaderValidationPilotService, BroaderValidationPilotService>();
+        services.AddScoped<LocationMatchingBenchmarkService>();
+        services.AddScoped<CalibrationSingleReviewerEvaluationService>();
         return services;
     }
 

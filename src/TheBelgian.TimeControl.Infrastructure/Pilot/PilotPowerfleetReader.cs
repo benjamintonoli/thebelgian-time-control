@@ -594,6 +594,13 @@ internal sealed class PilotPowerfleetReader(
         "startlongitude",
         "endlatitude",
         "endlongitude",
+        "maxspeed",
+        "avgspeed",
+        "durationofstay",
+        "route",
+        "fuelspent",
+        "temperature",
+        "note",
     ];
 }
 

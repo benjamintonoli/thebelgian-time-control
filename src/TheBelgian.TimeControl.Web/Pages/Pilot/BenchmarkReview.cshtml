@@ -1,0 +1,172 @@
+@page "/Pilot/BenchmarkReview"
+@model TheBelgian.TimeControl.Web.Pages.Pilot.BenchmarkReviewModel
+@{
+    ViewData["Title"] = "Kalibratiereview (30 cases)";
+}
+
+<h1>Blinde kalibratiereview (30 cases)</h1>
+<p class="text-muted">
+    Alleen de 30 kalibratiecases. Geen matcherstatus, score of voorspelling vóór het label.
+    Alle 30 vragen een onafhankelijke tweede review. Holdout blijft vergrendeld.
+</p>
+
+<div class="mb-3">
+    <a class="btn btn-outline-secondary btn-sm @(Model.SecondPass ? "" : "active")"
+       href="/Pilot/BenchmarkReview">Eerste review</a>
+    <a class="btn btn-outline-secondary btn-sm @(Model.SecondPass ? "active" : "")"
+       href="/Pilot/BenchmarkReview?secondPass=true">Tweede review</a>
+</div>
+
+<p>
+    Eerste labels: @Model.LabeledCount/30 · Dubbel: @Model.DoubleLabeledCount/30 ·
+    Resterend in wachtrij: @Model.RemainingCount · Conflicten: @Model.DisagreementCount
+</p>
+
+@if (Model.Agreement is { } agreement)
+{
+    <div class="alert alert-secondary">
+        @agreement.Status
+        @if (agreement.DoubleLabeledCount > 0)
+        {
+            <span>
+                · Exact label agreement: @agreement.ExactLabelAgreementCount/@agreement.DoubleLabeledCount
+                (@agreement.ExactLabelAgreementRate) · ExpectedStopId agreement:
+                @agreement.ExpectedStopIdAgreementCount/@agreement.DoubleLabeledCount
+                (@agreement.ExpectedStopIdAgreementRate) · Cohen’s κ: @agreement.CohensKappa
+            </span>
+        }
+    </div>
+}
+
+@if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+{
+    <div class="alert alert-danger">@Model.ErrorMessage</div>
+}
+@if (!string.IsNullOrWhiteSpace(Model.InfoMessage))
+{
+    <div class="alert alert-success">@Model.InfoMessage</div>
+}
+
+@if (Model.Current is null)
+{
+    <div class="alert alert-info">
+        @(Model.SecondPass
+            ? "Geen openstaande tweede reviews in de kalibratieset."
+            : "Geen openstaande kalibratiecases. Genereer eerst via --location-matching-benchmark-purify.")
+    </div>
+}
+else
+{
+    var current = Model.Current;
+    <section class="mb-4">
+        <h2 class="h4">Bronbewijs</h2>
+        <dl class="row">
+            <dt class="col-sm-3">PerformanceId</dt>
+            <dd class="col-sm-9">@current.PerformanceId</dd>
+            <dt class="col-sm-3">Technieker</dt>
+            <dd class="col-sm-9">@current.Technician</dd>
+            <dt class="col-sm-3">Datum</dt>
+            <dd class="col-sm-9">@current.Date.ToString("dd/MM/yyyy")</dd>
+            <dt class="col-sm-3">Tijd</dt>
+            <dd class="col-sm-9">@current.Start.ToString("HH:mm") – @current.End.ToString("HH:mm")</dd>
+            <dt class="col-sm-3">LACLEUNIK</dt>
+            <dd class="col-sm-9">@(current.Lacleunik ?? "—")</dd>
+            <dt class="col-sm-3">Plenion-adres</dt>
+            <dd class="col-sm-9">@current.PlenionAddress</dd>
+            <dt class="col-sm-3">Geocodekwaliteit</dt>
+            <dd class="col-sm-9">@current.GeocodeQuality</dd>
+            <dt class="col-sm-3">Activiteitstype</dt>
+            <dd class="col-sm-9">@(current.ActivityType ?? "—")</dd>
+            <dt class="col-sm-3">Vorige prestatie</dt>
+            <dd class="col-sm-9">@(current.PreviousPerformance ?? "—")</dd>
+            <dt class="col-sm-3">Volgende prestatie</dt>
+            <dd class="col-sm-9">@(current.NextPerformance ?? "—")</dd>
+            <dt class="col-sm-3">Exposure</dt>
+            <dd class="col-sm-9">@(current.LocationExposure ?? "—")</dd>
+        </dl>
+
+        <h3 class="h5">Kandidaatstops (bewijs)</h3>
+        @if (current.Candidates.Count == 0)
+        {
+            <p>Geen kandidaatstops.</p>
+        }
+        else
+        {
+            <table class="table table-sm">
+                <thead>
+                <tr>
+                    <th>StopId</th>
+                    <th>Adres</th>
+                    <th>Afstand (m)</th>
+                    <th>Aankomst</th>
+                    <th>Vertrek</th>
+                    <th>Overlap (min)</th>
+                    <th>Δ start</th>
+                    <th>Δ eind</th>
+                    <th>Toelichting</th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var candidate in current.Candidates)
+                {
+                    <tr>
+                        <td><code>@candidate.StopId</code></td>
+                        <td>@(candidate.Address ?? "—")</td>
+                        <td>@(candidate.DistanceMeters?.ToString("0") ?? "—")</td>
+                        <td>@candidate.Arrival.ToString("HH:mm")</td>
+                        <td>@candidate.Departure.ToString("HH:mm")</td>
+                        <td>@candidate.OverlapMinutes</td>
+                        <td>@candidate.StartDifferenceMinutes</td>
+                        <td>@candidate.EndDifferenceMinutes</td>
+                        <td>@candidate.Explanation</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    </section>
+
+    <form method="post" class="card card-body mb-4">
+        <input type="hidden" asp-for="PerformanceId" />
+        <input type="hidden" asp-for="SecondPass" />
+        <div class="row g-3">
+            <div class="col-md-4">
+                <label asp-for="Label" class="form-label">Label</label>
+                <select asp-for="Label" class="form-select" required>
+                    <option value="">—</option>
+                    <option value="CorrectCandidate">CorrectCandidate</option>
+                    <option value="NoValidCandidate">NoValidCandidate</option>
+                    <option value="Ambiguous">Ambiguous</option>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label asp-for="ExpectedStopId" class="form-label">ExpectedStopId</label>
+                <select asp-for="ExpectedStopId" class="form-select">
+                    <option value="">(null)</option>
+                    @foreach (var candidate in current.Candidates)
+                    {
+                        <option value="@candidate.StopId">@candidate.StopId</option>
+                    }
+                </select>
+                <div class="form-text">Verplicht bij CorrectCandidate; null bij NoValidCandidate/Ambiguous.</div>
+            </div>
+            <div class="col-md-4">
+                <label asp-for="ReviewerConfidence" class="form-label">ReviewerConfidence</label>
+                <select asp-for="ReviewerConfidence" class="form-select" required>
+                    <option>High</option>
+                    <option>Medium</option>
+                    <option>Low</option>
+                </select>
+            </div>
+            <div class="col-12">
+                <label asp-for="ReviewerNote" class="form-label">ReviewerNote</label>
+                <textarea asp-for="ReviewerNote" class="form-control" rows="2"></textarea>
+            </div>
+            <div class="col-12">
+                <button class="btn btn-primary" type="submit">
+                    @(Model.SecondPass ? "Tweede review opslaan" : "Label opslaan")
+                </button>
+            </div>
+        </div>
+    </form>
+}

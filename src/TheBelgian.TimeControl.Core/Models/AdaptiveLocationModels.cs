@@ -63,7 +63,9 @@ public sealed record AdaptiveMatchResult(
     IReadOnlyList<AdaptiveMatchCandidate> Candidates,
     bool UsedHistoricalCluster,
     AdaptiveDistanceZone DistanceZone,
-    string Assessment);
+    string Assessment,
+    bool UsedRecovery = false,
+    string? RecoveryReason = null);
 
 public sealed record MergedPilotStop(
     string MergedStopId,
