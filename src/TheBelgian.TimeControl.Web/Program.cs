@@ -6,10 +6,12 @@ using TheBelgian.TimeControl.Infrastructure;
 using TheBelgian.TimeControl.Infrastructure.Pilot;
 using TheBelgian.TimeControl.Web.Pages.Pilot;
 
-if (args.Contains("--broader-validation", StringComparer.OrdinalIgnoreCase) ||
-    args.Contains("--coverage-gap", StringComparer.OrdinalIgnoreCase))
+var isBroader = args.Contains("--broader-validation", StringComparer.OrdinalIgnoreCase);
+var isCoverageGap = args.Contains("--coverage-gap", StringComparer.OrdinalIgnoreCase);
+var isActivity = args.Contains("--activity-classification", StringComparer.OrdinalIgnoreCase);
+
+if (isBroader || isCoverageGap || isActivity)
 {
-    var runCoverageGap = args.Contains("--coverage-gap", StringComparer.OrdinalIgnoreCase);
     var builder = WebApplication.CreateBuilder(args);
     builder.Logging.ClearProviders();
     builder.Logging.AddConsole();
@@ -34,7 +36,45 @@ if (args.Contains("--broader-validation", StringComparer.OrdinalIgnoreCase) ||
         Path.Combine(builder.Environment.ContentRootPath, "..", "..", "docs"));
     Directory.CreateDirectory(docsPath);
 
-    if (runCoverageGap)
+    if (isActivity)
+    {
+        var analysis = ActivityClassificationAnalysisService.Analyze(broader);
+        var markdownPath = Path.Combine(docsPath, "activity-classification-report.md");
+        var jsonPath = Path.Combine(docsPath, "activity-classification-report.json");
+        await File.WriteAllTextAsync(
+            markdownPath,
+            ActivityClassificationReportWriter.ToMarkdown(analysis),
+            Encoding.UTF8);
+        await File.WriteAllTextAsync(
+            jsonPath,
+            ActivityClassificationReportWriter.ToJson(analysis),
+            Encoding.UTF8);
+        foreach (var summary in analysis.TypeSummaries)
+        {
+            Console.WriteLine(
+                $"Type={summary.ActivityType}|Count={summary.PerformanceCount}|GeoRequired={summary.RequiresGeographicMatchCount}|IncorrectDenominator={summary.IncorrectlyInLocationDenominatorCount}|Unknown={summary.UnknownCount}|HFDTAAK={string.Join(';', summary.MainTaskCodes)}");
+        }
+
+        Console.WriteLine($"OpenCases={analysis.OpenCases.OpenCaseCount}");
+        Console.WriteLine($"OpenNotLocationBound={analysis.OpenCases.NotLocationBoundCount}");
+        Console.WriteLine($"OpenStillLocationBound={analysis.OpenCases.StillLocationBoundCount}");
+        Console.WriteLine($"OpenUnknown={analysis.OpenCases.UnknownCount}");
+        Console.WriteLine(
+            $"CorrectedReliablePercent={analysis.CorrectedMatch.CorrectedReliablePercent}");
+        Console.WriteLine(
+            $"LocationBoundResolutions={analysis.CorrectedMatch.LocationBoundResolutionCount}");
+        Console.WriteLine(
+            $"RemainingNoReliableMatch={analysis.CorrectedMatch.RemainingNoReliableMatchCount}");
+        Console.WriteLine(
+            $"AliasFlippableLocationBound={analysis.CorrectedMatch.AliasFlippableLocationBoundCount}");
+        Console.WriteLine(
+            $"PotentialAfterAlias={analysis.CorrectedMatch.PotentialReliablePercentAfterAliases}");
+        Console.WriteLine($"Advice={analysis.AliasAdvice}");
+        Console.WriteLine($"Report={markdownPath}");
+        return;
+    }
+
+    if (isCoverageGap)
     {
         var analysis = CoverageGapAnalysisService.Analyze(broader);
         var markdownPath = Path.Combine(docsPath, "coverage-gap-analysis.md");
