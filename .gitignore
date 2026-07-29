@@ -46,3 +46,8 @@ docs/calibration-labels-reviewer1.json
 docs/calibration-labels-reviewer2.json
 docs/calibration-single-reviewer-eval.json
 docs/calibration-single-reviewer-eval-warnings.json
+docs/recovery-audit-pack.md
+docs/recovery-audit-labels.json
+docs/recovery-audit-labels-reviewer1.json
+docs/recovery-audit-set.json
+docs/recovery-audit-evaluation.json

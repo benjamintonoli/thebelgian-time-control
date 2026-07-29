@@ -46,6 +46,7 @@ public sealed class CalibrationLabelEntry
     public required long PerformanceId { get; init; }
     public string? Label { get; init; }
     public string? ExpectedStopId { get; init; }
+    public IReadOnlyList<string>? ExpectedVisitStopIds { get; init; }
     public string? ReviewerConfidence { get; init; }
     public string? ReviewerNote { get; init; }
 }

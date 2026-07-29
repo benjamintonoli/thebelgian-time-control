@@ -20,6 +20,9 @@ internal static class LocationMatchingBenchmarkSampling
     public const int CalibrationSeed = 202607294;
     public const int CalibrationCaseCount = 30;
     public const int PureHoldoutSeed = 20251001;
+    public const int RecoveryAuditSeed = 202607295;
+    public const int RecoveryAuditMaxCases = 60;
+    public const int RecoveryAuditControlTarget = 15;
     public const double SecondReviewFraction = 0.20;
 
     public static string DistanceBucket(double? meters) =>
@@ -710,6 +713,145 @@ internal static class LocationMatchingBenchmarkSampling
         }
 
         return list;
+    }
+
+    public static List<RecoveryAuditClassifiedCase> SelectRecoveryAuditCases(
+        IReadOnlyList<RecoveryAuditClassifiedCase> pool,
+        int maxCount = RecoveryAuditMaxCases,
+        int controlTarget = RecoveryAuditControlTarget,
+        int seed = RecoveryAuditSeed)
+    {
+        if (maxCount <= 0)
+        {
+            return [];
+        }
+
+        var recovery = pool.Where(item => item.UsedRecovery).ToList();
+        var adaptiveAccepted = pool
+            .Where(item => !item.UsedRecovery && item.AdaptiveAccepted)
+            .ToList();
+        var abstention = pool
+            .Where(item =>
+                !item.UsedRecovery &&
+                !item.AdaptiveAccepted &&
+                item.HybridAbstention)
+            .ToList();
+
+        var selected = new Dictionary<long, RecoveryAuditClassifiedCase>();
+        foreach (var item in recovery.OrderBy(item => item.PerformanceId))
+        {
+            selected[item.PerformanceId] = TagRecoveryAuditStrata(item);
+        }
+
+        var remaining = Math.Max(0, maxCount - selected.Count);
+        int positiveSlots;
+        int negativeSlots;
+        if (remaining >= 2 * controlTarget)
+        {
+            positiveSlots = controlTarget;
+            negativeSlots = controlTarget;
+        }
+        else
+        {
+            positiveSlots = Math.Min(controlTarget, (remaining + 1) / 2);
+            negativeSlots = Math.Min(controlTarget, remaining - positiveSlots);
+        }
+
+        foreach (var item in Shuffle(adaptiveAccepted, seed ^ 11).Take(positiveSlots))
+        {
+            selected[item.PerformanceId] = TagRecoveryAuditStrata(item);
+        }
+
+        foreach (var item in Shuffle(abstention, seed ^ 29).Take(negativeSlots))
+        {
+            selected[item.PerformanceId] = TagRecoveryAuditStrata(item);
+        }
+
+        // Top up only under-filled control strata, never beyond controlTarget.
+        var positiveCount = selected.Values.Count(item =>
+            item.Strata.Contains("AdaptiveAcceptedControl", StringComparer.Ordinal));
+        var negativeCount = selected.Values.Count(item =>
+            item.Strata.Contains("AbstentionControl", StringComparer.Ordinal));
+        remaining = Math.Max(0, maxCount - selected.Count);
+        if (remaining > 0 && positiveCount < controlTarget)
+        {
+            foreach (var item in Shuffle(adaptiveAccepted, seed ^ 47)
+                         .Where(caseItem => !selected.ContainsKey(caseItem.PerformanceId))
+                         .Take(Math.Min(controlTarget - positiveCount, remaining)))
+            {
+                selected[item.PerformanceId] = TagRecoveryAuditStrata(item);
+            }
+        }
+
+        remaining = Math.Max(0, maxCount - selected.Count);
+        negativeCount = selected.Values.Count(item =>
+            item.Strata.Contains("AbstentionControl", StringComparer.Ordinal));
+        if (remaining > 0 && negativeCount < controlTarget)
+        {
+            foreach (var item in Shuffle(abstention, seed ^ 53)
+                         .Where(caseItem => !selected.ContainsKey(caseItem.PerformanceId))
+                         .Take(Math.Min(controlTarget - negativeCount, remaining)))
+            {
+                selected[item.PerformanceId] = TagRecoveryAuditStrata(item);
+            }
+        }
+
+        return selected.Values
+            .OrderBy(item => item.PerformanceId)
+            .ToList();
+    }
+
+    public static RecoveryAuditDistribution BuildRecoveryAuditDistribution(
+        IReadOnlyList<RecoveryAuditClassifiedCase> selected) =>
+        new()
+        {
+            RecoveryOnly = selected.Count(item => item.UsedRecovery),
+            AdaptiveAcceptedControl = selected.Count(item =>
+                item.Strata.Contains("AdaptiveAcceptedControl", StringComparer.Ordinal)),
+            AbstentionControl = selected.Count(item =>
+                item.Strata.Contains("AbstentionControl", StringComparer.Ordinal)),
+            WeakOverlapRecovery = selected.Count(item =>
+                item.Strata.Contains("WeakOverlapRecovery", StringComparer.Ordinal)),
+            ProbableDistanceRecovery = selected.Count(item =>
+                item.Strata.Contains("ProbableDistanceRecovery", StringComparer.Ordinal)),
+            WeakGeocodeRecovery = selected.Count(item =>
+                item.Strata.Contains("WeakGeocodeRecovery", StringComparer.Ordinal)),
+            Total = selected.Count,
+        };
+
+    private static RecoveryAuditClassifiedCase TagRecoveryAuditStrata(
+        RecoveryAuditClassifiedCase item)
+    {
+        var strata = new List<string>();
+        if (item.UsedRecovery)
+        {
+            strata.Add("RecoveryOnly");
+            if (item.SelectedOverlapMinutes is < 10 &&
+                item.SelectedOverlapPercent is < 50)
+            {
+                strata.Add("WeakOverlapRecovery");
+            }
+
+            if (item.SelectedDistanceMeters is > 100 and <= 250)
+            {
+                strata.Add("ProbableDistanceRecovery");
+            }
+
+            if (item.GeocodeQuality is "LowConfidence" or "PartialAddress")
+            {
+                strata.Add("WeakGeocodeRecovery");
+            }
+        }
+        else if (item.AdaptiveAccepted)
+        {
+            strata.Add("AdaptiveAcceptedControl");
+        }
+        else if (item.HybridAbstention)
+        {
+            strata.Add("AbstentionControl");
+        }
+
+        return item with { Strata = strata };
     }
 
     private static int StableHash(string value)

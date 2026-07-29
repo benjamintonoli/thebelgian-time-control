@@ -132,6 +132,7 @@ public static class DependencyInjection
         services.AddScoped<IBroaderValidationPilotService, BroaderValidationPilotService>();
         services.AddScoped<LocationMatchingBenchmarkService>();
         services.AddScoped<CalibrationSingleReviewerEvaluationService>();
+        services.AddScoped<LocationMatchingRecoveryAuditService>();
         return services;
     }
 

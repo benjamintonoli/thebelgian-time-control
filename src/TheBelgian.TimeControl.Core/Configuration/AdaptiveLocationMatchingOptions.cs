@@ -21,10 +21,20 @@ public sealed class AdaptiveLocationMatchingOptions
     public double ProbableMinimumScore { get; init; } = 55;
     public double PassThroughMaxDurationMinutes { get; init; } = 2;
     public double StopMergeDistanceMeters { get; init; } = 60;
-    public string CalculationVersion { get; init; } = "adaptive-v1";
+    public string CalculationVersion { get; init; } = "adaptive-v2-visit";
 
     /// <summary>
-    /// When adaptive leaves a strong candidate Unresolved, allow precision-preserving recovery.
+    /// Max distance between consecutive stop fragments that may form one VisitCandidate.
+    /// </summary>
+    public double VisitMergeDistanceMeters { get; init; } = 100;
+
+    /// <summary>
+    /// Max gap between fragment departure and next fragment arrival for visit aggregation.
+    /// </summary>
+    public double VisitMergeMaxGapMinutes { get; init; } = 15;
+
+    /// <summary>
+    /// When adaptive leaves a strong candidate Unresolved/Ambiguous, allow precision-preserving recovery.
     /// </summary>
     public bool EnablePrecisionPreservingRecovery { get; init; } = true;
 
@@ -36,12 +46,12 @@ public sealed class AdaptiveLocationMatchingOptions
     /// <summary>
     /// Minimum positive overlap minutes OR percent required for recovery (OR-combined).
     /// </summary>
-    public double RecoveryMinimumOverlapMinutes { get; init; } = 4;
+    public double RecoveryMinimumOverlapMinutes { get; init; } = 10;
 
     /// <summary>
     /// Minimum overlap percent OR minutes required for recovery (OR-combined).
     /// </summary>
-    public double RecoveryMinimumOverlapPercent { get; init; } = 30;
+    public double RecoveryMinimumOverlapPercent { get; init; } = 50;
 
     /// <summary>
     /// Strong temporal support for Probable101To250 recovery with weaker geocode (StreetOnly).
@@ -58,6 +68,16 @@ public sealed class AdaptiveLocationMatchingOptions
     /// </summary>
     public double RecoveryMinimumScoreMargin { get; init; } = 8;
 
+    /// <summary>
+    /// Per-performance minimum overlap for the short consecutive same-LACLEUNIK chain exception.
+    /// </summary>
+    public double RecoveryShortChainMinOverlapMinutes { get; init; } = 3;
+
+    /// <summary>
+    /// Combined chain overlap percent required for the short consecutive same-LACLEUNIK exception.
+    /// </summary>
+    public double RecoveryShortChainMinCombinedOverlapPercent { get; init; } = 80;
+
     public void Validate()
     {
         if (StrongDistanceMeters <= 0 ||
@@ -68,12 +88,20 @@ public sealed class AdaptiveLocationMatchingOptions
                 "Adaptieve afstandsgrenzen moeten positief en oplopend zijn.");
         }
 
+        if (VisitMergeDistanceMeters <= 0 || VisitMergeMaxGapMinutes < 0)
+        {
+            throw new InvalidOperationException(
+                "Visit-merge drempels moeten positief zijn.");
+        }
+
         if (RecoveryMaximumDistanceMeters < StrongDistanceMeters ||
             RecoveryMinimumOverlapMinutes < 0 ||
             RecoveryMinimumOverlapPercent < 0 ||
             RecoveryStrongOverlapMinutes < RecoveryMinimumOverlapMinutes ||
             RecoveryStrongOverlapPercent < RecoveryMinimumOverlapPercent ||
-            RecoveryMinimumScoreMargin < 0)
+            RecoveryMinimumScoreMargin < 0 ||
+            RecoveryShortChainMinOverlapMinutes < 0 ||
+            RecoveryShortChainMinCombinedOverlapPercent <= 0)
         {
             throw new InvalidOperationException(
                 "Recovery-drempels moeten niet-negatief zijn en sterke overlap >= minimum overlap.");

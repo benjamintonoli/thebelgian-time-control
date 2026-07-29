@@ -66,10 +66,12 @@ public sealed record LocationMatchingBenchmarkCase
     public required IReadOnlyList<LocationMatchingBenchmarkCandidate> Candidates { get; init; }
     public string? Label { get; init; }
     public string? ExpectedStopId { get; init; }
+    public IReadOnlyList<string>? ExpectedVisitStopIds { get; init; }
     public string? ReviewerConfidence { get; init; }
     public string? ReviewerNote { get; init; }
     public string? SecondReviewLabel { get; init; }
     public string? SecondReviewExpectedStopId { get; init; }
+    public IReadOnlyList<string>? SecondReviewExpectedVisitStopIds { get; init; }
     public string? SecondReviewerConfidence { get; init; }
     public string? SecondReviewerNote { get; init; }
     public bool RequiresSecondReview { get; init; }

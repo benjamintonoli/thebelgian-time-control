@@ -32,11 +32,22 @@ var isResetCalibrationReviewer = resetReviewerIndex >= 0;
 var isCalibrationEval = args.Contains(
     "--calibration-single-reviewer-eval",
     StringComparer.OrdinalIgnoreCase);
+var isExportRecoveryAudit = args.Contains(
+    "--export-recovery-audit",
+    StringComparer.OrdinalIgnoreCase);
+var importRecoveryAuditIndex = Array.FindIndex(
+    args,
+    static item => string.Equals(item, "--import-recovery-audit-labels", StringComparison.OrdinalIgnoreCase));
+var isImportRecoveryAudit = importRecoveryAuditIndex >= 0;
+var isEvaluateRecoveryAudit = args.Contains(
+    "--evaluate-recovery-audit",
+    StringComparer.OrdinalIgnoreCase);
 
 if (isBroader || isCoverageGap || isActivity || isAdaptive ||
     isBenchmark || isBenchmarkResample || isBenchmarkPurify ||
     isExportCalibration || isImportCalibration || isResetCalibrationReviewer ||
-    isCalibrationEval)
+    isCalibrationEval || isExportRecoveryAudit || isImportRecoveryAudit ||
+    isEvaluateRecoveryAudit)
 {
     var builder = WebApplication.CreateBuilder(args);
     builder.Logging.ClearProviders();
@@ -139,6 +150,131 @@ if (isBroader || isCoverageGap || isActivity || isAdaptive ||
         Console.WriteLine($"Reviewer2={reviewer2}");
         Console.WriteLine($"Conflicts={conflicts}");
         Console.WriteLine($"Template={templatePath}");
+        return;
+    }
+
+    if (isExportRecoveryAudit)
+    {
+        var auditService = scope.ServiceProvider
+            .GetRequiredService<LocationMatchingRecoveryAuditService>();
+        var exported = await auditService.ExportAsync(docsPath, CancellationToken.None);
+        Console.WriteLine($"Markdown={exported.MarkdownPath}");
+        Console.WriteLine($"Labels={exported.LabelsPath}");
+        Console.WriteLine($"Set={exported.SetPath}");
+        Console.WriteLine($"CaseCount={exported.CaseCount}");
+        Console.WriteLine($"NewRecoveryOnly={exported.NewRecoveryOnlyCount}");
+        Console.WriteLine(
+            $"Distribution=RecoveryOnly={exported.Distribution.RecoveryOnly}|AdaptiveAcceptedControl={exported.Distribution.AdaptiveAcceptedControl}|AbstentionControl={exported.Distribution.AbstentionControl}|WeakOverlapRecovery={exported.Distribution.WeakOverlapRecovery}|ProbableDistanceRecovery={exported.Distribution.ProbableDistanceRecovery}|WeakGeocodeRecovery={exported.Distribution.WeakGeocodeRecovery}|Total={exported.Distribution.Total}");
+        return;
+    }
+
+    if (isImportRecoveryAudit)
+    {
+        if (importRecoveryAuditIndex + 1 >= args.Length)
+        {
+            Console.Error.WriteLine("Gebruik: --import-recovery-audit-labels <bestand>");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        var labelsPath = Path.GetFullPath(args[importRecoveryAuditIndex + 1]);
+        try
+        {
+            var auditService = scope.ServiceProvider
+                .GetRequiredService<LocationMatchingRecoveryAuditService>();
+            var imported = auditService.ImportLabels(docsPath, labelsPath);
+            Console.WriteLine($"ImportedCount={imported.ImportedCount}");
+            Console.WriteLine($"LabeledCount={imported.LabeledCount}");
+            Console.WriteLine($"Labels={imported.LabelsPath}");
+            Console.WriteLine($"Set={imported.SetPath}");
+            var evaluation = await auditService.EvaluateAsync(docsPath, CancellationToken.None);
+            Console.WriteLine($"EvalStatus={evaluation.Status}");
+            Console.WriteLine($"LabelsComplete={evaluation.LabelsComplete}");
+            if (evaluation.RecoveryOnly is not null)
+            {
+                Console.WriteLine(
+                    $"RecoveryOnlyPrecision={evaluation.RecoveryOnly.Precision}|FP={evaluation.RecoveryOnly.FalsePositives}|WrongStop={evaluation.RecoveryOnly.WrongStopIdChoices}");
+            }
+
+            if (evaluation.AllLabeledHybrid is not null)
+            {
+                Console.WriteLine(
+                    $"AllLabeledHybridPrecision={evaluation.AllLabeledHybrid.Precision}|FP={evaluation.AllLabeledHybrid.FalsePositives}|WrongStop={evaluation.AllLabeledHybrid.WrongStopIdChoices}");
+            }
+
+            foreach (var note in evaluation.Notes)
+            {
+                Console.WriteLine($"Note={note}");
+            }
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            Console.Error.WriteLine(exception.Message);
+            Environment.ExitCode = 1;
+        }
+
+        return;
+    }
+
+    if (isEvaluateRecoveryAudit)
+    {
+        var auditService = scope.ServiceProvider
+            .GetRequiredService<LocationMatchingRecoveryAuditService>();
+        var evaluation = await auditService.EvaluateAsync(docsPath, CancellationToken.None);
+        Console.WriteLine($"CaseCount={evaluation.CaseCount}");
+        Console.WriteLine($"LabeledCount={evaluation.LabeledCount}");
+        Console.WriteLine($"LabelsComplete={evaluation.LabelsComplete}");
+        Console.WriteLine($"Status={evaluation.Status}");
+        if (evaluation.RecoveryOnly is not null)
+        {
+            var slice = evaluation.RecoveryOnly;
+            Console.WriteLine(
+                $"RecoveryOnly=Cases={slice.CaseCount}|Accepted={slice.AcceptedMatches}|Correct={slice.CorrectAcceptedMatches}|Precision={slice.Precision}|FP={slice.FalsePositives}|FN={slice.FalseNegatives}|WrongStop={slice.WrongStopIdChoices}");
+        }
+
+        if (evaluation.WeakOverlapRecovery is not null)
+        {
+            var slice = evaluation.WeakOverlapRecovery;
+            Console.WriteLine(
+                $"WeakOverlap=Cases={slice.CaseCount}|Precision={slice.Precision}|FP={slice.FalsePositives}|WrongStop={slice.WrongStopIdChoices}");
+        }
+
+        if (evaluation.ByDistanceZone is not null)
+        {
+            foreach (var pair in evaluation.ByDistanceZone.OrderBy(item => item.Key, StringComparer.Ordinal))
+            {
+                Console.WriteLine(
+                    $"DistanceZone={pair.Key}|Cases={pair.Value.CaseCount}|Precision={pair.Value.Precision}|FP={pair.Value.FalsePositives}|WrongStop={pair.Value.WrongStopIdChoices}");
+            }
+        }
+
+        if (evaluation.ByGeocodeQuality is not null)
+        {
+            foreach (var pair in evaluation.ByGeocodeQuality.OrderBy(item => item.Key, StringComparer.Ordinal))
+            {
+                Console.WriteLine(
+                    $"Geocode={pair.Key}|Cases={pair.Value.CaseCount}|Precision={pair.Value.Precision}|FP={pair.Value.FalsePositives}|WrongStop={pair.Value.WrongStopIdChoices}");
+            }
+        }
+
+        if (evaluation.AllLabeledHybrid is not null)
+        {
+            var slice = evaluation.AllLabeledHybrid;
+            Console.WriteLine(
+                $"AllLabeledHybrid=Cases={slice.CaseCount}|Precision={slice.Precision}|FP={slice.FalsePositives}|WrongStop={slice.WrongStopIdChoices}");
+        }
+
+        foreach (var error in evaluation.Errors)
+        {
+            Console.WriteLine(
+                $"Error={error.PerformanceId}|{error.Stratum}|{error.Label}|{error.HybridDecision}|{error.Reason}");
+        }
+
+        foreach (var note in evaluation.Notes)
+        {
+            Console.WriteLine($"Note={note}");
+        }
+
         return;
     }
 

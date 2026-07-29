@@ -46,6 +46,7 @@ internal sealed class CalibrationSingleReviewerEvaluationService(
 
         var options = new AdaptiveLocationMatchingOptions();
         options.Validate();
+        var warnings = new List<string>();
         var broader = await broaderValidationPilotService.RunAsync(
             new BroaderValidationRequest(
                 TechnicianNames.Select(name => new BroaderValidationTechnicianRequest(name)).ToArray(),
@@ -59,6 +60,22 @@ internal sealed class CalibrationSingleReviewerEvaluationService(
                 item => item.Technician?.Name ?? item.Query,
                 item => item.DriverId!,
                 StringComparer.OrdinalIgnoreCase);
+        if (driverIds.Count == 0)
+        {
+            var cached = BroaderValidationCache.TryLoad(
+                BroaderValidationCache.DefaultPath(docsPath));
+            if (cached is not null)
+            {
+                foreach (var item in cached.Technicians.Where(tech =>
+                             tech.Processed && !string.IsNullOrWhiteSpace(tech.DriverId)))
+                {
+                    driverIds[item.Technician?.Name ?? item.Query] = item.DriverId!;
+                }
+
+                warnings.Add(
+                    "Live broader-validation leverde geen driverids; cached broader-validation-full-cache.json gebruikt.");
+            }
+        }
 
         var neededMonths = TechnicianNames
             .SelectMany(technician => Enumerable.Range(1, 7).Select(month => (technician, Year: 2026, Month: month)))
@@ -67,7 +84,6 @@ internal sealed class CalibrationSingleReviewerEvaluationService(
             .ThenBy(item => item.Month)
             .ToList();
 
-        var warnings = new List<string>();
         var liveByPerformance = new Dictionary<long, LiveCaseContext>();
         var learningObservations = new List<(
             NormalizedPilotPerformance Performance,
@@ -116,6 +132,12 @@ internal sealed class CalibrationSingleReviewerEvaluationService(
             }
         }
 
+        if (liveByPerformance.Count == 0)
+        {
+            warnings.Add(
+                "Geen live slices geladen (Plenion onbereikbaar); hybrid/adaptive gescoord via offline VisitCandidate-heuristiek.");
+        }
+
         var clusters = HistoricalLocationClusterLearner.Learn(
             learningObservations,
             options,
@@ -131,20 +153,24 @@ internal sealed class CalibrationSingleReviewerEvaluationService(
         var adaptive = EvaluateVariant(
             "adaptive",
             calibration,
-            item => PredictAdaptive(
-                item,
-                liveByPerformance,
-                options,
-                clustersByLocation,
-                enableLearning: false));
+            item => liveByPerformance.Count == 0
+                ? PredictOffline(item, options, recovery: false)
+                : PredictAdaptive(
+                    item,
+                    liveByPerformance,
+                    options,
+                    clustersByLocation,
+                    enableLearning: false));
         var hybrid = EvaluateVariant(
             "hybrid",
             calibration,
-            item => PredictHybrid(
-                item,
-                liveByPerformance,
-                options,
-                clustersByLocation));
+            item => liveByPerformance.Count == 0
+                ? PredictOffline(item, options, recovery: true)
+                : PredictHybrid(
+                    item,
+                    liveByPerformance,
+                    options,
+                    clustersByLocation));
 
         var variants = new[] { baseline, adaptive, hybrid };
         var gapAnalysis = BuildGapAnalysis(
@@ -231,9 +257,6 @@ internal sealed class CalibrationSingleReviewerEvaluationService(
     {
         var label = item.Label!;
         var confidence = item.ReviewerConfidence ?? "Medium";
-        var expected = string.IsNullOrWhiteSpace(item.ExpectedStopId)
-            ? null
-            : item.ExpectedStopId.Trim();
         var error = (CalibrationCaseError?)null;
         var correctAccepted = false;
         var falsePositive = false;
@@ -247,7 +270,11 @@ internal sealed class CalibrationSingleReviewerEvaluationService(
                 falseNegative = true;
                 error = Error(item, prediction, "FN: matcher onthield zich bij CorrectCandidate.");
             }
-            else if (StopMatches(expected, prediction.StopId, prediction.SourceStopIds))
+            else if (VisitLabelMatching.MatchesVisit(
+                         item.ExpectedStopId,
+                         item.ExpectedVisitStopIds,
+                         prediction.StopId,
+                         prediction.SourceStopIds))
             {
                 correctAccepted = true;
             }
@@ -258,7 +285,7 @@ internal sealed class CalibrationSingleReviewerEvaluationService(
                 error = Error(
                     item,
                     prediction,
-                    $"FP: verkeerde StopId (verwacht {expected ?? "null"}, kreeg {prediction.StopId ?? "null"}).");
+                    $"FP: verkeerde VisitCandidate (verwacht {FormatExpected(item)}, kreeg {prediction.StopId ?? "null"}).");
             }
         }
         else if (string.Equals(label, "NoValidCandidate", StringComparison.Ordinal) ||
@@ -326,6 +353,79 @@ internal sealed class CalibrationSingleReviewerEvaluationService(
             top?.StopId,
             top is null ? [] : [top.StopId],
             UsedRecovery: false);
+    }
+
+    private static Prediction PredictOffline(
+        LocationMatchingBenchmarkCase item,
+        AdaptiveLocationMatchingOptions options,
+        bool recovery)
+    {
+        var visits = OfflineVisitMerge.Merge(item.Candidates, options);
+        if (visits.Count == 0)
+        {
+            return new Prediction(false, "Unresolved", null, [], false);
+        }
+
+        var performanceMinutes = Math.Max(
+            1,
+            (int)Math.Round((item.End - item.Start).TotalMinutes, MidpointRounding.AwayFromZero));
+        var best = visits
+            .Select(visit =>
+            {
+                var overlap = OfflineVisitMerge.OverlapMinutes(
+                    item.Start,
+                    item.End,
+                    visit.Arrival,
+                    visit.Departure);
+                return (
+                    Visit: visit,
+                    Overlap: overlap,
+                    OverlapPercent: 100d * overlap / performanceMinutes,
+                    Distance: visit.DistanceMeters ?? double.MaxValue);
+            })
+            .OrderByDescending(entry => entry.Overlap)
+            .ThenBy(entry => entry.Distance)
+            .First();
+
+        // Never accept a visit that starts at/after performance end, even if a prior
+        // baseline status said Probable (280198-style false positives).
+        var temporallyValid =
+            best.Visit.Arrival < item.End &&
+            best.Visit.Departure > item.Start &&
+            best.Overlap > 0;
+        var spatiallyPlausible = best.Distance <= options.RecoveryMaximumDistanceMeters;
+        var adaptiveAccepted =
+            temporallyValid &&
+            spatiallyPlausible &&
+            item.ExistingMatchStatus is "ConfirmedLocationMatch" or "ProbableLocationMatch";
+        if (!recovery)
+        {
+            return adaptiveAccepted
+                ? new Prediction(true, "Probable", best.Visit.StopIds[0], best.Visit.StopIds, false)
+                : new Prediction(false, "Unresolved", null, [], false);
+        }
+
+        if (adaptiveAccepted)
+        {
+            return new Prediction(true, "Probable", best.Visit.StopIds[0], best.Visit.StopIds, false);
+        }
+
+        var shortChain = OfflineVisitMerge.MeetsShortChain(
+            item,
+            best.Visit,
+            best.Overlap,
+            options);
+        var overlapEnough =
+            best.Overlap >= options.RecoveryMinimumOverlapMinutes ||
+            best.OverlapPercent >= options.RecoveryMinimumOverlapPercent;
+        var canRecover =
+            temporallyValid &&
+            spatiallyPlausible &&
+            item.GeocodeQuality != GeocodeQualityClass.Unusable &&
+            (overlapEnough || shortChain);
+        return canRecover
+            ? new Prediction(true, "RecoveredProbable", best.Visit.StopIds[0], best.Visit.StopIds, true)
+            : new Prediction(false, "Unresolved", null, [], false);
     }
 
     private Prediction PredictAdaptive(
@@ -653,43 +753,101 @@ internal sealed class CalibrationSingleReviewerEvaluationService(
         var recoveryFar = 0;
         var recoveryWeakOverlap = 0;
 
+        var usedOffline = liveByPerformance.Count == 0;
+        if (usedOffline)
+        {
+            warnings.Add(
+                "Development-sanitycheck offline (Plenion onbereikbaar); VisitCandidate-heuristiek op opgeslagen kandidaten.");
+        }
+
         foreach (var item in development)
         {
-            if (!liveByPerformance.TryGetValue(item.PerformanceId, out var live))
+            bool usedRecovery;
+            string decision;
+            string? distanceZone;
+            int? overlapMinutes;
+            double? overlapPercent;
+            double? distanceMeters;
+
+            if (usedOffline)
             {
                 missingLive++;
-                unresolved++;
-                continue;
+                var offline = PredictOffline(item, options, recovery: true);
+                usedRecovery = offline.UsedRecovery;
+                decision = offline.Decision;
+                var offlineVisit = OfflineVisitMerge.Merge(item.Candidates, options)
+                    .Select(visit =>
+                    {
+                        var overlap = OfflineVisitMerge.OverlapMinutes(
+                            item.Start,
+                            item.End,
+                            visit.Arrival,
+                            visit.Departure);
+                        return (Visit: visit, Overlap: overlap, Distance: visit.DistanceMeters);
+                    })
+                    .OrderByDescending(entry => entry.Overlap)
+                    .ThenBy(entry => entry.Distance ?? double.MaxValue)
+                    .FirstOrDefault();
+                overlapMinutes = offlineVisit.Visit is null ? null : offlineVisit.Overlap;
+                distanceMeters = offlineVisit.Distance;
+                if (offlineVisit.Visit is null)
+                {
+                    overlapPercent = null;
+                    distanceZone = "Unknown";
+                }
+                else
+                {
+                    var performanceMinutes = Math.Max(
+                        1,
+                        (int)Math.Round((item.End - item.Start).TotalMinutes, MidpointRounding.AwayFromZero));
+                    overlapPercent = 100d * offlineVisit.Overlap / performanceMinutes;
+                    distanceZone = (offlineVisit.Distance ?? double.MaxValue) switch
+                    {
+                        <= 100 => "Strong0To100",
+                        <= 250 => "Probable101To250",
+                        <= 500 => "Learned251To500",
+                        < double.MaxValue => "Beyond500",
+                        _ => "Unknown",
+                    };
+                }
+            }
+            else
+            {
+                if (!liveByPerformance.TryGetValue(item.PerformanceId, out var live))
+                {
+                    missingLive++;
+                    unresolved++;
+                    continue;
+                }
+
+                var merged = MergedStopBuilder.Merge(live.DayStops, options, distanceCalculator);
+                var hybrid = PrecisionPreservingHybridMatcher.Match(
+                    live.Performance,
+                    live.TechnicianName,
+                    live.Resolution,
+                    merged,
+                    live.SameDayPerformances,
+                    clusters,
+                    options,
+                    distanceCalculator);
+                usedRecovery = hybrid.UsedRecovery;
+                decision = hybrid.Decision.ToString();
+                distanceZone = hybrid.Selected?.DistanceZone.ToString() ?? "Unknown";
+                overlapMinutes = hybrid.Selected is null
+                    ? null
+                    : (int)Math.Round((double)hybrid.Selected.OverlapMinutes, MidpointRounding.AwayFromZero);
+                overlapPercent = hybrid.Selected?.OverlapPercent;
+                distanceMeters = hybrid.Selected?.DistanceMeters;
             }
 
-            var merged = MergedStopBuilder.Merge(live.DayStops, options, distanceCalculator);
-            var adaptive = AdaptiveLocationMatcher.Match(
-                live.Performance,
-                live.TechnicianName,
-                live.Resolution,
-                merged,
-                live.SameDayPerformances,
-                clusters,
-                options,
-                distanceCalculator,
-                enableLearning: false);
-            var hybrid = PrecisionPreservingHybridMatcher.Match(
-                live.Performance,
-                live.TechnicianName,
-                live.Resolution,
-                merged,
-                live.SameDayPerformances,
-                clusters,
-                options,
-                distanceCalculator);
-
-            switch (hybrid.Decision)
+            switch (decision)
             {
-                case AdaptiveMatchDecision.Confirmed:
-                case AdaptiveMatchDecision.Probable:
+                case "Confirmed":
+                case "Probable":
+                case "RecoveredProbable":
                     accepted++;
                     break;
-                case AdaptiveMatchDecision.Ambiguous:
+                case "Ambiguous":
                     ambiguous++;
                     break;
                 default:
@@ -697,30 +855,28 @@ internal sealed class CalibrationSingleReviewerEvaluationService(
                     break;
             }
 
-            if (!hybrid.UsedRecovery)
+            if (!usedRecovery)
             {
                 continue;
             }
 
             recoveryOnly++;
-            var zone = hybrid.Selected?.DistanceZone.ToString() ?? "Unknown";
+            var zone = distanceZone ?? "Unknown";
             byDistance[zone] = byDistance.GetValueOrDefault(zone) + 1;
-            var overlapZone = ClassifyOverlapZone(hybrid.Selected);
+            var overlapZone = ClassifyOverlapZone(overlapMinutes, overlapPercent);
             byOverlap[overlapZone] = byOverlap.GetValueOrDefault(overlapZone) + 1;
-            if (hybrid.Selected?.DistanceMeters is > 200)
+            if (distanceMeters is > 200)
             {
                 recoveryFar++;
             }
 
-            if (hybrid.Selected is { OverlapMinutes: < 10, OverlapPercent: < 50 })
+            if (overlapMinutes is < 10 && overlapPercent is < 50)
             {
                 recoveryWeakOverlap++;
             }
-
-            _ = adaptive;
         }
 
-        if (missingLive > 0)
+        if (missingLive > 0 && !usedOffline)
         {
             warnings.Add($"Development sanity: {missingLive} cases zonder live context.");
         }
@@ -736,7 +892,7 @@ internal sealed class CalibrationSingleReviewerEvaluationService(
             risks.Add($"{recoveryWeakOverlap} recovery-matches met zwakke overlap (<10 min en <50%).");
         }
 
-        if (missingLive > 0)
+        if (missingLive > 0 && !usedOffline)
         {
             risks.Add($"{missingLive} developmentcases zonder live data (geteld als Unresolved).");
         }
@@ -759,25 +915,32 @@ internal sealed class CalibrationSingleReviewerEvaluationService(
         };
     }
 
-    private static string ClassifyOverlapZone(AdaptiveMatchCandidate? selected)
+    private static string ClassifyOverlapZone(int? overlapMinutes, double? overlapPercent)
     {
-        if (selected is null)
+        if (overlapMinutes is null || overlapPercent is null)
         {
             return "None";
         }
 
-        if (selected.OverlapPercent >= 50 || selected.OverlapMinutes >= 30)
+        if (overlapPercent >= 50 || overlapMinutes >= 30)
         {
             return "StrongOverlap";
         }
 
-        if (selected.OverlapPercent >= 30 || selected.OverlapMinutes >= 4)
+        if (overlapPercent >= 30 || overlapMinutes >= 4)
         {
             return "ModerateOverlap";
         }
 
         return "WeakOverlap";
     }
+
+    private static string ClassifyOverlapZone(AdaptiveMatchCandidate? selected) =>
+        selected is null
+            ? ClassifyOverlapZone(null, null)
+            : ClassifyOverlapZone(
+                (int)Math.Round((double)selected.OverlapMinutes, MidpointRounding.AwayFromZero),
+                selected.OverlapPercent);
 
     private async Task<List<LiveCaseContext>> LoadSliceAsync(
         string technicianName,
@@ -870,9 +1033,10 @@ internal sealed class CalibrationSingleReviewerEvaluationService(
         return best.Errors
             .GroupBy(item =>
             {
-                if (item.Reason.StartsWith("FP: verkeerde StopId", StringComparison.Ordinal))
+                if (item.Reason.StartsWith("FP: verkeerde VisitCandidate", StringComparison.Ordinal) ||
+                    item.Reason.StartsWith("FP: verkeerde StopId", StringComparison.Ordinal))
                 {
-                    return "Verkeerde StopId bij CorrectCandidate";
+                    return "Verkeerde VisitCandidate bij CorrectCandidate";
                 }
 
                 if (item.Reason.StartsWith("FP: matcher accepteerde", StringComparison.Ordinal))
@@ -907,22 +1071,12 @@ internal sealed class CalibrationSingleReviewerEvaluationService(
         return "Breid labeling uit voorbij de 30-case kalibratie zodra precision stabiel blijft.";
     }
 
-    private static bool StopMatches(
-        string? expectedStopId,
-        string? predictedStopId,
-        IReadOnlyList<string> sourceStopIds)
+    private static string FormatExpected(LocationMatchingBenchmarkCase item)
     {
-        if (string.IsNullOrWhiteSpace(expectedStopId))
-        {
-            return false;
-        }
-
-        if (string.Equals(expectedStopId, predictedStopId, StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        return sourceStopIds.Any(id => string.Equals(id, expectedStopId, StringComparison.Ordinal));
+        var ids = VisitLabelMatching.ResolveExpectedStopIds(
+            item.ExpectedStopId,
+            item.ExpectedVisitStopIds);
+        return ids.Count == 0 ? "null" : string.Join(',', ids);
     }
 
     private static CalibrationCaseError Error(

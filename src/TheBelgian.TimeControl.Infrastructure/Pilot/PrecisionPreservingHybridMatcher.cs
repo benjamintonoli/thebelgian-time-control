@@ -6,9 +6,9 @@ using TheBelgian.TimeControl.Core.Models;
 namespace TheBelgian.TimeControl.Infrastructure.Pilot;
 
 /// <summary>
-/// Keeps adaptive as the precision-safe base and recovers only strong Unresolved
-/// candidates that have positive overlap and clear location evidence.
-/// Explicitly rejects stops that start after the performance ends (e.g. 280198).
+/// Keeps adaptive as the precision-safe base and recovers only strong Unresolved/Ambiguous
+/// candidates that have sufficient overlap (or a short same-LACLEUNIK chain exception).
+/// Explicitly rejects visits that start after the performance ends.
 /// </summary>
 internal static class PrecisionPreservingHybridMatcher
 {
@@ -40,7 +40,8 @@ internal static class PrecisionPreservingHybridMatcher
             return adaptive;
         }
 
-        if (adaptive.Decision != AdaptiveMatchDecision.Unresolved ||
+        if (adaptive.Decision is not (AdaptiveMatchDecision.Unresolved
+                or AdaptiveMatchDecision.Ambiguous) ||
             adaptive.Candidates.Count == 0)
         {
             return adaptive;
@@ -82,7 +83,7 @@ internal static class PrecisionPreservingHybridMatcher
         selected = candidates[0];
         reason = string.Empty;
 
-        // Stops that begin only after the performance ends must never be recovered.
+        // Visits that begin only after the performance ends must never be recovered.
         if (selected.Stop.Arrival >= performance.EndDateTime)
         {
             return false;
@@ -98,46 +99,117 @@ internal static class PrecisionPreservingHybridMatcher
             return false;
         }
 
+        var shortChain = MeetsShortChainException(
+            performance,
+            selected,
+            sameDayPerformances,
+            options);
         var overlapEnough =
             selected.OverlapMinutes >= options.RecoveryMinimumOverlapMinutes ||
             selected.OverlapPercent >= options.RecoveryMinimumOverlapPercent;
-        if (!overlapEnough)
+        if (!overlapEnough && !shortChain)
         {
             return false;
         }
 
-        if (!HasLocationEvidence(selected, geocodeQuality, options))
+        if (!HasLocationEvidence(selected, geocodeQuality, options, shortChain))
         {
             return false;
         }
 
-        if (candidates.Count > 1)
-        {
-            var margin = selected.TotalScore - candidates[1].TotalScore;
-            if (margin < options.RecoveryMinimumScoreMargin)
-            {
-                return false;
-            }
-        }
-
-        if (BelongsMoreToNeighbor(performance, selected, sameDayPerformances))
+        if (!shortChain &&
+            candidates.Count > 1 &&
+            selected.TotalScore - candidates[1].TotalScore < options.RecoveryMinimumScoreMargin)
         {
             return false;
         }
 
-        reason = string.Create(
-            CultureInfo.InvariantCulture,
-            $"Recovery: positive overlap {selected.OverlapMinutes} min ({selected.OverlapPercent:0.#}%), " +
-            $"distance {selected.DistanceMeters?.ToString("0.#", CultureInfo.InvariantCulture) ?? "n/a"} m " +
-            $"({selected.DistanceZone}), geocode {geocodeQuality}, " +
-            $"no comparable competitor, not owned by neighbor.");
+        if (BelongsMoreToNeighbor(performance, selected, sameDayPerformances, options))
+        {
+            return false;
+        }
+
+        reason = shortChain
+            ? string.Create(
+                CultureInfo.InvariantCulture,
+                $"Recovery(short-chain): overlap {selected.OverlapMinutes} min ({selected.OverlapPercent:0.#}%), " +
+                $"distance {selected.DistanceMeters?.ToString("0.#", CultureInfo.InvariantCulture) ?? "n/a"} m " +
+                $"({selected.DistanceZone}), same LACLEUNIK visit chain.")
+            : string.Create(
+                CultureInfo.InvariantCulture,
+                $"Recovery: positive overlap {selected.OverlapMinutes} min ({selected.OverlapPercent:0.#}%), " +
+                $"distance {selected.DistanceMeters?.ToString("0.#", CultureInfo.InvariantCulture) ?? "n/a"} m " +
+                $"({selected.DistanceZone}), geocode {geocodeQuality}, " +
+                $"no comparable competitor, not owned by neighbor.");
         return true;
+    }
+
+    private static bool MeetsShortChainException(
+        NormalizedPilotPerformance performance,
+        AdaptiveMatchCandidate selected,
+        IReadOnlyList<NormalizedPilotPerformance> sameDayPerformances,
+        AdaptiveLocationMatchingOptions options)
+    {
+        var lac = performance.DeliveryAddressExternalId;
+        if (string.IsNullOrWhiteSpace(lac))
+        {
+            return false;
+        }
+
+        var adjacent = sameDayPerformances
+            .Where(item =>
+                item.ExternalId != performance.ExternalId &&
+                string.Equals(
+                    item.DeliveryAddressExternalId,
+                    lac,
+                    StringComparison.OrdinalIgnoreCase))
+            .Where(item =>
+                OverlapMinutes(
+                    item.StartDateTime,
+                    item.EndDateTime,
+                    selected.Stop.Arrival,
+                    selected.Stop.Departure) >= options.RecoveryShortChainMinOverlapMinutes)
+            .OrderBy(item => item.StartDateTime)
+            .ToArray();
+        if (adjacent.Length == 0)
+        {
+            return false;
+        }
+
+        if (selected.OverlapMinutes < options.RecoveryShortChainMinOverlapMinutes)
+        {
+            return false;
+        }
+
+        // Pick the temporally closest adjacent performance with same LACLEUNIK.
+        var neighbor = adjacent
+            .OrderBy(item =>
+                Math.Min(
+                    Math.Abs((item.StartDateTime - performance.EndDateTime).TotalMinutes),
+                    Math.Abs((item.EndDateTime - performance.StartDateTime).TotalMinutes)))
+            .First();
+
+        var chainStart = performance.StartDateTime < neighbor.StartDateTime
+            ? performance.StartDateTime
+            : neighbor.StartDateTime;
+        var chainEnd = performance.EndDateTime > neighbor.EndDateTime
+            ? performance.EndDateTime
+            : neighbor.EndDateTime;
+        var chainMinutes = Math.Max(1, (chainEnd - chainStart).TotalMinutes);
+        var chainOverlap = OverlapMinutes(
+            chainStart,
+            chainEnd,
+            selected.Stop.Arrival,
+            selected.Stop.Departure);
+        var chainPercent = 100d * chainOverlap / chainMinutes;
+        return chainPercent >= options.RecoveryShortChainMinCombinedOverlapPercent;
     }
 
     private static bool HasLocationEvidence(
         AdaptiveMatchCandidate candidate,
         GeocodeQualityClass geocodeQuality,
-        AdaptiveLocationMatchingOptions options)
+        AdaptiveLocationMatchingOptions options,
+        bool shortChain)
     {
         if (candidate.DistanceMeters is null ||
             candidate.DistanceMeters > options.RecoveryMaximumDistanceMeters)
@@ -152,9 +224,9 @@ internal static class PrecisionPreservingHybridMatcher
 
         var strongOverlap =
             candidate.OverlapMinutes >= options.RecoveryStrongOverlapMinutes ||
-            candidate.OverlapPercent >= options.RecoveryStrongOverlapPercent;
+            candidate.OverlapPercent >= options.RecoveryStrongOverlapPercent ||
+            shortChain;
 
-        // LowConfidence needs strong temporal support plus in-range distance.
         if (geocodeQuality == GeocodeQualityClass.LowConfidence)
         {
             return strongOverlap &&
@@ -174,11 +246,9 @@ internal static class PrecisionPreservingHybridMatcher
 
         if (strongOverlap)
         {
-            // StreetOnly/Partial allowed with strong temporal support.
             return true;
         }
 
-        // Weaker overlap in the probable band needs PartialAddress or better (279971).
         return geocodeQuality is GeocodeQualityClass.PreciseBuilding
             or GeocodeQualityClass.PreciseAmenity
             or GeocodeQualityClass.PartialAddress;
@@ -187,10 +257,10 @@ internal static class PrecisionPreservingHybridMatcher
     private static bool BelongsMoreToNeighbor(
         NormalizedPilotPerformance performance,
         AdaptiveMatchCandidate candidate,
-        IReadOnlyList<NormalizedPilotPerformance> sameDayPerformances)
+        IReadOnlyList<NormalizedPilotPerformance> sameDayPerformances,
+        AdaptiveLocationMatchingOptions options)
     {
-        // Spanning stops may continue into the next performance (280344). Reject only when
-        // the stop clearly opens inside another performance without tight alignment to current.
+        var lac = performance.DeliveryAddressExternalId;
         var arrivalAlignmentToCurrent = Math.Abs(
             (candidate.Stop.Arrival - performance.StartDateTime).TotalMinutes);
 
@@ -201,28 +271,52 @@ internal static class PrecisionPreservingHybridMatcher
                 continue;
             }
 
-            var arrivesInsideNeighbor =
-                candidate.Stop.Arrival >= neighbor.StartDateTime &&
-                candidate.Stop.Arrival < neighbor.EndDateTime;
-            if (!arrivesInsideNeighbor)
+            var sameLac = !string.IsNullOrWhiteSpace(lac) &&
+                          string.Equals(
+                              neighbor.DeliveryAddressExternalId,
+                              lac,
+                              StringComparison.OrdinalIgnoreCase);
+            var neighborOverlap = OverlapMinutes(
+                neighbor.StartDateTime,
+                neighbor.EndDateTime,
+                candidate.Stop.Arrival,
+                candidate.Stop.Departure);
+
+            // Same LACLEUNIK chain: shared visit is allowed (handled by short-chain recovery).
+            if (sameLac)
             {
                 continue;
             }
 
-            if (arrivalAlignmentToCurrent <= 30)
+            // Different location: reject small boundary leakage onto the neighbor's visit.
+            if (candidate.Stop.Arrival >= performance.EndDateTime)
             {
-                var neighborOverlap = OverlapMinutes(
-                    neighbor.StartDateTime,
-                    neighbor.EndDateTime,
-                    candidate.Stop.Arrival,
-                    candidate.Stop.Departure);
-                if (neighborOverlap <= candidate.OverlapMinutes)
-                {
-                    continue;
-                }
+                return true;
             }
 
-            return true;
+            var arrivesInsideNeighbor =
+                candidate.Stop.Arrival >= neighbor.StartDateTime &&
+                candidate.Stop.Arrival < neighbor.EndDateTime;
+            if (arrivesInsideNeighbor &&
+                neighborOverlap > candidate.OverlapMinutes)
+            {
+                return true;
+            }
+
+            if (arrivesInsideNeighbor &&
+                arrivalAlignmentToCurrent > options.MaximumArrivalDifferenceMinutes &&
+                neighborOverlap >= options.RecoveryShortChainMinOverlapMinutes)
+            {
+                return true;
+            }
+
+            // Tiny current overlap while neighbor owns the visit.
+            if (candidate.OverlapMinutes < options.RecoveryMinimumOverlapMinutes &&
+                neighborOverlap > candidate.OverlapMinutes &&
+                neighborOverlap >= options.RecoveryShortChainMinOverlapMinutes)
+            {
+                return true;
+            }
         }
 
         return false;
