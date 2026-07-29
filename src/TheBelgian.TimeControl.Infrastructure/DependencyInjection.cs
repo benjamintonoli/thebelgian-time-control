@@ -61,6 +61,21 @@ public static class DependencyInjection
                 }
             }, "Locatieafstandsgrenzen moeten positief en oplopend zijn.")
             .ValidateOnStart();
+        services.AddOptions<AdaptiveLocationMatchingOptions>()
+            .Bind(configuration.GetSection(AdaptiveLocationMatchingOptions.SectionName))
+            .Validate(options =>
+            {
+                try
+                {
+                    options.Validate();
+                    return true;
+                }
+                catch (InvalidOperationException)
+                {
+                    return false;
+                }
+            }, "Adaptieve locatieparameters moeten geldig zijn.")
+            .ValidateOnStart();
         var sqliteConnection = configuration.GetConnectionString("TimeControl")
             ?? "Data Source=data/time-control.db";
         services.AddDbContextFactory<TimeControlDbContext>(options =>

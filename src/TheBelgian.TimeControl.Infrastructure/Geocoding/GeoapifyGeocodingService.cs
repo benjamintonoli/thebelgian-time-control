@@ -147,15 +147,40 @@ internal sealed class GeoapifyGeocodingService(
                          Number(rank, "confidence", out var parsedConfidence)
             ? Math.Clamp(parsedConfidence, 0, 1)
             : 0;
-        var matchType = result.TryGetProperty("rank", out rank)
-            ? String(rank, "match_type")
-            : null;
+        double? building = null;
+        double? street = null;
+        double? city = null;
+        string? matchType = null;
+        if (result.TryGetProperty("rank", out rank))
+        {
+            if (Number(rank, "confidence_building_level", out var buildingLevel))
+            {
+                building = Math.Clamp(buildingLevel, 0, 1);
+            }
+
+            if (Number(rank, "confidence_street_level", out var streetLevel))
+            {
+                street = Math.Clamp(streetLevel, 0, 1);
+            }
+
+            if (Number(rank, "confidence_city_level", out var cityLevel))
+            {
+                city = Math.Clamp(cityLevel, 0, 1);
+            }
+
+            matchType = String(rank, "match_type");
+        }
+
         var candidate = new GeocodingCandidate(
             new GeoCoordinate(latitude, longitude),
             String(result, "formatted"),
             confidence.ToString("0.###", CultureInfo.InvariantCulture),
             String(result, "result_type"),
-            string.IsNullOrWhiteSpace(matchType) ? [] : [matchType]);
+            string.IsNullOrWhiteSpace(matchType) ? [] : [matchType],
+            building,
+            street,
+            city,
+            matchType);
         return new RankedCandidate(candidate, confidence);
     }
 

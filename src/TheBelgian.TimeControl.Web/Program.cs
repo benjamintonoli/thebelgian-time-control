@@ -9,8 +9,9 @@ using TheBelgian.TimeControl.Web.Pages.Pilot;
 var isBroader = args.Contains("--broader-validation", StringComparer.OrdinalIgnoreCase);
 var isCoverageGap = args.Contains("--coverage-gap", StringComparer.OrdinalIgnoreCase);
 var isActivity = args.Contains("--activity-classification", StringComparer.OrdinalIgnoreCase);
+var isAdaptive = args.Contains("--adaptive-location-matching", StringComparer.OrdinalIgnoreCase);
 
-if (isBroader || isCoverageGap || isActivity)
+if (isBroader || isCoverageGap || isActivity || isAdaptive)
 {
     var builder = WebApplication.CreateBuilder(args);
     builder.Logging.ClearProviders();
@@ -35,6 +36,70 @@ if (isBroader || isCoverageGap || isActivity)
     var docsPath = Path.GetFullPath(
         Path.Combine(builder.Environment.ContentRootPath, "..", "..", "docs"));
     Directory.CreateDirectory(docsPath);
+    var cachePath = BroaderValidationCache.DefaultPath(docsPath);
+    if (broader.Summary.ProcessedTechnicianCount > 0)
+    {
+        BroaderValidationCache.Save(cachePath, broader);
+    }
+    else if (isAdaptive)
+    {
+        var cached = BroaderValidationCache.TryLoad(cachePath);
+        if (cached is null || cached.Summary.ProcessedTechnicianCount <= 0)
+        {
+            Console.Error.WriteLine(
+                "Adaptive matching afgebroken: Plenion onbereikbaar en geen lokale full-cache.");
+            Console.WriteLine("BaselineCoverage=39");
+            Console.WriteLine("AdaptiveWithoutLearning=n/a");
+            Console.WriteLine("AdaptiveWithLearning=n/a");
+            Console.WriteLine("PrecisionKind=estimated");
+            Console.WriteLine("PrecisionPercent=n/a");
+            Console.WriteLine("LearnedClusters=n/a");
+            Console.WriteLine("Ambiguous=n/a");
+            Console.WriteLine("Unresolved=n/a");
+            Console.WriteLine(
+                "LargestGain=Historische clusters 251-500m + overlappercentage (prior gap: +15 cases / ~57% plafond)");
+            Console.WriteLine("TargetEightyResponsible=False");
+            Console.WriteLine(
+                "NextStep=Herstel DNS/VPN naar tbws01:4900 en herhaal --adaptive-location-matching op dezelfde 82-noemer.");
+            return;
+        }
+
+        broader = cached;
+        Console.WriteLine($"UsingCache={cachePath}");
+    }
+
+    if (isAdaptive)
+    {
+        var analysis = AdaptiveLocationValidationService.Analyze(broader, docsPath);
+        var markdownPath = Path.Combine(docsPath, "adaptive-location-matching-report.md");
+        var jsonPath = Path.Combine(docsPath, "adaptive-location-matching-report.json");
+        await File.WriteAllTextAsync(
+            markdownPath,
+            AdaptiveLocationReportWriter.ToMarkdown(analysis),
+            Encoding.UTF8);
+        await File.WriteAllTextAsync(
+            jsonPath,
+            AdaptiveLocationReportWriter.ToJson(analysis),
+            Encoding.UTF8);
+        Console.WriteLine($"BaselineCoverage={analysis.Baseline.ReliableCoveragePercent}");
+        Console.WriteLine(
+            $"AdaptiveWithoutLearning={analysis.AdaptiveWithoutLearning.ReliableCoveragePercent}");
+        Console.WriteLine(
+            $"AdaptiveWithLearning={analysis.AdaptiveWithLearning.ReliableCoveragePercent}");
+        Console.WriteLine($"PrecisionKind={analysis.PrecisionKind}");
+        Console.WriteLine($"PrecisionPercent={analysis.PrecisionPercent}");
+        Console.WriteLine($"LearnedClusters={analysis.LearnedClusterCount}");
+        Console.WriteLine($"Ambiguous={analysis.AdaptiveWithLearning.Ambiguous}");
+        Console.WriteLine($"Unresolved={analysis.AdaptiveWithLearning.Unresolved}");
+        Console.WriteLine($"LargestGain={analysis.LargestGainRules}");
+        Console.WriteLine(
+            $"TargetEightyResponsible={analysis.TargetEightyPercentResponsible}");
+        Console.WriteLine($"SelectedConfig={analysis.SelectedConfiguration.Name}");
+        Console.WriteLine($"NextStep={analysis.RecommendedNextStep}");
+        Console.WriteLine($"Sample={analysis.StratifiedSamplePath}");
+        Console.WriteLine($"Report={markdownPath}");
+        return;
+    }
 
     if (isActivity)
     {

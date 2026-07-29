@@ -139,7 +139,11 @@ public sealed record GeocodingCandidate(
     string? FormattedAddress,
     string? Confidence,
     string? EntityType,
-    IReadOnlyList<string> MatchCodes);
+    IReadOnlyList<string> MatchCodes,
+    double? ConfidenceBuildingLevel = null,
+    double? ConfidenceStreetLevel = null,
+    double? ConfidenceCityLevel = null,
+    string? MatchType = null);
 
 public sealed record GeocodingResult(
     GeocodingStatus Status,
