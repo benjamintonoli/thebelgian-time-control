@@ -20,6 +20,7 @@ internal sealed class PilotPlenionReader(
         ReadOnlyPilotRequest request,
         CancellationToken cancellationToken)
     {
+        OfflineOnlyGuard.EnsureLiveAccessAllowed("PlenionODBC");
         ValidateConfiguration();
         await using var connection = new OdbcConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);

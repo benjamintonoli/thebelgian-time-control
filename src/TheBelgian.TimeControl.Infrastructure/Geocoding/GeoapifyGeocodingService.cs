@@ -27,6 +27,7 @@ internal sealed class GeoapifyGeocodingService(
         string address,
         CancellationToken cancellationToken)
     {
+        TheBelgian.TimeControl.Infrastructure.Pilot.OfflineOnlyGuard.EnsureLiveAccessAllowed("GeoapifyHTTP");
         if (!IsConfigured)
         {
             return new GeocodingResult(

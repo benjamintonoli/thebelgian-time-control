@@ -25,6 +25,7 @@ internal sealed class PilotPowerfleetReader(
         ReadOnlyPilotRequest pilotRequest,
         CancellationToken cancellationToken)
     {
+        OfflineOnlyGuard.EnsureLiveAccessAllowed("PowerfleetHTTP");
         ValidateConfiguration();
         var maximumTrips = ResolveMaximumTrips(pilotRequest.MaximumTrips);
         var maximumResponseBytes = ResolveMaximumResponseBytes(pilotRequest.MaximumTrips);

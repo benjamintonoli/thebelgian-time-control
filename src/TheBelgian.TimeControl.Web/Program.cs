@@ -6,6 +6,56 @@ using TheBelgian.TimeControl.Infrastructure;
 using TheBelgian.TimeControl.Infrastructure.Pilot;
 using TheBelgian.TimeControl.Web.Pages.Pilot;
 
+var isVerifyFrozenMatcher = args.Contains(
+    "--verify-frozen-matcher",
+    StringComparer.OrdinalIgnoreCase);
+if (isVerifyFrozenMatcher)
+{
+    // Offline-only path: no DI, no Plenion/Powerfleet/Geoapify initialization.
+    var contentRoot = Directory.GetCurrentDirectory();
+    var webProjectHint = Path.Combine(contentRoot, "src", "TheBelgian.TimeControl.Web");
+    var docsPath = Directory.Exists(webProjectHint)
+        ? Path.GetFullPath(Path.Combine(contentRoot, "docs"))
+        : Path.GetFullPath(Path.Combine(contentRoot, "..", "..", "docs"));
+    Directory.CreateDirectory(docsPath);
+    Console.WriteLine("FrozenMatcherMode=offline-local-only");
+    Console.WriteLine("ExternalProviders=disabled");
+    Console.WriteLine($"DocsPath={docsPath}");
+    var verification = FrozenMatcherVerificationService.Verify(docsPath);
+    Console.WriteLine($"GitCommit={verification.GitCommit}");
+    Console.WriteLine($"ConfigurationHashSha256={verification.ConfigurationHashSha256}");
+    Console.WriteLine($"Manifest={verification.ManifestPath}");
+    Console.WriteLine($"Report={verification.ReportPath}");
+    Console.WriteLine($"Passed={verification.Passed}");
+    Console.WriteLine($"ExitCode={verification.ExitCode}");
+    Console.WriteLine($"ExternalDataAccessed={verification.ExternalDataAccessed}");
+    Console.WriteLine($"HoldoutOpened={verification.HoldoutOpened}");
+    Console.WriteLine(
+        $"Calibration=Cases={verification.Calibration.CaseCount}|Precision={verification.Calibration.Precision}|Coverage={verification.Calibration.Coverage}|FP={verification.Calibration.FalsePositives}|FN={verification.Calibration.FalseNegatives}|WrongVisit={verification.Calibration.WrongVisitCandidateChoices}");
+    Console.WriteLine(
+        $"RecoveryOnly=Cases={verification.RecoveryOnly.CaseCount}|Precision={verification.RecoveryOnly.Precision}|FP={verification.RecoveryOnly.FalsePositives}|FN={verification.RecoveryOnly.FalseNegatives}|WrongVisit={verification.RecoveryOnly.WrongVisitCandidateChoices}");
+    Console.WriteLine(
+        $"AllLabeledHybrid=Cases={verification.AllLabeledHybrid.CaseCount}|Precision={verification.AllLabeledHybrid.Precision}|FP={verification.AllLabeledHybrid.FalsePositives}|FN={verification.AllLabeledHybrid.FalseNegatives}|WrongVisit={verification.AllLabeledHybrid.WrongVisitCandidateChoices}");
+    foreach (var check in verification.RegressionChecks)
+    {
+        Console.WriteLine(
+            $"Regression={check.PerformanceId}|Expect={check.Expectation}|Passed={check.Passed}|Observed={check.Observed}");
+    }
+
+    foreach (var note in verification.Notes)
+    {
+        Console.WriteLine($"Note={note}");
+    }
+
+    foreach (var failure in verification.Failures)
+    {
+        Console.Error.WriteLine($"Failure={failure}");
+    }
+
+    Environment.ExitCode = verification.ExitCode;
+    return;
+}
+
 var isBroader = args.Contains("--broader-validation", StringComparer.OrdinalIgnoreCase);
 var isCoverageGap = args.Contains("--coverage-gap", StringComparer.OrdinalIgnoreCase);
 var isActivity = args.Contains("--activity-classification", StringComparer.OrdinalIgnoreCase);

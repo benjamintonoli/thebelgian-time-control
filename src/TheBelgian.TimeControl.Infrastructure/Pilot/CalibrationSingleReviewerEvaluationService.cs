@@ -360,72 +360,13 @@ internal sealed class CalibrationSingleReviewerEvaluationService(
         AdaptiveLocationMatchingOptions options,
         bool recovery)
     {
-        var visits = OfflineVisitMerge.Merge(item.Candidates, options);
-        if (visits.Count == 0)
-        {
-            return new Prediction(false, "Unresolved", null, [], false);
-        }
-
-        var performanceMinutes = Math.Max(
-            1,
-            (int)Math.Round((item.End - item.Start).TotalMinutes, MidpointRounding.AwayFromZero));
-        var best = visits
-            .Select(visit =>
-            {
-                var overlap = OfflineVisitMerge.OverlapMinutes(
-                    item.Start,
-                    item.End,
-                    visit.Arrival,
-                    visit.Departure);
-                return (
-                    Visit: visit,
-                    Overlap: overlap,
-                    OverlapPercent: 100d * overlap / performanceMinutes,
-                    Distance: visit.DistanceMeters ?? double.MaxValue);
-            })
-            .OrderByDescending(entry => entry.Overlap)
-            .ThenBy(entry => entry.Distance)
-            .First();
-
-        // Never accept a visit that starts at/after performance end, even if a prior
-        // baseline status said Probable (280198-style false positives).
-        var temporallyValid =
-            best.Visit.Arrival < item.End &&
-            best.Visit.Departure > item.Start &&
-            best.Overlap > 0;
-        var spatiallyPlausible = best.Distance <= options.RecoveryMaximumDistanceMeters;
-        var adaptiveAccepted =
-            temporallyValid &&
-            spatiallyPlausible &&
-            item.ExistingMatchStatus is "ConfirmedLocationMatch" or "ProbableLocationMatch";
-        if (!recovery)
-        {
-            return adaptiveAccepted
-                ? new Prediction(true, "Probable", best.Visit.StopIds[0], best.Visit.StopIds, false)
-                : new Prediction(false, "Unresolved", null, [], false);
-        }
-
-        if (adaptiveAccepted)
-        {
-            return new Prediction(true, "Probable", best.Visit.StopIds[0], best.Visit.StopIds, false);
-        }
-
-        var shortChain = OfflineVisitMerge.MeetsShortChain(
-            item,
-            best.Visit,
-            best.Overlap,
-            options);
-        var overlapEnough =
-            best.Overlap >= options.RecoveryMinimumOverlapMinutes ||
-            best.OverlapPercent >= options.RecoveryMinimumOverlapPercent;
-        var canRecover =
-            temporallyValid &&
-            spatiallyPlausible &&
-            item.GeocodeQuality != GeocodeQualityClass.Unusable &&
-            (overlapEnough || shortChain);
-        return canRecover
-            ? new Prediction(true, "RecoveredProbable", best.Visit.StopIds[0], best.Visit.StopIds, true)
-            : new Prediction(false, "Unresolved", null, [], false);
+        var offline = OfflineHybridPredictor.Predict(item, options, recovery);
+        return new Prediction(
+            offline.Accepted,
+            offline.Decision,
+            offline.StopId,
+            offline.SourceStopIds,
+            offline.UsedRecovery);
     }
 
     private Prediction PredictAdaptive(
