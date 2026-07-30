@@ -6,6 +6,53 @@ using TheBelgian.TimeControl.Infrastructure;
 using TheBelgian.TimeControl.Infrastructure.Pilot;
 using TheBelgian.TimeControl.Web.Pages.Pilot;
 
+var isEvaluateLockedHoldout = args.Contains(
+    "--evaluate-locked-holdout",
+    StringComparer.OrdinalIgnoreCase);
+if (isEvaluateLockedHoldout)
+{
+    // Offline-only path: no DI, no Plenion/Powerfleet/Geoapify initialization.
+    var contentRoot = Directory.GetCurrentDirectory();
+    var webProjectHint = Path.Combine(contentRoot, "src", "TheBelgian.TimeControl.Web");
+    var docsPath = Directory.Exists(webProjectHint)
+        ? Path.GetFullPath(Path.Combine(contentRoot, "docs"))
+        : Path.GetFullPath(Path.Combine(contentRoot, "..", "..", "docs"));
+    Directory.CreateDirectory(docsPath);
+    Console.WriteLine("LockedHoldoutMode=offline-local-only");
+    Console.WriteLine("ExternalProviders=disabled");
+    Console.WriteLine($"DocsPath={docsPath}");
+    var holdoutEvaluation = LockedHoldoutEvaluationService.Evaluate(docsPath);
+    Console.WriteLine($"Completed={holdoutEvaluation.Completed}");
+    Console.WriteLine($"Decision={holdoutEvaluation.Decision}");
+    Console.WriteLine($"ExitCode={holdoutEvaluation.ExitCode}");
+    Console.WriteLine($"FinalJson={holdoutEvaluation.FinalJsonPath}");
+    Console.WriteLine($"FinalMarkdown={holdoutEvaluation.FinalMarkdownPath}");
+    Console.WriteLine($"StartedMarker={holdoutEvaluation.StartedMarkerPath}");
+    if (holdoutEvaluation.Report is not null)
+    {
+        var report = holdoutEvaluation.Report;
+        Console.WriteLine($"HoldoutOpened={report.HoldoutOpened}");
+        Console.WriteLine($"ExternalDataAccessed={report.ExternalDataAccessed}");
+        Console.WriteLine($"GitCommit={report.GitCommit}");
+        Console.WriteLine($"ConfigurationHashSha256={report.ConfigurationHashSha256}");
+        Console.WriteLine($"HoldoutContentSha256={report.HoldoutContentSha256}");
+        Console.WriteLine(
+            $"Metrics=Cases={report.CaseCount}|Accepted={report.AcceptedMatches}|CorrectAccepted={report.CorrectAcceptedMatches}|Precision={report.Precision}|Coverage={report.Coverage}|FP={report.FalsePositives}|FN={report.FalseNegatives}|WrongVisit={report.WrongVisitCandidateChoices}|Abstentions={report.Abstentions}");
+        foreach (var pair in report.ErrorCategories.OrderBy(item => item.Key, StringComparer.Ordinal))
+        {
+            Console.WriteLine($"ErrorCategory={pair.Key}:{pair.Value}");
+        }
+    }
+
+    foreach (var message in holdoutEvaluation.Messages)
+    {
+        Console.WriteLine($"Message={message}");
+    }
+
+    Environment.ExitCode = holdoutEvaluation.ExitCode;
+    return;
+}
+
 var isVerifyFrozenMatcher = args.Contains(
     "--verify-frozen-matcher",
     StringComparer.OrdinalIgnoreCase);

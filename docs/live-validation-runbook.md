@@ -101,11 +101,16 @@ Commit daarna alleen codewijzigingen; manifest/rapport blijven gitignored.
 
 ## 8. Locked holdout exact één keer evalueren
 
-Er is momenteel geen CLI-flag voor holdout-evaluatie. Doe holdout pas na stap 7:
+Alleen na groene live validatie én frozen verification. Offline, één keer:
 
-1. Bevestig dat `docs/location-matching-holdout-manifest.json` locked is.
-2. Voer een goedgekeurde one-shot holdout-evaluatie uit (aparte procedure/PR);
-   gebruik holdoutresultaten niet om drempels te tunen.
-3. Bewaar het holdoutrapport en markeer de holdout opnieuw als geconsumeerd.
+```powershell
+$env:ASPNETCORE_ENVIRONMENT = "Development"
+dotnet run --project src/TheBelgian.TimeControl.Web -c Release --no-build --no-launch-profile -- --evaluate-locked-holdout
+```
 
-Tot die one-shot bestaat: holdout gesloten laten.
+- Weigert wanneer `docs/location-matching-holdout-final.json` of
+  `docs/location-matching-holdout-started.json` al bestaat.
+- Schrijft `docs/location-matching-holdout-final.json` en
+  `docs/location-matching-holdout-final.md`.
+- Gebruikt geen live Plenion/Powerfleet/Geoapify.
+- Holdoutresultaten niet gebruiken om drempels te tunen.
