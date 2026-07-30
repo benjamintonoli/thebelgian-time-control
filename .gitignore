@@ -33,6 +33,11 @@ docs/location-matching-completeness.json
 docs/location-matching-development.json
 docs/location-matching-holdout.json
 docs/location-matching-holdout-manifest.json
+docs/location-matching-holdout-review-pack.md
+docs/location-matching-holdout-labels.json
+docs/location-matching-holdout-started.json
+docs/location-matching-holdout-final.json
+docs/location-matching-holdout-final.md
 docs/location-matching-challenge.json
 docs/location-matching-evaluation.json
 docs/location-matching-case-pool.json

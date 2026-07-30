@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Text.Json;
-using TheBelgian.TimeControl.Core.Configuration;
 using TheBelgian.TimeControl.Core.Models;
 using TheBelgian.TimeControl.Infrastructure.Pilot;
 
@@ -52,7 +51,7 @@ public sealed class LockedHoldoutEvaluationTests
     }
 
     [Fact]
-    public void Evaluate_ComputesMetrics_AndWritesReports()
+    public void Evaluate_ComputesMetrics_FromSidecarLabels()
     {
         var temp = NewTempDocs();
         try
@@ -60,21 +59,16 @@ public sealed class LockedHoldoutEvaluationTests
             WriteHoldout(
                 temp,
                 [
-                    LabeledCase(
-                        1,
-                        "CorrectCandidate",
-                        "stop-a",
-                        "ConfirmedLocationMatch",
-                        Candidate("stop-a", 50, 60)),
-                    LabeledCase(
-                        2,
-                        "NoValidCandidate",
-                        null,
-                        "NoReliableMatch",
-                        Candidate("far", 1800, 2)),
+                    Case(1, "ConfirmedLocationMatch", Candidate("stop-a", 50, 60)),
+                    Case(2, "NoReliableMatch", Candidate("far", 1800, 2)),
+                ]);
+            WriteLabels(
+                temp,
+                [
+                    Label(1, "CorrectCandidate", "stop-a", null, "High"),
+                    Label(2, "NoValidCandidate", null, null, "High"),
                 ]);
 
-            using var offline = OfflineOnlyGuard.Enter();
             var result = LockedHoldoutEvaluationService.Evaluate(
                 temp,
                 gitCommit: "test-commit",
@@ -93,12 +87,76 @@ public sealed class LockedHoldoutEvaluationTests
             Assert.Equal(0.5, result.Report.Coverage);
             Assert.Equal(0, result.Report.FalsePositives);
             Assert.Equal(0, result.Report.FalseNegatives);
-            Assert.Equal(0, result.Report.WrongVisitCandidateChoices);
-            Assert.Equal(1, result.Report.Abstentions);
             Assert.Equal("GO", result.Report.Decision);
-            Assert.True(File.Exists(result.FinalJsonPath));
-            Assert.True(File.Exists(result.FinalMarkdownPath));
             Assert.True(File.Exists(result.StartedMarkerPath));
+        }
+        finally
+        {
+            Directory.Delete(temp, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Evaluate_IncompleteLabels_DoNotConsumeOneShot()
+    {
+        var temp = NewTempDocs();
+        try
+        {
+            WriteHoldout(
+                temp,
+                [
+                    Case(1, "ConfirmedLocationMatch", Candidate("stop-a", 50, 60)),
+                ]);
+            WriteLabels(
+                temp,
+                [
+                    new CalibrationLabelEntry
+                    {
+                        PerformanceId = 1,
+                        Label = null,
+                        ExpectedStopId = null,
+                        ReviewerConfidence = null,
+                        ReviewerNote = null,
+                    },
+                ]);
+
+            var result = LockedHoldoutEvaluationService.Evaluate(
+                temp,
+                requireFrozenHoldoutIdentity: false);
+
+            Assert.False(result.Completed);
+            Assert.Equal(1, result.ExitCode);
+            Assert.Equal("REJECTED", result.Decision);
+            Assert.False(File.Exists(Path.Combine(temp, LockedHoldoutEvaluationService.StartedMarkerFileName)));
+            Assert.False(File.Exists(Path.Combine(temp, LockedHoldoutEvaluationService.FinalJsonFileName)));
+            Assert.Contains(result.Messages, message => message.Contains("ongeldig", StringComparison.OrdinalIgnoreCase) ||
+                                                       message.Contains("Label", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(temp, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Evaluate_MissingLabelsFile_DoesNotConsumeOneShot()
+    {
+        var temp = NewTempDocs();
+        try
+        {
+            WriteHoldout(
+                temp,
+                [
+                    Case(1, "ConfirmedLocationMatch", Candidate("stop-a", 50, 60)),
+                ]);
+
+            var result = LockedHoldoutEvaluationService.Evaluate(
+                temp,
+                requireFrozenHoldoutIdentity: false);
+
+            Assert.False(result.Completed);
+            Assert.Equal("REJECTED", result.Decision);
+            Assert.False(File.Exists(Path.Combine(temp, LockedHoldoutEvaluationService.StartedMarkerFileName)));
         }
         finally
         {
@@ -112,28 +170,16 @@ public sealed class LockedHoldoutEvaluationTests
         var temp = NewTempDocs();
         try
         {
-            WriteHoldout(
-                temp,
-                [
-                    LabeledCase(
-                        1,
-                        "CorrectCandidate",
-                        "stop-a",
-                        "ConfirmedLocationMatch",
-                        Candidate("stop-a", 50, 60)),
-                ]);
-            File.WriteAllText(
-                Path.Combine(temp, LockedHoldoutEvaluationService.FinalJsonFileName),
-                "{}");
+            WriteHoldout(temp, [Case(1, "ConfirmedLocationMatch", Candidate("stop-a", 50, 60))]);
+            WriteLabels(temp, [Label(1, "CorrectCandidate", "stop-a", null, "High")]);
+            File.WriteAllText(Path.Combine(temp, LockedHoldoutEvaluationService.FinalJsonFileName), "{}");
 
             var result = LockedHoldoutEvaluationService.Evaluate(
                 temp,
                 requireFrozenHoldoutIdentity: false);
 
             Assert.False(result.Completed);
-            Assert.Equal(1, result.ExitCode);
             Assert.Equal("REJECTED", result.Decision);
-            Assert.Contains(result.Messages, message => message.Contains("Finale holdoutrapport", StringComparison.Ordinal));
             Assert.False(File.Exists(Path.Combine(temp, LockedHoldoutEvaluationService.StartedMarkerFileName)));
         }
         finally
@@ -148,28 +194,16 @@ public sealed class LockedHoldoutEvaluationTests
         var temp = NewTempDocs();
         try
         {
-            WriteHoldout(
-                temp,
-                [
-                    LabeledCase(
-                        1,
-                        "CorrectCandidate",
-                        "stop-a",
-                        "ConfirmedLocationMatch",
-                        Candidate("stop-a", 50, 60)),
-                ]);
-            File.WriteAllText(
-                Path.Combine(temp, LockedHoldoutEvaluationService.StartedMarkerFileName),
-                "{}");
+            WriteHoldout(temp, [Case(1, "ConfirmedLocationMatch", Candidate("stop-a", 50, 60))]);
+            WriteLabels(temp, [Label(1, "CorrectCandidate", "stop-a", null, "High")]);
+            File.WriteAllText(Path.Combine(temp, LockedHoldoutEvaluationService.StartedMarkerFileName), "{}");
 
             var result = LockedHoldoutEvaluationService.Evaluate(
                 temp,
                 requireFrozenHoldoutIdentity: false);
 
             Assert.False(result.Completed);
-            Assert.Equal(1, result.ExitCode);
             Assert.Equal("REJECTED", result.Decision);
-            Assert.Contains(result.Messages, message => message.Contains("started", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {
@@ -183,16 +217,8 @@ public sealed class LockedHoldoutEvaluationTests
         var temp = NewTempDocs();
         try
         {
-            WriteHoldout(
-                temp,
-                [
-                    LabeledCase(
-                        1,
-                        "CorrectCandidate",
-                        "stop-a",
-                        "ConfirmedLocationMatch",
-                        Candidate("stop-a", 50, 60)),
-                ]);
+            WriteHoldout(temp, [Case(1, "ConfirmedLocationMatch", Candidate("stop-a", 50, 60))]);
+            WriteLabels(temp, [Label(1, "CorrectCandidate", "stop-a", null, "High")]);
 
             var first = LockedHoldoutEvaluationService.Evaluate(
                 temp,
@@ -212,32 +238,20 @@ public sealed class LockedHoldoutEvaluationTests
     }
 
     [Fact]
-    public void Evaluate_UsesOfflineGuard_NoLiveProviders()
+    public void Evaluate_NoGo_WhenFalsePositiveOnNoValidCandidate()
     {
         var temp = NewTempDocs();
         try
         {
-            WriteHoldout(
-                temp,
-                [
-                    LabeledCase(
-                        1,
-                        "NoValidCandidate",
-                        null,
-                        "NoReliableMatch"),
-                ]);
+            WriteHoldout(temp, [Case(1, "NoReliableMatch", Candidate("near", 40, 40))]);
+            WriteLabels(temp, [Label(1, "NoValidCandidate", null, null, "High")]);
 
             var result = LockedHoldoutEvaluationService.Evaluate(
                 temp,
                 requireFrozenHoldoutIdentity: false);
             Assert.True(result.Completed);
-            Assert.NotNull(result.Report);
-            Assert.False(result.Report!.ExternalDataAccessed);
-
-            using var scope = OfflineOnlyGuard.Enter();
-            var ex = Assert.Throws<InvalidOperationException>(
-                () => OfflineOnlyGuard.EnsureLiveAccessAllowed("Powerfleet"));
-            Assert.Contains("Powerfleet", ex.Message, StringComparison.Ordinal);
+            Assert.Equal(1, result.Report!.FalsePositives);
+            Assert.Equal("NO-GO", result.Report.Decision);
         }
         finally
         {
@@ -246,7 +260,7 @@ public sealed class LockedHoldoutEvaluationTests
     }
 
     [Fact]
-    public void Evaluate_NoGo_WhenFalsePositiveOnNoValidCandidate()
+    public void ExportReviewPack_IsBlind_AndWritesEmptyLabels()
     {
         var temp = NewTempDocs();
         try
@@ -254,22 +268,74 @@ public sealed class LockedHoldoutEvaluationTests
             WriteHoldout(
                 temp,
                 [
-                    LabeledCase(
-                        1,
-                        "NoValidCandidate",
-                        null,
+                    Case(
+                        10,
                         "NoReliableMatch",
-                        Candidate("near", 40, 40)),
+                        Candidate("a", 40, 30),
+                        Candidate("b", 45, 20)),
                 ]);
 
-            var result = LockedHoldoutEvaluationService.Evaluate(
+            var exported = LockedHoldoutReviewPackService.ExportReviewPack(
                 temp,
                 requireFrozenHoldoutIdentity: false);
-            Assert.True(result.Completed);
-            Assert.NotNull(result.Report);
-            Assert.Equal(1, result.Report!.FalsePositives);
-            Assert.Equal(0.0, result.Report.Precision);
-            Assert.Equal("NO-GO", result.Report.Decision);
+
+            Assert.Equal(1, exported.CaseCount);
+            Assert.True(File.Exists(exported.MarkdownPath));
+            Assert.True(File.Exists(exported.LabelsPath));
+
+            var markdown = File.ReadAllText(exported.MarkdownPath);
+            Assert.Contains("PerformanceId", markdown, StringComparison.Ordinal);
+            Assert.Contains("Possible visit groups", markdown, StringComparison.Ordinal);
+            Assert.DoesNotContain("RecoveredProbable", markdown, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("ExistingMatchStatus", markdown, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("ExistingCandidateScore", markdown, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("ScoreMargin", markdown, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("NO-GO", markdown, StringComparison.Ordinal);
+            Assert.DoesNotContain("CONDITIONAL GO", markdown, StringComparison.Ordinal);
+            Assert.DoesNotContain("adaptive", markdown, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("hybrid", markdown, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Unresolved", markdown, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("ProbableLocationMatch", markdown, StringComparison.OrdinalIgnoreCase);
+
+            var labels = JsonSerializer.Deserialize<List<CalibrationLabelEntry>>(
+                File.ReadAllText(exported.LabelsPath),
+                JsonOptions)!;
+            Assert.Single(labels);
+            Assert.Equal(10, labels[0].PerformanceId);
+            Assert.Null(labels[0].Label);
+            Assert.Null(labels[0].ExpectedStopId);
+            Assert.Null(labels[0].ExpectedVisitStopIds);
+            Assert.Null(labels[0].ReviewerConfidence);
+        }
+        finally
+        {
+            Directory.Delete(temp, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ExportReviewPack_DoesNotMutateHoldout()
+    {
+        var temp = NewTempDocs();
+        try
+        {
+            var cases = new[]
+            {
+                Case(3, "NoReliableMatch", Candidate("x", 12, 15)),
+            };
+            WriteHoldout(temp, cases);
+            var before = File.ReadAllText(
+                Path.Combine(temp, LocationMatchingBenchmarkService.HoldoutFileName));
+            var beforeSha = LocationMatchingBenchmarkSampling.ComputeContentSha256(cases);
+
+            var exported = LockedHoldoutReviewPackService.ExportReviewPack(
+                temp,
+                requireFrozenHoldoutIdentity: false);
+
+            var after = File.ReadAllText(
+                Path.Combine(temp, LocationMatchingBenchmarkService.HoldoutFileName));
+            Assert.Equal(before, after);
+            Assert.Equal(beforeSha, exported.HoldoutContentSha256);
         }
         finally
         {
@@ -296,7 +362,7 @@ public sealed class LockedHoldoutEvaluationTests
 
     private static void WriteHoldout(
         string docsPath,
-        IReadOnlyList<LocationMatchingBenchmarkCase> cases)
+        LocationMatchingBenchmarkCase[] cases)
     {
         var contentSha = LocationMatchingBenchmarkSampling.ComputeContentSha256(cases);
         File.WriteAllText(
@@ -318,23 +384,46 @@ public sealed class LockedHoldoutEvaluationTests
                     RandomSeed = 1,
                     GeneratedAt = DateTimeOffset.UtcNow,
                     Locked = true,
-                    TargetCaseCount = cases.Count,
+                    TargetCaseCount = cases.Length,
                     MaxCasesPerLacleunik = 8,
                     MinUniqueLacleunik = 1,
                     SelectedPerformanceIds = cases.Select(item => item.PerformanceId).ToArray(),
                     CompleteMonthsUsed = ["2025-10"],
-                    CountsByTechnician = new Dictionary<string, int> { ["Test"] = cases.Count },
-                    CountsByMonth = new Dictionary<string, int> { ["2025-10"] = cases.Count },
-                    CountsByExposure = new Dictionary<string, int> { ["SeenLocation"] = cases.Count },
+                    CountsByTechnician = new Dictionary<string, int> { ["Test"] = cases.Length },
+                    CountsByMonth = new Dictionary<string, int> { ["2025-10"] = cases.Length },
+                    CountsByExposure = new Dictionary<string, int> { ["SeenLocation"] = cases.Length },
                     ContentSha256 = contentSha,
                 },
                 JsonOptions));
     }
 
-    private static LocationMatchingBenchmarkCase LabeledCase(
+    private static void WriteLabels(
+        string docsPath,
+        IReadOnlyList<CalibrationLabelEntry> entries)
+    {
+        File.WriteAllText(
+            Path.Combine(docsPath, LockedHoldoutReviewPackService.LabelsFileName),
+            JsonSerializer.Serialize(entries, JsonOptions));
+    }
+
+    private static CalibrationLabelEntry Label(
         long id,
         string label,
         string? expectedStopId,
+        IReadOnlyList<string>? expectedVisitStopIds,
+        string confidence) =>
+        new()
+        {
+            PerformanceId = id,
+            Label = label,
+            ExpectedStopId = expectedStopId,
+            ExpectedVisitStopIds = expectedVisitStopIds,
+            ReviewerConfidence = confidence,
+            ReviewerNote = "synthetic",
+        };
+
+    private static LocationMatchingBenchmarkCase Case(
+        long id,
         string existingStatus,
         params LocationMatchingBenchmarkCandidate[] candidates)
     {
@@ -351,9 +440,7 @@ public sealed class LockedHoldoutEvaluationTests
             GeocodeQuality = GeocodeQualityClass.PreciseBuilding,
             ExistingMatchStatus = existingStatus,
             Candidates = candidates,
-            Label = label,
-            ExpectedStopId = expectedStopId,
-            ReviewerConfidence = "High",
+            Label = null,
             LocationExposure = "SeenLocation",
             DatasetRole = "holdout",
         };

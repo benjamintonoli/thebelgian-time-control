@@ -99,18 +99,30 @@ dotnet run --project src/TheBelgian.TimeControl.Web -c Release --no-build --no-l
 Dit herschrijft `docs/frozen-matcher-manifest.json` met commit + configuratiehash.
 Commit daarna alleen codewijzigingen; manifest/rapport blijven gitignored.
 
-## 8. Locked holdout exact één keer evalueren
+## 8. Locked holdout: blind labeling, daarna exact één keer evalueren
 
-Alleen na groene live validatie én frozen verification. Offline, één keer:
+### 8a. Blind review pack exporteren (geen evaluatie)
+
+```powershell
+$env:ASPNETCORE_ENVIRONMENT = "Development"
+dotnet run --project src/TheBelgian.TimeControl.Web -c Release --no-build --no-launch-profile -- --export-locked-holdout-review
+```
+
+Schrijft:
+- `docs/location-matching-holdout-review-pack.md`
+- `docs/location-matching-holdout-labels.json` (lege template)
+
+Wijzigt de locked holdout niet. Label handmatig in het labelbestand.
+
+### 8b. One-shot evaluatie (pas na volledige labels)
 
 ```powershell
 $env:ASPNETCORE_ENVIRONMENT = "Development"
 dotnet run --project src/TheBelgian.TimeControl.Web -c Release --no-build --no-launch-profile -- --evaluate-locked-holdout
 ```
 
-- Weigert wanneer `docs/location-matching-holdout-final.json` of
-  `docs/location-matching-holdout-started.json` al bestaat.
-- Schrijft `docs/location-matching-holdout-final.json` en
-  `docs/location-matching-holdout-final.md`.
+- Weigert wanneer final of started al bestaat.
+- Weigert onvolledige labels **vóór** de one-shot (geen started-marker).
+- Schrijft `docs/location-matching-holdout-final.json` en `.md`.
 - Gebruikt geen live Plenion/Powerfleet/Geoapify.
 - Holdoutresultaten niet gebruiken om drempels te tunen.

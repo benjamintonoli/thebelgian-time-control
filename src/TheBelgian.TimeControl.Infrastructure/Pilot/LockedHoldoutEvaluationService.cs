@@ -15,11 +15,26 @@ internal static class LockedHoldoutEvaluationService
     public const string FinalJsonFileName = "location-matching-holdout-final.json";
     public const string FinalMarkdownFileName = "location-matching-holdout-final.md";
     public const string StartedMarkerFileName = "location-matching-holdout-started.json";
+    public const string LabelsFileName = LockedHoldoutReviewPackService.LabelsFileName;
     public const string ExpectedConfigurationHashSha256 =
         "b4cccfa21f20e5d3be59b992fcdb8352849c36dd1d24529990235e918565b043";
     public const string ExpectedHoldoutContentSha256 =
         "206a0ac89162151a6b236deb3047c9574d84409c2b3a82b2ff2f6c415d08f2b9";
     public const int ExpectedCaseCount = 59;
+
+    private static readonly string[] AllowedLabels =
+    [
+        "CorrectCandidate",
+        "NoValidCandidate",
+        "Ambiguous",
+    ];
+
+    private static readonly string[] AllowedConfidence =
+    [
+        "High",
+        "Medium",
+        "Low",
+    ];
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -69,9 +84,36 @@ internal static class LockedHoldoutEvaluationService
 
         var holdoutPath = Path.Combine(docsPath, LocationMatchingBenchmarkService.HoldoutFileName);
         var manifestPath = Path.Combine(docsPath, LocationMatchingBenchmarkService.HoldoutManifestFileName);
+        var labelsPath = Path.Combine(docsPath, LabelsFileName);
         if (!File.Exists(holdoutPath) || !File.Exists(manifestPath))
         {
             messages.Add("Holdoutbestand of manifest ontbreekt.");
+            return Rejected(finalJsonPath, finalMdPath, startedPath, messages);
+        }
+
+        if (!File.Exists(labelsPath))
+        {
+            messages.Add($"Labelbestand ontbreekt: {LabelsFileName}");
+            return Rejected(finalJsonPath, finalMdPath, startedPath, messages);
+        }
+
+        // Preflight load + label validation must succeed before the one-shot is consumed.
+        if (!TryLoadHoldout(
+                holdoutPath,
+                manifestPath,
+                requireFrozenHoldoutIdentity,
+                out var rawCases,
+                out var manifest,
+                out var contentSha,
+                out var loadError))
+        {
+            messages.Add(loadError);
+            return Rejected(finalJsonPath, finalMdPath, startedPath, messages);
+        }
+
+        if (!TryLoadAndValidateLabels(labelsPath, rawCases, out var labeledCases, out var labelError))
+        {
+            messages.Add(labelError);
             return Rejected(finalJsonPath, finalMdPath, startedPath, messages);
         }
 
@@ -87,38 +129,7 @@ internal static class LockedHoldoutEvaluationService
                 JsonOptions),
             Encoding.UTF8);
 
-        if (!TryLoadHoldout(
-                holdoutPath,
-                manifestPath,
-                requireFrozenHoldoutIdentity,
-                out var cases,
-                out var manifest,
-                out var contentSha,
-                out var loadError))
-        {
-            messages.Add(loadError);
-            var blocked = BuildBlockedReport(
-                commit,
-                gitTag,
-                configurationHash,
-                contentSha,
-                loadError);
-            WriteReports(finalJsonPath, finalMdPath, blocked);
-            messages.Add($"Decision={blocked.Decision}");
-            return new LockedHoldoutEvaluationResult
-            {
-                Completed = true,
-                ExitCode = 2,
-                Decision = blocked.Decision,
-                FinalJsonPath = finalJsonPath,
-                FinalMarkdownPath = finalMdPath,
-                StartedMarkerPath = startedPath,
-                Report = blocked,
-                Messages = messages,
-            };
-        }
-
-        var scored = cases
+        var scored = labeledCases
             .OrderBy(item => item.PerformanceId)
             .Select(item => ScoreCase(item, matchingOptions))
             .ToArray();
@@ -128,7 +139,7 @@ internal static class LockedHoldoutEvaluationService
             configurationHash,
             manifest.ContentSha256 ?? contentSha,
             contentSha,
-            cases,
+            labeledCases,
             scored);
         WriteReports(finalJsonPath, finalMdPath, report);
         messages.Add($"HoldoutOpened=True Cases={report.CaseCount} Decision={report.Decision}");
@@ -195,19 +206,165 @@ internal static class LockedHoldoutEvaluationService
                 }
             }
 
-            if (cases.Any(item => string.IsNullOrWhiteSpace(item.Label)))
-            {
-                error =
-                    "Holdout bevat ongelabelde cases; precision-evaluatie is niet mogelijk zonder labels.";
-                return false;
-            }
-
             return true;
         }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException or IOException)
         {
             error = ex.Message;
             return false;
+        }
+    }
+
+    internal static bool TryLoadAndValidateLabels(
+        string labelsPath,
+        IReadOnlyList<LocationMatchingBenchmarkCase> holdoutCases,
+        out LocationMatchingBenchmarkCase[] labeledCases,
+        out string error)
+    {
+        labeledCases = [];
+        error = string.Empty;
+        try
+        {
+            var entries = JsonSerializer.Deserialize<List<CalibrationLabelEntry>>(
+                              File.ReadAllText(labelsPath),
+                              JsonOptions) ??
+                          [];
+            ValidateHoldoutLabelFile(entries, holdoutCases);
+            var byId = entries.ToDictionary(item => item.PerformanceId);
+            labeledCases = holdoutCases
+                .Select(item =>
+                {
+                    var entry = byId[item.PerformanceId];
+                    var visitIds = entry.ExpectedVisitStopIds is { Count: > 0 }
+                        ? entry.ExpectedVisitStopIds
+                            .Where(id => !string.IsNullOrWhiteSpace(id))
+                            .Select(id => id.Trim())
+                            .Distinct(StringComparer.Ordinal)
+                            .ToArray()
+                        : null;
+                    return item with
+                    {
+                        Label = entry.Label,
+                        ExpectedStopId = string.IsNullOrWhiteSpace(entry.ExpectedStopId)
+                            ? null
+                            : entry.ExpectedStopId.Trim(),
+                        ExpectedVisitStopIds = visitIds,
+                        ReviewerConfidence = entry.ReviewerConfidence,
+                        ReviewerNote = entry.ReviewerNote,
+                    };
+                })
+                .ToArray();
+            return true;
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or IOException)
+        {
+            error = ex.Message;
+            return false;
+        }
+    }
+
+    internal static void ValidateHoldoutLabelFile(
+        IReadOnlyList<CalibrationLabelEntry> entries,
+        IReadOnlyList<LocationMatchingBenchmarkCase> holdoutCases)
+    {
+        var errors = new List<string>();
+        if (entries.Count != holdoutCases.Count)
+        {
+            errors.Add($"Verwacht {holdoutCases.Count} labels, gevonden {entries.Count}.");
+        }
+
+        var expectedIds = holdoutCases.Select(item => item.PerformanceId).ToHashSet();
+        var seen = new HashSet<long>();
+        var stopIdsByPerformance = holdoutCases.ToDictionary(
+            item => item.PerformanceId,
+            item => item.Candidates
+                .Select(candidate => candidate.StopId)
+                .ToHashSet(StringComparer.Ordinal));
+
+        foreach (var entry in entries)
+        {
+            if (!seen.Add(entry.PerformanceId))
+            {
+                errors.Add($"Dubbele PerformanceId: {entry.PerformanceId}.");
+            }
+
+            if (!expectedIds.Contains(entry.PerformanceId))
+            {
+                errors.Add($"Onbekende PerformanceId: {entry.PerformanceId}.");
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(entry.Label) ||
+                !AllowedLabels.Contains(entry.Label, StringComparer.Ordinal))
+            {
+                errors.Add(
+                    $"PerformanceId {entry.PerformanceId}: Label moet CorrectCandidate, NoValidCandidate of Ambiguous zijn.");
+            }
+
+            if (string.IsNullOrWhiteSpace(entry.ReviewerConfidence) ||
+                !AllowedConfidence.Contains(entry.ReviewerConfidence, StringComparer.Ordinal))
+            {
+                errors.Add(
+                    $"PerformanceId {entry.PerformanceId}: ReviewerConfidence moet High, Medium of Low zijn.");
+            }
+
+            var stopId = string.IsNullOrWhiteSpace(entry.ExpectedStopId)
+                ? null
+                : entry.ExpectedStopId.Trim();
+            var visitIds = entry.ExpectedVisitStopIds is { Count: > 0 }
+                ? entry.ExpectedVisitStopIds
+                    .Where(id => !string.IsNullOrWhiteSpace(id))
+                    .Select(id => id.Trim())
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray()
+                : Array.Empty<string>();
+
+            if (string.Equals(entry.Label, "CorrectCandidate", StringComparison.Ordinal))
+            {
+                if (visitIds.Length == 0 && stopId is null)
+                {
+                    errors.Add(
+                        $"PerformanceId {entry.PerformanceId}: CorrectCandidate vereist ExpectedVisitStopIds of ExpectedStopId voor precies één bezoek.");
+                }
+
+                foreach (var visitId in visitIds)
+                {
+                    if (!stopIdsByPerformance[entry.PerformanceId].Contains(visitId))
+                    {
+                        errors.Add(
+                            $"PerformanceId {entry.PerformanceId}: ExpectedVisitStopId '{visitId}' bestaat niet bij deze case.");
+                    }
+                }
+
+                if (stopId is not null &&
+                    visitIds.Length == 0 &&
+                    !stopIdsByPerformance[entry.PerformanceId].Contains(stopId))
+                {
+                    errors.Add(
+                        $"PerformanceId {entry.PerformanceId}: ExpectedStopId '{stopId}' bestaat niet bij deze case.");
+                }
+            }
+            else if (entry.Label is "NoValidCandidate" or "Ambiguous")
+            {
+                if (stopId is not null || visitIds.Length > 0)
+                {
+                    errors.Add(
+                        $"PerformanceId {entry.PerformanceId}: {entry.Label} vereist geen verwacht bezoek.");
+                }
+            }
+        }
+
+        foreach (var missing in expectedIds.Where(id => !seen.Contains(id)).OrderBy(id => id))
+        {
+            errors.Add($"Ontbrekende PerformanceId: {missing}.");
+        }
+
+        if (errors.Count > 0)
+        {
+            throw new InvalidOperationException(
+                "Holdoutlabels ongeldig of onvolledig (one-shot niet verbruikt):" +
+                Environment.NewLine +
+                string.Join(Environment.NewLine, errors.Select(item => "- " + item)));
         }
     }
 
@@ -441,50 +598,6 @@ internal static class LockedHoldoutEvaluationService
             HoldoutOpened = true,
         };
     }
-
-    private static LockedHoldoutFinalReport BuildBlockedReport(
-        string commit,
-        string? gitTag,
-        string configurationHash,
-        string contentSha,
-        string reason) =>
-        new()
-        {
-            EvaluatedAt = DateTimeOffset.UtcNow,
-            GitCommit = commit,
-            GitTag = gitTag,
-            ConfigurationHashSha256 = configurationHash,
-            HoldoutManifestHashSha256 = contentSha,
-            HoldoutContentSha256 = contentSha,
-            CaseCount = 0,
-            LabelDistribution = new Dictionary<string, int>(StringComparer.Ordinal),
-            AcceptedMatches = 0,
-            CorrectAcceptedMatches = 0,
-            Precision = 0,
-            Coverage = 0,
-            FalsePositives = 0,
-            FalseNegatives = 0,
-            WrongVisitCandidateChoices = 0,
-            Abstentions = 0,
-            HighConfidence = null,
-            ByDistanceZone = new Dictionary<string, FrozenMatcherMetricSlice>(StringComparer.Ordinal),
-            ByOverlapZone = new Dictionary<string, FrozenMatcherMetricSlice>(StringComparer.Ordinal),
-            ByGeocodeQuality = new Dictionary<string, FrozenMatcherMetricSlice>(StringComparer.Ordinal),
-            Errors = [],
-            ErrorCategories = new Dictionary<string, int>(StringComparer.Ordinal)
-            {
-                ["HoldoutLoadBlocked"] = 1,
-            },
-            SystematicFalsePositivePattern = false,
-            Decision = "NO-GO",
-            DecisionNotes =
-            [
-                reason,
-                "Holdout one-shot is verbruikt; matcher niet bijstellen op deze holdout.",
-            ],
-            ExternalDataAccessed = false,
-            HoldoutOpened = true,
-        };
 
     private static Dictionary<string, FrozenMatcherMetricSlice> SliceBy(
         IReadOnlyList<ScoredCase> scored,

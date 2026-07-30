@@ -6,6 +6,41 @@ using TheBelgian.TimeControl.Infrastructure;
 using TheBelgian.TimeControl.Infrastructure.Pilot;
 using TheBelgian.TimeControl.Web.Pages.Pilot;
 
+var isExportLockedHoldoutReview = args.Contains(
+    "--export-locked-holdout-review",
+    StringComparer.OrdinalIgnoreCase);
+if (isExportLockedHoldoutReview)
+{
+    // Offline-only path: no DI, no Plenion/Powerfleet/Geoapify initialization.
+    var contentRoot = Directory.GetCurrentDirectory();
+    var webProjectHint = Path.Combine(contentRoot, "src", "TheBelgian.TimeControl.Web");
+    var docsPath = Directory.Exists(webProjectHint)
+        ? Path.GetFullPath(Path.Combine(contentRoot, "docs"))
+        : Path.GetFullPath(Path.Combine(contentRoot, "..", "..", "docs"));
+    Directory.CreateDirectory(docsPath);
+    Console.WriteLine("LockedHoldoutReviewExportMode=offline-local-only");
+    Console.WriteLine("ExternalProviders=disabled");
+    Console.WriteLine($"DocsPath={docsPath}");
+    try
+    {
+        var exported = LockedHoldoutReviewPackService.ExportReviewPack(docsPath);
+        Console.WriteLine($"CaseCount={exported.CaseCount}");
+        Console.WriteLine($"HoldoutContentSha256={exported.HoldoutContentSha256}");
+        Console.WriteLine($"Markdown={exported.MarkdownPath}");
+        Console.WriteLine($"Labels={exported.LabelsPath}");
+        Console.WriteLine("Blind=True");
+        Console.WriteLine("HoldoutMutated=False");
+        Environment.ExitCode = 0;
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"Error={ex.Message}");
+        Environment.ExitCode = 1;
+    }
+
+    return;
+}
+
 var isEvaluateLockedHoldout = args.Contains(
     "--evaluate-locked-holdout",
     StringComparer.OrdinalIgnoreCase);
