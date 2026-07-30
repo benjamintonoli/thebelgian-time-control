@@ -1,0 +1,197 @@
+﻿{
+  "EvaluatedAt": "2026-07-30T14:58:41.2122604+00:00",
+  "GitCommit": "b63512838c08def53a3ce4f607a16f5ff647cbf9",
+  "GitTag": null,
+  "ConfigurationHashSha256": "b4cccfa21f20e5d3be59b992fcdb8352849c36dd1d24529990235e918565b043",
+  "HoldoutManifestHashSha256": "206a0ac89162151a6b236deb3047c9574d84409c2b3a82b2ff2f6c415d08f2b9",
+  "HoldoutContentSha256": "206a0ac89162151a6b236deb3047c9574d84409c2b3a82b2ff2f6c415d08f2b9",
+  "CaseCount": 59,
+  "LabelDistribution": {
+    "NoValidCandidate": 53,
+    "Ambiguous": 3,
+    "CorrectCandidate": 3
+  },
+  "AcceptedMatches": 3,
+  "CorrectAcceptedMatches": 2,
+  "Precision": 0.6667,
+  "Coverage": 0.0508,
+  "FalsePositives": 1,
+  "FalseNegatives": 1,
+  "WrongVisitCandidateChoices": 0,
+  "Abstentions": 56,
+  "HighConfidence": {
+    "CaseCount": 54,
+    "AcceptedMatches": 3,
+    "CorrectAcceptedMatches": 2,
+    "Precision": 0.6667,
+    "Coverage": 0.0556,
+    "FalsePositives": 1,
+    "FalseNegatives": 0,
+    "WrongVisitCandidateChoices": 0
+  },
+  "ByDistanceZone": {
+    "Beyond500": {
+      "CaseCount": 28,
+      "AcceptedMatches": 0,
+      "CorrectAcceptedMatches": 0,
+      "Precision": 0,
+      "Coverage": 0,
+      "FalsePositives": 0,
+      "FalseNegatives": 1,
+      "WrongVisitCandidateChoices": 0
+    },
+    "Learned251To500": {
+      "CaseCount": 2,
+      "AcceptedMatches": 0,
+      "CorrectAcceptedMatches": 0,
+      "Precision": 0,
+      "Coverage": 0,
+      "FalsePositives": 0,
+      "FalseNegatives": 0,
+      "WrongVisitCandidateChoices": 0
+    },
+    "Strong0To100": {
+      "CaseCount": 3,
+      "AcceptedMatches": 3,
+      "CorrectAcceptedMatches": 2,
+      "Precision": 0.6667,
+      "Coverage": 1,
+      "FalsePositives": 1,
+      "FalseNegatives": 0,
+      "WrongVisitCandidateChoices": 0
+    },
+    "Unknown": {
+      "CaseCount": 26,
+      "AcceptedMatches": 0,
+      "CorrectAcceptedMatches": 0,
+      "Precision": 0,
+      "Coverage": 0,
+      "FalsePositives": 0,
+      "FalseNegatives": 0,
+      "WrongVisitCandidateChoices": 0
+    }
+  },
+  "ByOverlapZone": {
+    "ModerateOverlap": {
+      "CaseCount": 7,
+      "AcceptedMatches": 1,
+      "CorrectAcceptedMatches": 0,
+      "Precision": 0,
+      "Coverage": 0.1429,
+      "FalsePositives": 1,
+      "FalseNegatives": 1,
+      "WrongVisitCandidateChoices": 0
+    },
+    "None": {
+      "CaseCount": 20,
+      "AcceptedMatches": 0,
+      "CorrectAcceptedMatches": 0,
+      "Precision": 0,
+      "Coverage": 0,
+      "FalsePositives": 0,
+      "FalseNegatives": 0,
+      "WrongVisitCandidateChoices": 0
+    },
+    "StrongOverlap": {
+      "CaseCount": 4,
+      "AcceptedMatches": 2,
+      "CorrectAcceptedMatches": 2,
+      "Precision": 1,
+      "Coverage": 0.5,
+      "FalsePositives": 0,
+      "FalseNegatives": 0,
+      "WrongVisitCandidateChoices": 0
+    },
+    "WeakOverlap": {
+      "CaseCount": 28,
+      "AcceptedMatches": 0,
+      "CorrectAcceptedMatches": 0,
+      "Precision": 0,
+      "Coverage": 0,
+      "FalsePositives": 0,
+      "FalseNegatives": 0,
+      "WrongVisitCandidateChoices": 0
+    }
+  },
+  "ByGeocodeQuality": {
+    "LowConfidence": {
+      "CaseCount": 8,
+      "AcceptedMatches": 0,
+      "CorrectAcceptedMatches": 0,
+      "Precision": 0,
+      "Coverage": 0,
+      "FalsePositives": 0,
+      "FalseNegatives": 1,
+      "WrongVisitCandidateChoices": 0
+    },
+    "PartialAddress": {
+      "CaseCount": 35,
+      "AcceptedMatches": 3,
+      "CorrectAcceptedMatches": 2,
+      "Precision": 0.6667,
+      "Coverage": 0.0857,
+      "FalsePositives": 1,
+      "FalseNegatives": 0,
+      "WrongVisitCandidateChoices": 0
+    },
+    "PreciseBuilding": {
+      "CaseCount": 2,
+      "AcceptedMatches": 0,
+      "CorrectAcceptedMatches": 0,
+      "Precision": 0,
+      "Coverage": 0,
+      "FalsePositives": 0,
+      "FalseNegatives": 0,
+      "WrongVisitCandidateChoices": 0
+    },
+    "Unusable": {
+      "CaseCount": 14,
+      "AcceptedMatches": 0,
+      "CorrectAcceptedMatches": 0,
+      "Precision": 0,
+      "Coverage": 0,
+      "FalsePositives": 0,
+      "FalseNegatives": 0,
+      "WrongVisitCandidateChoices": 0
+    }
+  },
+  "Errors": [
+    {
+      "PerformanceId": 264201,
+      "Label": "CorrectCandidate",
+      "Category": "FN_CorrectCandidate",
+      "PredictedDecision": "Unresolved",
+      "PredictedStopId": null,
+      "ReviewerConfidence": "Medium",
+      "DistanceZone": "Beyond500",
+      "OverlapZone": "ModerateOverlap",
+      "GeocodeQuality": "LowConfidence",
+      "Diagnostics": "status=AddressDataIssue;sources=0;recovery=False"
+    },
+    {
+      "PerformanceId": 265057,
+      "Label": "NoValidCandidate",
+      "Category": "FP_NoValidCandidate",
+      "PredictedDecision": "Probable",
+      "PredictedStopId": "259110179/259138007",
+      "ReviewerConfidence": "High",
+      "DistanceZone": "Strong0To100",
+      "OverlapZone": "ModerateOverlap",
+      "GeocodeQuality": "PartialAddress",
+      "Diagnostics": "status=ConfirmedLocationMatch;sources=1;recovery=False"
+    }
+  ],
+  "ErrorCategories": {
+    "FN_CorrectCandidate": 1,
+    "FP_NoValidCandidate": 1
+  },
+  "SystematicFalsePositivePattern": false,
+  "Decision": "NO-GO",
+  "DecisionNotes": [
+    "Offline-only holdoutevaluatie; geen Plenion/Powerfleet/Geoapify-toegang.",
+    "Coverage is informatief en geen zelfstandig afkeurcriterium.",
+    "Holdout: 59 cases, 2025-10-01 t/m 2025-12-31, \u00E9\u00E9n technieker."
+  ],
+  "ExternalDataAccessed": false,
+  "HoldoutOpened": true
+}
