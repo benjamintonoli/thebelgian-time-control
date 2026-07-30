@@ -74,7 +74,8 @@ public sealed class AdaptiveLocationMatchingOptions
     public double RecoveryShortChainMinOverlapMinutes { get; init; } = 3;
 
     /// <summary>
-    /// Combined chain overlap percent required for the short consecutive same-LACLEUNIK exception.
+    /// Combined short-chain coverage: share of the visit duration that falls inside the
+    /// adjacent same-LACLEUNIK performance chain window (percent).
     /// </summary>
     public double RecoveryShortChainMinCombinedOverlapPercent { get; init; } = 80;
 

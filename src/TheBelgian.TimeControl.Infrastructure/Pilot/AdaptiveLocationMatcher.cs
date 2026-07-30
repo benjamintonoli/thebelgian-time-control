@@ -107,6 +107,7 @@ internal static class AdaptiveLocationMatcher
         var departureDiff = RoundedMinutes(stop.Departure - performance.EndDateTime);
         var competing = sameDayPerformances.Any(other =>
             other.ExternalId != performance.ExternalId &&
+            !AdjacentPerformanceVisitRules.SameWorkLocation(performance, other) &&
             OverlapMinutes(
                 other.StartDateTime,
                 other.EndDateTime,

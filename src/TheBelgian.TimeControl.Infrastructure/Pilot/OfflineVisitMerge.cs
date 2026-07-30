@@ -97,6 +97,27 @@ internal static class OfflineVisitMerge
                 continue;
             }
 
+            // Require a directly adjacent neighbor window (small gap / contiguous).
+            DateTimeOffset earlierEnd;
+            DateTimeOffset laterStart;
+            if (item.Start <= neighborStart)
+            {
+                earlierEnd = item.End;
+                laterStart = neighborStart;
+            }
+            else
+            {
+                earlierEnd = neighborEnd;
+                laterStart = item.Start;
+            }
+
+            var gapMinutes = (laterStart - earlierEnd).TotalMinutes;
+            if (gapMinutes < -options.VisitMergeMaxGapMinutes ||
+                gapMinutes > options.VisitMergeMaxGapMinutes)
+            {
+                continue;
+            }
+
             var neighborOverlap = OverlapMinutes(
                 neighborStart,
                 neighborEnd,
@@ -107,11 +128,21 @@ internal static class OfflineVisitMerge
                 continue;
             }
 
+            var visitMinutes = Math.Max(1, (visit.Departure - visit.Arrival).TotalMinutes);
+            var performanceMinutes = Math.Max(1, (item.End - item.Start).TotalMinutes);
+            var currentPercent = 100d * currentOverlap / performanceMinutes;
+            // Boundary-only minutes on a long performance are not enough.
+            if (currentOverlap < options.RecoveryMinimumOverlapMinutes &&
+                currentPercent < options.MinimumOverlapPercent)
+            {
+                continue;
+            }
+
             var chainStart = item.Start < neighborStart ? item.Start : neighborStart;
             var chainEnd = item.End > neighborEnd ? item.End : neighborEnd;
-            var chainMinutes = Math.Max(1, (chainEnd - chainStart).TotalMinutes);
             var chainOverlap = OverlapMinutes(chainStart, chainEnd, visit.Arrival, visit.Departure);
-            if (100d * chainOverlap / chainMinutes >= options.RecoveryShortChainMinCombinedOverlapPercent)
+            // Visit must be mostly dedicated to the adjacent same-LACLEUNIK chain window.
+            if (100d * chainOverlap / visitMinutes >= options.RecoveryShortChainMinCombinedOverlapPercent)
             {
                 return true;
             }

@@ -1,0 +1,167 @@
+{
+  "CreatedAt": "2026-07-30T10:08:13.551725+00:00",
+  "GitCommit": "b03047a231403c27e6c5545140361127ddbff91f",
+  "ConfigurationHashSha256": "b4cccfa21f20e5d3be59b992fcdb8352849c36dd1d24529990235e918565b043",
+  "Environment": "Development",
+  "HoldoutOpened": false,
+  "FrozenVerification": {
+    "Passed": true,
+    "ExitCode": 0,
+    "Calibration": {
+      "CaseCount": 30,
+      "AcceptedMatches": 10,
+      "CorrectAcceptedMatches": 10,
+      "Precision": 1,
+      "Coverage": 0.3333,
+      "FalsePositives": 0,
+      "FalseNegatives": 3,
+      "WrongVisitCandidateChoices": 0
+    },
+    "RecoveryOnly": {
+      "CaseCount": 17,
+      "AcceptedMatches": 17,
+      "CorrectAcceptedMatches": 17,
+      "Precision": 1,
+      "Coverage": null,
+      "FalsePositives": 0,
+      "FalseNegatives": 0,
+      "WrongVisitCandidateChoices": 0
+    },
+    "AllLabeledHybrid": {
+      "CaseCount": 51,
+      "AcceptedMatches": 35,
+      "CorrectAcceptedMatches": 35,
+      "Precision": 1,
+      "Coverage": null,
+      "FalsePositives": 0,
+      "FalseNegatives": 0,
+      "WrongVisitCandidateChoices": 0
+    }
+  },
+  "LiveCalibration": {
+    "HybridAcceptanceCriteriaMet": true,
+    "HybridAcceptanceNotes": "Alle hybrid-acceptatiecriteria gehaald.",
+    "RecoveredPerformanceIds": [
+      279763,
+      279971,
+      280191,
+      280344,
+      280347
+    ],
+    "Metrics": {
+      "CaseCount": 30,
+      "AcceptedMatches": 10,
+      "CorrectAcceptedMatches": 10,
+      "Precision": 1,
+      "Coverage": 0.3333,
+      "FalsePositives": 0,
+      "FalseNegatives": 3,
+      "WrongStopIdChoices": 0
+    },
+    "Errors": [
+      {
+        "PerformanceId": 280278,
+        "Label": "CorrectCandidate",
+        "ExpectedStopId": "294915521/295092273",
+        "ReviewerConfidence": "High",
+        "Reason": "FN: matcher onthield zich bij CorrectCandidate.",
+        "PredictedDecision": "Unresolved",
+        "PredictedStopId": null
+      },
+      {
+        "PerformanceId": 280279,
+        "Label": "CorrectCandidate",
+        "ExpectedStopId": "294706853/294867362",
+        "ReviewerConfidence": "High",
+        "Reason": "FN: matcher onthield zich bij CorrectCandidate.",
+        "PredictedDecision": "Unresolved",
+        "PredictedStopId": null
+      },
+      {
+        "PerformanceId": 280282,
+        "Label": "CorrectCandidate",
+        "ExpectedStopId": "295542333/295553538",
+        "ReviewerConfidence": "Medium",
+        "Reason": "FN: matcher onthield zich bij CorrectCandidate.",
+        "PredictedDecision": "Unresolved",
+        "PredictedStopId": null
+      }
+    ]
+  },
+  "LiveRecoveryAudit": {
+    "RecoveryOnly": {
+      "CaseCount": 17,
+      "AcceptedMatches": 17,
+      "CorrectAcceptedMatches": 17,
+      "Precision": 1,
+      "FalsePositives": 0,
+      "FalseNegatives": 0,
+      "WrongStopIdChoices": 0
+    },
+    "AllLabeledHybrid": {
+      "CaseCount": 51,
+      "AcceptedMatches": 35,
+      "CorrectAcceptedMatches": 35,
+      "Precision": 1,
+      "FalsePositives": 0,
+      "FalseNegatives": 0,
+      "WrongStopIdChoices": 0
+    },
+    "Errors": [],
+    "Notes": [
+      "Auditset oververtegenwoordigt recoverycases; niet gebruiken voor coverage-schatting.",
+      "MultiFragmentVisits=5"
+    ]
+  },
+  "DevelopmentSanityCheck": {
+    "CaseCount": 200,
+    "Accepted": 49,
+    "Unresolved": 82,
+    "Ambiguous": 69,
+    "RecoveryOnlyMatches": 23,
+    "RecoveryByDistanceZone": {
+      "Strong0To100": 13,
+      "Probable101To250": 10
+    },
+    "RecoveryByOverlapZone": {
+      "StrongOverlap": 20,
+      "ModerateOverlap": 3
+    },
+    "NotableRiskPatterns": [
+      "2 short-chain uitzonderingen met overlap <10 min en <50%: 279971,280344"
+    ]
+  },
+  "PreviousLiveComparison": {
+    "PreviousAccepted": 47,
+    "PreviousUnresolved": 81,
+    "PreviousAmbiguous": 72,
+    "PreviousRecoveryOnly": 24,
+    "NewAccepted": 49,
+    "NewUnresolved": 82,
+    "NewAmbiguous": 69,
+    "NewRecoveryOnly": 23
+  },
+  "Diagnoses": {
+    "Case279970": {
+      "Issue": "Ambiguous without recovery despite 25 min overlap; same-LACLEUNIK shared visit treated as competition / margin failure",
+      "Fix": "Ignore same-LACLEUNIK overlap as competition; allow short-chain / shared visit recovery",
+      "LiveOutcome": "RecoveredProbable"
+    },
+    "Case279971": {
+      "Issue": "Unresolved probable-distance with competing performance overlap on shared visit with 279970",
+      "Fix": "Same-LACLEUNIK overlaps are not competing; short-chain when overlap <10 requires >=20% overlap percent",
+      "LiveOutcome": "Recovered (in RecoveredPerformanceIds)"
+    },
+    "WeakOverlapCase280346": {
+      "Issue": "Short-chain recovery accepted boundary leakage (4 min / 10%) onto longer adjacent same-LACLEUNIK visit",
+      "Fix": "Short-chain requires MinimumOverlapPercent when absolute overlap < RecoveryMinimumOverlapMinutes",
+      "LiveOutcome": "Ambiguous / not accepted"
+    }
+  },
+  "ShortChainExceptionsWithWeakAbsoluteOverlap": [
+    279971,
+    280344
+  ],
+  "AcceptanceCriteriaMet": true,
+  "ReadyForOneShotHoldout": true
+}

@@ -117,6 +117,8 @@ internal static class PrecisionPreservingHybridMatcher
             return false;
         }
 
+        // Shared same-location visit chains may leave Ambiguous margins between far competitors;
+        // do not require score margin when the short-chain exception already validated the visit.
         if (!shortChain &&
             candidates.Count > 1 &&
             selected.TotalScore - candidates[1].TotalScore < options.RecoveryMinimumScoreMargin)
@@ -148,62 +150,16 @@ internal static class PrecisionPreservingHybridMatcher
         NormalizedPilotPerformance performance,
         AdaptiveMatchCandidate selected,
         IReadOnlyList<NormalizedPilotPerformance> sameDayPerformances,
-        AdaptiveLocationMatchingOptions options)
-    {
-        var lac = performance.DeliveryAddressExternalId;
-        if (string.IsNullOrWhiteSpace(lac))
-        {
-            return false;
-        }
-
-        var adjacent = sameDayPerformances
-            .Where(item =>
-                item.ExternalId != performance.ExternalId &&
-                string.Equals(
-                    item.DeliveryAddressExternalId,
-                    lac,
-                    StringComparison.OrdinalIgnoreCase))
-            .Where(item =>
-                OverlapMinutes(
-                    item.StartDateTime,
-                    item.EndDateTime,
-                    selected.Stop.Arrival,
-                    selected.Stop.Departure) >= options.RecoveryShortChainMinOverlapMinutes)
-            .OrderBy(item => item.StartDateTime)
-            .ToArray();
-        if (adjacent.Length == 0)
-        {
-            return false;
-        }
-
-        if (selected.OverlapMinutes < options.RecoveryShortChainMinOverlapMinutes)
-        {
-            return false;
-        }
-
-        // Pick the temporally closest adjacent performance with same LACLEUNIK.
-        var neighbor = adjacent
-            .OrderBy(item =>
-                Math.Min(
-                    Math.Abs((item.StartDateTime - performance.EndDateTime).TotalMinutes),
-                    Math.Abs((item.EndDateTime - performance.StartDateTime).TotalMinutes)))
-            .First();
-
-        var chainStart = performance.StartDateTime < neighbor.StartDateTime
-            ? performance.StartDateTime
-            : neighbor.StartDateTime;
-        var chainEnd = performance.EndDateTime > neighbor.EndDateTime
-            ? performance.EndDateTime
-            : neighbor.EndDateTime;
-        var chainMinutes = Math.Max(1, (chainEnd - chainStart).TotalMinutes);
-        var chainOverlap = OverlapMinutes(
-            chainStart,
-            chainEnd,
-            selected.Stop.Arrival,
-            selected.Stop.Departure);
-        var chainPercent = 100d * chainOverlap / chainMinutes;
-        return chainPercent >= options.RecoveryShortChainMinCombinedOverlapPercent;
-    }
+        AdaptiveLocationMatchingOptions options) =>
+        AdjacentPerformanceVisitRules.MeetsSharedVisitChain(
+            performance,
+            selected.Stop,
+            selected.OverlapMinutes,
+            selected.OverlapPercent,
+            sameDayPerformances,
+            options,
+            out _,
+            out _);
 
     private static bool HasLocationEvidence(
         AdaptiveMatchCandidate candidate,
@@ -260,7 +216,6 @@ internal static class PrecisionPreservingHybridMatcher
         IReadOnlyList<NormalizedPilotPerformance> sameDayPerformances,
         AdaptiveLocationMatchingOptions options)
     {
-        var lac = performance.DeliveryAddressExternalId;
         var arrivalAlignmentToCurrent = Math.Abs(
             (candidate.Stop.Arrival - performance.StartDateTime).TotalMinutes);
 
@@ -271,22 +226,17 @@ internal static class PrecisionPreservingHybridMatcher
                 continue;
             }
 
-            var sameLac = !string.IsNullOrWhiteSpace(lac) &&
-                          string.Equals(
-                              neighbor.DeliveryAddressExternalId,
-                              lac,
-                              StringComparison.OrdinalIgnoreCase);
-            var neighborOverlap = OverlapMinutes(
+            // Same LACLEUNIK / work location: shared visit is allowed (short-chain recovery).
+            if (AdjacentPerformanceVisitRules.SameWorkLocation(performance, neighbor))
+            {
+                continue;
+            }
+
+            var neighborOverlap = AdjacentPerformanceVisitRules.OverlapMinutes(
                 neighbor.StartDateTime,
                 neighbor.EndDateTime,
                 candidate.Stop.Arrival,
                 candidate.Stop.Departure);
-
-            // Same LACLEUNIK chain: shared visit is allowed (handled by short-chain recovery).
-            if (sameLac)
-            {
-                continue;
-            }
 
             // Different location: reject small boundary leakage onto the neighbor's visit.
             if (candidate.Stop.Arrival >= performance.EndDateTime)
@@ -326,12 +276,6 @@ internal static class PrecisionPreservingHybridMatcher
         DateTimeOffset firstStart,
         DateTimeOffset firstEnd,
         DateTimeOffset secondStart,
-        DateTimeOffset secondEnd)
-    {
-        var start = firstStart > secondStart ? firstStart : secondStart;
-        var end = firstEnd < secondEnd ? firstEnd : secondEnd;
-        return end <= start
-            ? 0
-            : (int)Math.Round((end - start).TotalMinutes, MidpointRounding.AwayFromZero);
-    }
+        DateTimeOffset secondEnd) =>
+        AdjacentPerformanceVisitRules.OverlapMinutes(firstStart, firstEnd, secondStart, secondEnd);
 }

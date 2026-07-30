@@ -693,6 +693,8 @@ internal sealed class CalibrationSingleReviewerEvaluationService(
         var missingLive = 0;
         var recoveryFar = 0;
         var recoveryWeakOverlap = 0;
+        var weakOverlapIds = new List<long>();
+        var shortChainWeakOverlapIds = new List<long>();
 
         var usedOffline = liveByPerformance.Count == 0;
         if (usedOffline)
@@ -709,6 +711,7 @@ internal sealed class CalibrationSingleReviewerEvaluationService(
             int? overlapMinutes;
             double? overlapPercent;
             double? distanceMeters;
+            var shortChainRecovery = false;
 
             if (usedOffline)
             {
@@ -716,6 +719,29 @@ internal sealed class CalibrationSingleReviewerEvaluationService(
                 var offline = PredictOffline(item, options, recovery: true);
                 usedRecovery = offline.UsedRecovery;
                 decision = offline.Decision;
+                shortChainRecovery = false;
+                if (offline.UsedRecovery)
+                {
+                    var bestVisit = OfflineVisitMerge.Merge(item.Candidates, options)
+                        .Select(visit => (
+                            Visit: visit,
+                            Overlap: OfflineVisitMerge.OverlapMinutes(
+                                item.Start,
+                                item.End,
+                                visit.Arrival,
+                                visit.Departure)))
+                        .OrderByDescending(entry => entry.Overlap)
+                        .FirstOrDefault();
+                    if (bestVisit.Visit is not null)
+                    {
+                        shortChainRecovery = OfflineVisitMerge.MeetsShortChain(
+                            item,
+                            bestVisit.Visit,
+                            bestVisit.Overlap,
+                            options);
+                    }
+                }
+
                 var offlineVisit = OfflineVisitMerge.Merge(item.Candidates, options)
                     .Select(visit =>
                     {
@@ -779,6 +805,8 @@ internal sealed class CalibrationSingleReviewerEvaluationService(
                     : (int)Math.Round((double)hybrid.Selected.OverlapMinutes, MidpointRounding.AwayFromZero);
                 overlapPercent = hybrid.Selected?.OverlapPercent;
                 distanceMeters = hybrid.Selected?.DistanceMeters;
+                shortChainRecovery = hybrid.UsedRecovery &&
+                    (hybrid.RecoveryReason?.Contains("short-chain", StringComparison.OrdinalIgnoreCase) ?? false);
             }
 
             switch (decision)
@@ -813,7 +841,15 @@ internal sealed class CalibrationSingleReviewerEvaluationService(
 
             if (overlapMinutes is < 10 && overlapPercent is < 50)
             {
-                recoveryWeakOverlap++;
+                if (shortChainRecovery)
+                {
+                    shortChainWeakOverlapIds.Add(item.PerformanceId);
+                }
+                else
+                {
+                    recoveryWeakOverlap++;
+                    weakOverlapIds.Add(item.PerformanceId);
+                }
             }
         }
 
@@ -830,7 +866,16 @@ internal sealed class CalibrationSingleReviewerEvaluationService(
 
         if (recoveryWeakOverlap > 0)
         {
-            risks.Add($"{recoveryWeakOverlap} recovery-matches met zwakke overlap (<10 min en <50%).");
+            risks.Add(
+                $"{recoveryWeakOverlap} recovery-matches met zwakke overlap (<10 min en <50%) zonder geldige keten: " +
+                string.Join(',', weakOverlapIds));
+        }
+
+        if (shortChainWeakOverlapIds.Count > 0)
+        {
+            risks.Add(
+                $"{shortChainWeakOverlapIds.Count} short-chain uitzonderingen met overlap <10 min en <50%: " +
+                string.Join(',', shortChainWeakOverlapIds));
         }
 
         if (missingLive > 0 && !usedOffline)

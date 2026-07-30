@@ -117,6 +117,131 @@ public sealed class VisitCandidateAndRecoveryTests
     }
 
     [Fact]
+    public void Adaptive_DoesNotTreatSameLacAdjacentVisitAsCompetition()
+    {
+        var options = new AdaptiveLocationMatchingOptions();
+        var first = Performance(
+            10,
+            "2026-07-17T09:40:00+02:00",
+            "2026-07-17T10:00:00+02:00",
+            lac: "12989");
+        var second = Performance(
+            11,
+            "2026-07-17T10:00:00+02:00",
+            "2026-07-17T11:00:00+02:00",
+            lac: "12989");
+        var resolution = Resolution(first, 51.05, 3.72, "street", 0.8, 0.0);
+        var shared = Merged(
+            "shared",
+            51.0504m,
+            3.7204m,
+            DateTimeOffset.Parse("2026-07-17T09:53:00+02:00", Invariant),
+            DateTimeOffset.Parse("2026-07-17T10:24:00+02:00", Invariant));
+
+        var hybridFirst = PrecisionPreservingHybridMatcher.Match(
+            first,
+            "Tech",
+            resolution,
+            [shared],
+            [first, second],
+            new Dictionary<string, HistoricalLocationCluster>(StringComparer.Ordinal),
+            options,
+            new HaversineDistanceCalculator());
+        var hybridSecond = PrecisionPreservingHybridMatcher.Match(
+            second,
+            "Tech",
+            Resolution(second, 51.05, 3.72, "street", 0.8, 0.0),
+            [shared],
+            [first, second],
+            new Dictionary<string, HistoricalLocationCluster>(StringComparer.Ordinal),
+            options,
+            new HaversineDistanceCalculator());
+
+        Assert.True(
+            hybridFirst.Decision is AdaptiveMatchDecision.Confirmed or AdaptiveMatchDecision.Probable);
+        Assert.Equal("shared", hybridFirst.Selected?.Stop.MergedStopId);
+        Assert.True(
+            hybridSecond.Decision is AdaptiveMatchDecision.Confirmed or AdaptiveMatchDecision.Probable ||
+            hybridSecond.UsedRecovery);
+        Assert.Equal("shared", hybridSecond.Selected?.Stop.MergedStopId);
+    }
+
+    [Fact]
+    public void Recovery_RejectsWeakOverlap_EvenWithDifferentLacNeighbor()
+    {
+        var options = new AdaptiveLocationMatchingOptions();
+        var current = Performance(
+            20,
+            "2026-07-09T14:40:00+02:00",
+            "2026-07-09T14:45:00+02:00",
+            lac: "16414");
+        var neighbor = Performance(
+            21,
+            "2026-07-09T14:45:00+02:00",
+            "2026-07-09T15:50:00+02:00",
+            lac: "99999");
+        var resolution = Resolution(current, 51.05, 3.72, "street", 0.8, 0.0);
+        var weak = Merged(
+            "weak",
+            51.0505m,
+            3.7205m,
+            DateTimeOffset.Parse("2026-07-09T14:43:00+02:00", Invariant),
+            DateTimeOffset.Parse("2026-07-09T15:44:00+02:00", Invariant));
+
+        var hybrid = PrecisionPreservingHybridMatcher.Match(
+            current,
+            "Tech",
+            resolution,
+            [weak],
+            [current, neighbor],
+            new Dictionary<string, HistoricalLocationCluster>(StringComparer.Ordinal),
+            options,
+            new HaversineDistanceCalculator());
+
+        Assert.False(hybrid.UsedRecovery);
+        Assert.True(
+            hybrid.Decision is AdaptiveMatchDecision.Unresolved or AdaptiveMatchDecision.Ambiguous);
+    }
+
+    [Fact]
+    public void Recovery_RejectsBoundaryLeakage_OntoLongerAdjacentSameLacPerformance()
+    {
+        var options = new AdaptiveLocationMatchingOptions();
+        // Current slot is long; visit only clips the last minutes then belongs to the next job.
+        var current = Performance(
+            20,
+            "2026-07-27T10:20:00+02:00",
+            "2026-07-27T11:00:00+02:00",
+            lac: "11645");
+        var next = Performance(
+            21,
+            "2026-07-27T11:00:00+02:00",
+            "2026-07-27T12:00:00+02:00",
+            lac: "11645");
+        var resolution = Resolution(current, 51.05, 3.72, "street", 0.8, 0.0);
+        var mostlyNext = Merged(
+            "next-owned",
+            51.0504m,
+            3.7204m,
+            DateTimeOffset.Parse("2026-07-27T10:55:00+02:00", Invariant),
+            DateTimeOffset.Parse("2026-07-27T12:00:00+02:00", Invariant));
+
+        var hybrid = PrecisionPreservingHybridMatcher.Match(
+            current,
+            "Tech",
+            resolution,
+            [mostlyNext],
+            [current, next],
+            new Dictionary<string, HistoricalLocationCluster>(StringComparer.Ordinal),
+            options,
+            new HaversineDistanceCalculator());
+
+        Assert.False(hybrid.UsedRecovery);
+        Assert.True(
+            hybrid.Decision is AdaptiveMatchDecision.Unresolved or AdaptiveMatchDecision.Ambiguous);
+    }
+
+    [Fact]
     public void Recovery_RejectsStopStartingAfterPerformanceEnd()
     {
         var options = new AdaptiveLocationMatchingOptions();
