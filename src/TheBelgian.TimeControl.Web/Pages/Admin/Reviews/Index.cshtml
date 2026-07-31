@@ -15,6 +15,30 @@
     @MatcherUsagePolicy.BannerBody
 </div>
 
+@if (Model.IsLivePilot)
+{
+    <div class="alert alert-info mb-3" role="status">
+        <strong>@(Model.LivePilot?.Banner ?? "Read-only pilot — geen automatische correcties.")</strong>
+        @if (Model.LivePilot is { } pilot)
+        {
+            <div class="small mt-2">
+                @pilot.TechnicianName (@pilot.TechnicianResourceId) ·
+                @pilot.DateFrom.ToString("yyyy-MM-dd")–@pilot.DateTo.ToString("yyyy-MM-dd")
+            </div>
+            <div class="small mt-1">
+                Gelezen: @pilot.PlenionPerformancesRead ·
+                Gekoppeld: @pilot.LinkedPerformances ·
+                Uitzonderingen: @pilot.Exceptions ·
+                Klein: @pilot.SmallDeviations ·
+                Onzeker: @pilot.MatchUncertainty ·
+                Datakwaliteit: @pilot.DataQuality ·
+                Afgehandeld: @pilot.Completed ·
+                Voorstellen: @pilot.ProposedMatches
+            </div>
+        }
+    </div>
+}
+
 <details class="mb-4">
     <summary class="fw-semibold">Technische informatie</summary>
     <dl class="small mt-2 mb-0">

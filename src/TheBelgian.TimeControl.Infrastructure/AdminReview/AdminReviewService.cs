@@ -11,9 +11,15 @@ internal sealed class AdminReviewService(
     IReviewCaseProvider caseProvider,
     IReviewExplanationService explanationService,
     AdminReviewDecisionRepository decisionRepository,
+    AdminReviewSessionMetricRepository sessionMetricRepository,
     TimeProvider timeProvider) : IAdminReviewService
 {
     public string DataSourceName => caseProvider.ProviderName;
+
+    public bool IsLivePilot => caseProvider is LiveReviewCaseProvider;
+
+    public LivePilotSummary? LivePilotSummary =>
+        caseProvider is LiveReviewCaseProvider live ? live.Summary : null;
 
     public async Task<AdminReviewSearchResult> SearchAsync(
         AdminReviewFilter filter,
@@ -21,12 +27,13 @@ internal sealed class AdminReviewService(
     {
         EnsureSafeProvider();
         var cases = await LoadWithAdminOverlayAsync(cancellationToken);
-        return SpotcheckPriorityCalculator.ApplyFilterAndPage(
+        var result = SpotcheckPriorityCalculator.ApplyFilterAndPage(
             cases,
             filter,
             caseProvider.UniqueCaseCount,
             caseProvider.DuplicatesRemoved,
             caseProvider.RawCaseCount);
+        return result with { LivePilot = LivePilotSummary };
     }
 
     public async Task<ReviewCase?> GetAsync(
@@ -43,6 +50,24 @@ internal sealed class AdminReviewService(
 
         var explanation = explanationService.Explain(match.Source, match.Matcher);
         return match with { DeterministicExplanation = explanation };
+    }
+
+    public async Task RecordCaseOpenedAsync(
+        long performanceId,
+        CancellationToken cancellationToken)
+    {
+        EnsureSafeProvider();
+        var current = await GetAsync(performanceId, cancellationToken);
+        if (current is null)
+        {
+            return;
+        }
+
+        await sessionMetricRepository.MarkOpenedAsync(
+            performanceId,
+            current.MatcherStatus,
+            timeProvider.GetUtcNow(),
+            cancellationToken);
     }
 
     public async Task<AdminReviewDecisionAudit> RecordDecisionAsync(
@@ -86,6 +111,7 @@ internal sealed class AdminReviewService(
             chosenStops = current.Matcher.ProposedVisit.ConstituentStopIds;
         }
 
+        var decidedAt = timeProvider.GetUtcNow();
         var audit = new AdminReviewDecisionAudit
         {
             PerformanceId = performanceId,
@@ -99,19 +125,39 @@ internal sealed class AdminReviewService(
             Decision = decision.ToString(),
             ReasonOrComment = string.IsNullOrWhiteSpace(comment) ? null : comment.Trim(),
             Reviewer = reviewer.Trim(),
-            DecidedAt = timeProvider.GetUtcNow(),
+            DecidedAt = decidedAt,
             MatcherCommit = current.Matcher.MatcherCommit,
             ConfigurationHash = current.Matcher.ConfigurationHash,
         };
 
-        // Append-only: never update prior rows; never mutate SourceEvidence or MatcherAssessment.
-        return await decisionRepository.AppendAsync(audit, cancellationToken);
+        var saved = await decisionRepository.AppendAsync(audit, cancellationToken);
+
+        var proposedId = current.Matcher.ProposedVisit?.VisitCandidateId;
+        var proposedConfirmed =
+            decision == AdminReviewStatus.Confirmed &&
+            !string.IsNullOrWhiteSpace(proposedId) &&
+            string.Equals(proposedId, chosenVisitCandidateId, StringComparison.Ordinal);
+
+        await sessionMetricRepository.CompleteAsync(
+            performanceId,
+            decision.ToString(),
+            current.MatcherStatus,
+            proposedConfirmed,
+            decidedAt,
+            cancellationToken);
+
+        return saved;
     }
 
     public Task<IReadOnlyList<AdminReviewDecisionAudit>> GetAuditTrailAsync(
         long performanceId,
         CancellationToken cancellationToken) =>
         decisionRepository.ListForPerformanceAsync(performanceId, cancellationToken);
+
+    public Task<IReadOnlyList<AdminReviewSessionMetric>> GetSessionMetricsAsync(
+        long performanceId,
+        CancellationToken cancellationToken) =>
+        sessionMetricRepository.ListForPerformanceAsync(performanceId, cancellationToken);
 
     private async Task<IReadOnlyList<ReviewCase>> LoadWithAdminOverlayAsync(
         CancellationToken cancellationToken)

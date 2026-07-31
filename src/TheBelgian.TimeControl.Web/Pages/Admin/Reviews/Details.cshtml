@@ -214,6 +214,40 @@ else
     <p class="audit-note">
         Beslissingen zijn append-only: eerdere rijen blijven staan en worden nooit overschreven.
     </p>
+    @if (Model.IsLivePilot)
+    {
+        <p class="small text-muted">Read-only pilot — geen automatische correcties.</p>
+    }
+    @if (Model.SessionMetrics.Count > 0)
+    {
+        <div class="table-responsive mb-3">
+            <table class="table table-sm">
+                <thead>
+                    <tr>
+                        <th>Geopend</th>
+                        <th>Beslist</th>
+                        <th>Duur (s)</th>
+                        <th>Beslissing</th>
+                        <th>Matcherstatus</th>
+                        <th>Voorstel bevestigd</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var metric in Model.SessionMetrics)
+                {
+                    <tr>
+                        <td class="small text-nowrap">@metric.OpenedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
+                        <td class="small text-nowrap">@(metric.DecidedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "—")</td>
+                        <td>@(metric.DurationSeconds is null ? "—" : metric.DurationSeconds.Value.ToString("0"))</td>
+                        <td>@(metric.Decision ?? "—")</td>
+                        <td>@(metric.MatcherStatus is null ? "—" : AdminReviewDisplay.EvidenceLabel(metric.MatcherStatus))</td>
+                        <td>@(metric.ProposedCandidateConfirmed is null ? "—" : (metric.ProposedCandidateConfirmed.Value ? "ja" : "nee"))</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    }
     @if (Model.AuditTrail.Count == 0)
     {
         <p class="text-muted">Nog geen beslissingen.</p>

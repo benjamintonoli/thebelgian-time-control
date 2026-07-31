@@ -191,4 +191,34 @@ public sealed record AdminReviewSearchResult(
     AdminReviewCategoryCounts Counts,
     int UniqueCaseCount,
     int DuplicatesRemoved,
-    int RawCaseCount);
+    int RawCaseCount,
+    LivePilotSummary? LivePilot = null);
+
+/// <summary>Compact live-pilot read summary. No personnel evaluation.</summary>
+public sealed record LivePilotSummary(
+    string TechnicianResourceId,
+    string TechnicianName,
+    DateOnly DateFrom,
+    DateOnly DateTo,
+    int PlenionPerformancesRead,
+    int LinkedPerformances,
+    int Exceptions,
+    int SmallDeviations,
+    int MatchUncertainty,
+    int DataQuality,
+    int Completed,
+    int ProposedMatches,
+    string Banner);
+
+/// <summary>Local timing for human review sessions (append/update, no HR conclusions).</summary>
+public sealed class AdminReviewSessionMetric
+{
+    public long Id { get; set; }
+    public long PerformanceId { get; set; }
+    public DateTimeOffset OpenedAt { get; set; }
+    public DateTimeOffset? DecidedAt { get; set; }
+    public double? DurationSeconds { get; set; }
+    public string? Decision { get; set; }
+    public string? MatcherStatus { get; set; }
+    public bool? ProposedCandidateConfirmed { get; set; }
+}

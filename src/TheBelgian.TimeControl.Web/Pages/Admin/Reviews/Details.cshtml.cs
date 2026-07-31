@@ -37,6 +37,10 @@ public sealed class DetailsModel(
 
     public IReadOnlyList<AdminReviewDecisionAudit> AuditTrail { get; private set; } = [];
 
+    public IReadOnlyList<AdminReviewSessionMetric> SessionMetrics { get; private set; } = [];
+
+    public bool IsLivePilot { get; private set; }
+
     public string? Message { get; private set; }
 
     public string? Error { get; private set; }
@@ -48,6 +52,9 @@ public sealed class DetailsModel(
         {
             return NotFound();
         }
+
+        await reviewService.RecordCaseOpenedAsync(PerformanceId, cancellationToken);
+        SessionMetrics = await reviewService.GetSessionMetricsAsync(PerformanceId, cancellationToken);
 
         ChosenVisitCandidateId = Case.Admin.ChosenVisitCandidateId
             ?? Case.Matcher.ProposedVisit?.VisitCandidateId;
@@ -120,7 +127,9 @@ public sealed class DetailsModel(
 
     private async Task LoadAsync(CancellationToken cancellationToken)
     {
+        IsLivePilot = reviewService.IsLivePilot;
         Case = await reviewService.GetAsync(PerformanceId, cancellationToken);
         AuditTrail = await reviewService.GetAuditTrailAsync(PerformanceId, cancellationToken);
+        SessionMetrics = await reviewService.GetSessionMetricsAsync(PerformanceId, cancellationToken);
     }
 }

@@ -77,6 +77,21 @@ public static class DependencyInjection
                 }
             }, "Adaptieve locatieparameters moeten geldig zijn.")
             .ValidateOnStart();
+        services.AddOptions<ReviewDataOptions>()
+            .Bind(configuration.GetSection(ReviewDataOptions.SectionName))
+            .Validate(options =>
+            {
+                try
+                {
+                    options.Validate();
+                    return true;
+                }
+                catch (InvalidOperationException)
+                {
+                    return false;
+                }
+            }, "ReviewData-configuratie is ongeldig.")
+            .ValidateOnStart();
         var sqliteConnection = configuration.GetConnectionString("TimeControl")
             ?? "Data Source=data/time-control.db";
         services.AddDbContextFactory<TimeControlDbContext>(options =>
@@ -136,9 +151,18 @@ public static class DependencyInjection
         services.AddScoped<LocationMatchingRecoveryAuditService>();
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<IReviewExplanationService, DeterministicReviewExplanationService>();
-        services.AddScoped<IReviewCaseProvider, OfflineReviewCaseProvider>();
+        services.AddScoped<OfflineReviewCaseProvider>();
         services.AddScoped<LiveReviewCaseProvider>();
+        services.AddScoped<IReviewCaseProvider>(provider =>
+        {
+            var reviewData = provider.GetRequiredService<IOptions<ReviewDataOptions>>().Value;
+            reviewData.Validate();
+            return reviewData.IsLivePilot
+                ? provider.GetRequiredService<LiveReviewCaseProvider>()
+                : provider.GetRequiredService<OfflineReviewCaseProvider>();
+        });
         services.AddScoped<AdminReviewDecisionRepository>();
+        services.AddScoped<AdminReviewSessionMetricRepository>();
         services.AddScoped<IAdminReviewService, AdminReviewService>();
         return services;
     }
@@ -197,6 +221,18 @@ public static class DependencyInjection
             );
             CREATE INDEX IF NOT EXISTS "IX_AdminReviewDecisionAudits_PerformanceId_DecidedAt"
                 ON "AdminReviewDecisionAudits" ("PerformanceId", "DecidedAt");
+            CREATE TABLE IF NOT EXISTS "AdminReviewSessionMetrics" (
+                "Id" INTEGER NOT NULL CONSTRAINT "PK_AdminReviewSessionMetrics" PRIMARY KEY AUTOINCREMENT,
+                "PerformanceId" INTEGER NOT NULL,
+                "OpenedAt" TEXT NOT NULL,
+                "DecidedAt" TEXT NULL,
+                "DurationSeconds" REAL NULL,
+                "Decision" TEXT NULL,
+                "MatcherStatus" TEXT NULL,
+                "ProposedCandidateConfirmed" INTEGER NULL
+            );
+            CREATE INDEX IF NOT EXISTS "IX_AdminReviewSessionMetrics_PerformanceId_OpenedAt"
+                ON "AdminReviewSessionMetrics" ("PerformanceId", "OpenedAt");
             """,
             cancellationToken);
     }

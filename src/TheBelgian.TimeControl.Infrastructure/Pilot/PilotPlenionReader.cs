@@ -47,11 +47,13 @@ internal sealed class PilotPlenionReader(
             SELECT IDRESOURCE, RESCODE, OMSCHR
             FROM Resource
             WHERE SOORT = 1
-              AND (OMSCHR LIKE ? OR RESCODE = ?)
+              AND (OMSCHR LIKE ? OR RESCODE = ? OR CAST(IDRESOURCE AS VARCHAR(32)) = ?)
             """;
         await using var command = new OdbcCommand(sql, connection);
-        command.Parameters.Add("name", OdbcType.VarChar).Value = $"%{query.Trim()}%";
-        command.Parameters.Add("code", OdbcType.VarChar).Value = query.Trim();
+        var trimmed = query.Trim();
+        command.Parameters.Add("name", OdbcType.VarChar).Value = $"%{trimmed}%";
+        command.Parameters.Add("code", OdbcType.VarChar).Value = trimmed;
+        command.Parameters.Add("id", OdbcType.VarChar).Value = trimmed;
         var matches = new List<Technician>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))

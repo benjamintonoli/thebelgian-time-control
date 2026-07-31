@@ -40,11 +40,17 @@ public sealed class IndexModel(
 
     public string DataSourceName { get; private set; } = string.Empty;
 
+    public bool IsLivePilot { get; private set; }
+
+    public LivePilotSummary? LivePilot { get; private set; }
+
     public string? Error { get; private set; }
 
     public async Task OnGetAsync(CancellationToken cancellationToken)
     {
         DataSourceName = reviewService.DataSourceName;
+        IsLivePilot = reviewService.IsLivePilot;
+        LivePilot = reviewService.LivePilotSummary;
         try
         {
             var filter = new AdminReviewFilter(
@@ -56,6 +62,7 @@ public sealed class IndexModel(
                 Page: PageNumber <= 0 ? 1 : PageNumber,
                 PageSize: SpotcheckPriorityCalculator.DefaultPageSize);
             Result = await reviewService.SearchAsync(filter, cancellationToken);
+            LivePilot = Result.LivePilot ?? LivePilot;
             var normalized = SpotcheckPriorityCalculator.NormalizeFilter(filter);
             Tab = normalized.Tab;
             Category = normalized.Category;

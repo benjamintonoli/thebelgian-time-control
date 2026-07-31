@@ -16,12 +16,21 @@ public sealed class AdminReviewSpotcheckTests
 {
     [Theory]
     [InlineData(0, SpotcheckPriorityTier.Informational)]
+    [InlineData(3, SpotcheckPriorityTier.Informational)]
     [InlineData(5, SpotcheckPriorityTier.SmallDeviation)]
+    [InlineData(14, SpotcheckPriorityTier.SmallDeviation)]
     [InlineData(15, SpotcheckPriorityTier.IndividualException)]
+    [InlineData(29, SpotcheckPriorityTier.IndividualException)]
     [InlineData(30, SpotcheckPriorityTier.HighPriority)]
     public void Priority_UsesDocumentedBands(int deviation, SpotcheckPriorityTier expected)
     {
         Assert.Equal(expected, SpotcheckPriorityCalculator.FromDeviationMinutes(deviation));
+    }
+
+    [Fact]
+    public void Priority_NullWithoutVisitAnchor()
+    {
+        Assert.Null(SpotcheckPriorityCalculator.FromDeviationMinutes(null));
     }
 
     [Fact]
@@ -69,6 +78,64 @@ public sealed class AdminReviewSpotcheckTests
         Assert.DoesNotContain(result.Items, item => item.Category == ReviewWorkCategory.SmallDeviation);
         Assert.DoesNotContain(result.Items, item => item.Category == ReviewWorkCategory.Informational);
         Assert.DoesNotContain(result.Items, item => item.Category == ReviewWorkCategory.Completed);
+    }
+
+    [Fact]
+    public void Informational_And_Completed_NotInDefaultList()
+    {
+        var cases = new[]
+        {
+            Proposed(1, 40, AdminReviewStatus.Pending),
+            Proposed(2, 2, AdminReviewStatus.Pending),
+            Proposed(3, 40, AdminReviewStatus.Confirmed),
+            UnresolvedWithoutVisit(4),
+        };
+        var derived = cases
+            .Select(item => SpotcheckPriorityCalculator.WithDerivedFields(item, false))
+            .ToArray();
+        Assert.Equal(ReviewWorkCategory.Informational, derived[1].Category);
+        Assert.Equal(ReviewWorkCategory.Completed, derived[2].Category);
+
+        var result = SpotcheckPriorityCalculator.ApplyFilterAndPage(
+            derived,
+            SpotcheckPriorityCalculator.DefaultWorklistFilter(),
+            uniqueCaseCount: 4,
+            duplicatesRemoved: 0,
+            rawCaseCount: 4);
+
+        Assert.All(result.Items, item => Assert.Equal(ReviewWorkCategory.ActionableDeviation, item.Category));
+        Assert.DoesNotContain(result.Items, item => item.Category == ReviewWorkCategory.Informational);
+        Assert.DoesNotContain(result.Items, item => item.Category == ReviewWorkCategory.Completed);
+        Assert.Single(result.Items);
+        Assert.Equal(1, result.TotalMatching);
+    }
+
+    [Fact]
+    public void DefaultFilter_PagesAt25_NewestFirst()
+    {
+        var cases = Enumerable.Range(1, 30)
+            .Select(i => SpotcheckPriorityCalculator.WithDerivedFields(
+                Proposed(i, 40, AdminReviewStatus.Pending, date: new DateOnly(2026, 7, i <= 31 ? i : 1)),
+                false))
+            .ToArray();
+
+        var page1 = SpotcheckPriorityCalculator.ApplyFilterAndPage(
+            cases,
+            SpotcheckPriorityCalculator.DefaultWorklistFilter(page: 1),
+            30,
+            0,
+            30);
+        Assert.Equal(25, page1.Items.Count);
+        Assert.Equal(30, page1.TotalMatching);
+        Assert.True(page1.Items[0].Date >= page1.Items[^1].Date);
+
+        var page2 = SpotcheckPriorityCalculator.ApplyFilterAndPage(
+            cases,
+            SpotcheckPriorityCalculator.DefaultWorklistFilter(page: 2),
+            30,
+            0,
+            30);
+        Assert.Equal(5, page2.Items.Count);
     }
 
     [Fact]
@@ -123,10 +190,76 @@ public sealed class AdminReviewSpotcheckTests
     {
         var derived = SpotcheckPriorityCalculator.WithDerivedFields(UnresolvedWithoutVisit(1), true);
         Assert.Null(derived.Matcher.StartDeviationMinutes);
+        Assert.Null(derived.Matcher.EndDeviationMinutes);
+        Assert.Null(derived.Matcher.MaxDeviationMinutes);
         Assert.Null(derived.Priority);
         Assert.Equal(ReviewWorkCategory.DataQuality, derived.Category);
         Assert.False(derived.HasRecurringConfirmedPattern);
         Assert.Equal(EvidenceStrength.NoReliableMatch, AdminReviewDisplay.Evidence(derived.MatcherStatus));
+    }
+
+    [Theory]
+    [InlineData(null, "—")]
+    [InlineData(0, "op tijd")]
+    [InlineData(31, "31 min later")]
+    [InlineData(-18, "18 min vroeger")]
+    public void DeviationTexts_AreCorrect(int? minutes, string expected)
+    {
+        Assert.Equal(expected, AdminReviewDisplay.Deviation(minutes));
+    }
+
+    [Fact]
+    public void AdminTexts_ReplaceInternalStatuses()
+    {
+        Assert.Equal("Waarschijnlijk bezoek", AdminReviewDisplay.MatcherStatus("RecoveredProbable"));
+        Assert.Equal("Sterk voorstel", AdminReviewDisplay.MatcherStatus("Probable"));
+        Assert.Equal("Meerdere mogelijke bezoeken", AdminReviewDisplay.MatcherStatus("Ambiguous"));
+        Assert.Equal("Geen betrouwbare match", AdminReviewDisplay.MatcherStatus("Unresolved"));
+        Assert.Equal("Menselijke bevestiging verplicht", MatcherUsagePolicy.BannerTitle);
+    }
+
+    [Fact]
+    public void Banner_IsShortAndHumanFacing()
+    {
+        Assert.Equal("Menselijke bevestiging verplicht", MatcherUsagePolicy.BannerTitle);
+        Assert.Equal(
+            "De tool doet voorstellen en voert geen automatische correcties uit.",
+            MatcherUsagePolicy.BannerBody);
+    }
+
+    [Fact]
+    public void NewCases_StartAsPending()
+    {
+        Assert.Equal(AdminReviewStatus.Pending, AdminReviewDecisionRules.InitialReviewStatus());
+    }
+
+    [Fact]
+    public void Confirmation_RequiresReviewer()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            AdminReviewDecisionRules.Validate(AdminReviewStatus.Confirmed, reviewer: " ", comment: null));
+        Assert.Contains("reviewer", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Rejection_RequiresReason()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            AdminReviewDecisionRules.Validate(AdminReviewStatus.Rejected, reviewer: "Ada", comment: null));
+        Assert.Contains("reden", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void AlternateCandidate_RequiresComment()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            AdminReviewDecisionRules.Validate(
+                AdminReviewStatus.Confirmed,
+                reviewer: "Ada",
+                comment: null,
+                proposedVisitCandidateId: "a/b",
+                chosenVisitCandidateId: "c/d"));
+        Assert.Contains("andere kandidaat", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -193,12 +326,32 @@ public sealed class AdminReviewSpotcheckTests
     }
 
     [Fact]
-    public void Banner_IsShortAndHumanFacing()
+    public async Task ReviewDuration_IsStoredOnDecision()
     {
-        Assert.Equal("Menselijke bevestiging verplicht", MatcherUsagePolicy.BannerTitle);
-        Assert.Equal(
-            "De tool doet voorstellen en voert geen automatische correcties uit.",
-            MatcherUsagePolicy.BannerBody);
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<TimeControlDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using (var context = new TimeControlDbContext(options))
+        {
+            await context.Database.EnsureCreatedAsync();
+        }
+
+        var repository = new AdminReviewSessionMetricRepository(new TestDbContextFactory(options));
+        var opened = DateTimeOffset.Parse("2026-07-01T10:00:00Z", CultureInfo.InvariantCulture);
+        await repository.MarkOpenedAsync(42, "Probable", opened, CancellationToken.None);
+        var decided = opened.AddMinutes(3);
+        var metric = await repository.CompleteAsync(
+            42,
+            nameof(AdminReviewStatus.Confirmed),
+            "Probable",
+            proposedCandidateConfirmed: true,
+            decided,
+            CancellationToken.None);
+        Assert.Equal(180, metric.DurationSeconds);
+        Assert.True(metric.ProposedCandidateConfirmed);
+        Assert.Equal(nameof(AdminReviewStatus.Confirmed), metric.Decision);
     }
 
     [Fact]
@@ -222,14 +375,20 @@ public sealed class AdminReviewSpotcheckTests
     {
         Assert.False(OfflineReviewCaseProvider.LoadsLockedHoldoutFlag);
         Assert.False(MatcherUsagePolicy.PlenionWritebackAllowed);
-        Assert.False(LiveReviewCaseProvider.IsEnabled);
+        Assert.False(LiveReviewCaseProvider.IsEnabledByDefault);
+        Assert.True(new ReviewDataOptions().IsOffline);
         var offline = File.ReadAllText(
             Path.Combine(FindRepoRoot(), "src", "TheBelgian.TimeControl.Infrastructure", "AdminReview", "OfflineReviewCaseProvider.cs"));
         Assert.DoesNotContain("location-matching-holdout.json", offline, StringComparison.Ordinal);
+        var live = File.ReadAllText(
+            Path.Combine(FindRepoRoot(), "src", "TheBelgian.TimeControl.Infrastructure", "AdminReview", "LiveReviewCaseProvider.cs"));
+        Assert.DoesNotContain("location-matching-holdout.json", live, StringComparison.Ordinal);
+        Assert.DoesNotContain("evaluate-locked-holdout", live, StringComparison.OrdinalIgnoreCase);
         var di = File.ReadAllText(
             Path.Combine(FindRepoRoot(), "src", "TheBelgian.TimeControl.Infrastructure", "DependencyInjection.cs"));
         Assert.DoesNotContain("OpenAI", di, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("DeterministicReviewExplanationService", di, StringComparison.Ordinal);
+        Assert.Contains("ReviewDataOptions", di, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -243,6 +402,45 @@ public sealed class AdminReviewSpotcheckTests
         Assert.Equal(cases.Count, provider.UniqueCaseCount);
         Assert.Equal(provider.RawCaseCount - provider.UniqueCaseCount, provider.DuplicatesRemoved);
         Assert.Equal(cases.Count, cases.Select(item => item.PerformanceId).Distinct().Count());
+        Assert.All(cases, item => Assert.Equal(AdminReviewStatus.Pending, item.ReviewStatus));
+    }
+
+    [Fact]
+    public void Pattern_RequiresThreeConfirmed_SameDirectionAndKind()
+    {
+        var cases = new[]
+        {
+            SpotcheckPriorityCalculator.WithDerivedFields(
+                Proposed(1, 8, AdminReviewStatus.Confirmed, technician: "Ada", date: new DateOnly(2026, 7, 1)), false),
+            SpotcheckPriorityCalculator.WithDerivedFields(
+                Proposed(2, 9, AdminReviewStatus.Confirmed, technician: "Ada", date: new DateOnly(2026, 7, 5)), false),
+            SpotcheckPriorityCalculator.WithDerivedFields(
+                Proposed(3, 10, AdminReviewStatus.Confirmed, technician: "Ada", date: new DateOnly(2026, 7, 10)), false),
+            SpotcheckPriorityCalculator.WithDerivedFields(
+                Proposed(4, 12, AdminReviewStatus.Pending, technician: "Ada", date: new DateOnly(2026, 7, 12)), false),
+            SpotcheckPriorityCalculator.WithDerivedFields(
+                UnresolvedWithoutVisit(5, technician: "Ada"), false),
+        };
+        var ids = RecurringConfirmedPatternDetector.DetectPerformanceIds(cases);
+        Assert.Contains(1, ids);
+        Assert.Contains(2, ids);
+        Assert.Contains(3, ids);
+        Assert.DoesNotContain(4, ids);
+        Assert.DoesNotContain(5, ids);
+    }
+
+    [Fact]
+    public void Pattern_NotFormedFromPendingOrUnresolvedAlone()
+    {
+        var cases = Enumerable.Range(1, 5)
+            .Select(i => SpotcheckPriorityCalculator.WithDerivedFields(
+                Proposed(i, 8, AdminReviewStatus.Pending, technician: "Bea", date: new DateOnly(2026, 7, i)),
+                false))
+            .Append(SpotcheckPriorityCalculator.WithDerivedFields(
+                UnresolvedWithoutVisit(99, technician: "Bea"),
+                false))
+            .ToArray();
+        Assert.Empty(RecurringConfirmedPatternDetector.DetectPerformanceIds(cases));
     }
 
     [Fact]

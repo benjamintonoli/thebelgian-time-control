@@ -18,6 +18,8 @@ public sealed class TimeControlDbContext(DbContextOptions<TimeControlDbContext> 
         Set<LocationResolutionCacheEntry>();
     public DbSet<AdminReviewDecisionAudit> AdminReviewDecisionAudits =>
         Set<AdminReviewDecisionAudit>();
+    public DbSet<AdminReviewSessionMetric> AdminReviewSessionMetrics =>
+        Set<AdminReviewSessionMetric>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -35,6 +37,8 @@ public sealed class TimeControlDbContext(DbContextOptions<TimeControlDbContext> 
             .IsUnique();
         modelBuilder.Entity<AdminReviewDecisionAudit>()
             .HasIndex(item => new { item.PerformanceId, item.DecidedAt });
+        modelBuilder.Entity<AdminReviewSessionMetric>()
+            .HasIndex(item => new { item.PerformanceId, item.OpenedAt });
 
         modelBuilder.Entity<PlenionPerformance>().Property(item => item.Kilometres).HasPrecision(12, 3);
         modelBuilder.Entity<PowerfleetTrip>().Property(item => item.DistanceKilometres).HasPrecision(12, 3);
