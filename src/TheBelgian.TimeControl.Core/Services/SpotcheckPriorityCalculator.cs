@@ -3,13 +3,20 @@ using TheBelgian.TimeControl.Core.Models;
 namespace TheBelgian.TimeControl.Core.Services;
 
 /// <summary>
-/// Spotcheck priority and list ordering. Pure rules; no matching changes.
+/// Spotcheck priority, categories, and worklist filtering. Pure rules; no matching changes.
 /// </summary>
 public static class SpotcheckPriorityCalculator
 {
-    public static SpotcheckPriorityTier FromDeviationMinutes(int maxAbsDeviationMinutes)
+    public const int DefaultPageSize = 25;
+
+    public static SpotcheckPriorityTier? FromDeviationMinutes(int? maxAbsDeviationMinutes)
     {
-        var abs = Math.Abs(maxAbsDeviationMinutes);
+        if (maxAbsDeviationMinutes is null)
+        {
+            return null;
+        }
+
+        var abs = Math.Abs(maxAbsDeviationMinutes.Value);
         if (abs >= 30)
         {
             return SpotcheckPriorityTier.HighPriority;
@@ -22,50 +29,238 @@ public static class SpotcheckPriorityCalculator
 
         if (abs >= 5)
         {
-            return SpotcheckPriorityTier.PatternRelevant;
+            return SpotcheckPriorityTier.SmallDeviation;
         }
 
         return SpotcheckPriorityTier.Informational;
     }
 
-    public static int MaxDeviationMinutes(int startDeviationMinutes, int endDeviationMinutes) =>
-        Math.Max(Math.Abs(startDeviationMinutes), Math.Abs(endDeviationMinutes));
-
-    /// <summary>
-    /// Small positive time advantage: arrives after planned start or leaves before planned end
-    /// by at most 3 minutes (informative band). Review context only — no wage/fraud conclusions.
-    /// </summary>
-    public static bool IsSmallTimeAdvantage(int startDeviationMinutes, int endDeviationMinutes)
+    public static int? MaxDeviationMinutes(int? startDeviationMinutes, int? endDeviationMinutes)
     {
-        var lateArrival = startDeviationMinutes > 0 && startDeviationMinutes <= 3;
-        var earlyDeparture = endDeviationMinutes < 0 && endDeviationMinutes >= -3;
-        return lateArrival || earlyDeparture;
+        if (startDeviationMinutes is null && endDeviationMinutes is null)
+        {
+            return null;
+        }
+
+        var start = startDeviationMinutes is null ? 0 : Math.Abs(startDeviationMinutes.Value);
+        var end = endDeviationMinutes is null ? 0 : Math.Abs(endDeviationMinutes.Value);
+        return Math.Max(start, end);
     }
 
-    public static IReadOnlySet<string> DetectRecurringSmallAdvantageTechnicians(
-        IEnumerable<(string Technician, int StartDeviation, int EndDeviation)> rows,
-        int minimumOccurrences = 3)
+    public static (int? Start, int? End, int? Max) DeviationsForVisit(
+        ReviewVisitCandidate? visit,
+        bool hasReliableVisitAnchor)
     {
-        return rows
-            .Where(item => IsSmallTimeAdvantage(item.StartDeviation, item.EndDeviation))
-            .GroupBy(item => item.Technician, StringComparer.OrdinalIgnoreCase)
-            .Where(group => group.Count() >= minimumOccurrences)
-            .Select(group => group.Key)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!hasReliableVisitAnchor || visit is null)
+        {
+            return (null, null, null);
+        }
+
+        var max = MaxDeviationMinutes(visit.StartDeviationMinutes, visit.EndDeviationMinutes);
+        return (visit.StartDeviationMinutes, visit.EndDeviationMinutes, max);
     }
 
-    public static bool NeedsHumanAttention(ReviewCase item) =>
-        item.MatcherProposedAcceptance ||
-        item.MatcherStatus is "Ambiguous" or "Unresolved" ||
-        item.Priority is SpotcheckPriorityTier.IndividualException
-            or SpotcheckPriorityTier.HighPriority ||
-        item.RecurringSmallAdvantage;
+    public static ReviewVisitCandidate? ResolveEffectiveVisit(ReviewCase item)
+    {
+        if (!string.IsNullOrWhiteSpace(item.Admin.ChosenVisitCandidateId))
+        {
+            return item.Matcher.CandidateVisits.FirstOrDefault(visit =>
+                string.Equals(
+                    visit.VisitCandidateId,
+                    item.Admin.ChosenVisitCandidateId,
+                    StringComparison.Ordinal));
+        }
 
-    public static IReadOnlyList<ReviewCase> ApplyFilterAndSort(
+        return item.Matcher.ProposedVisit;
+    }
+
+    public static bool HasReliableVisitAnchor(ReviewCase item) =>
+        item.Matcher.ProposedVisit is not null ||
+        !string.IsNullOrWhiteSpace(item.Admin.ChosenVisitCandidateId);
+
+    public static ReviewWorkCategory Classify(ReviewCase item)
+    {
+        if (item.ReviewStatus is AdminReviewStatus.Confirmed
+            or AdminReviewStatus.Rejected
+            or AdminReviewStatus.NoReliableMatch)
+        {
+            return ReviewWorkCategory.Completed;
+        }
+
+        if (string.Equals(item.MatcherStatus, "Ambiguous", StringComparison.OrdinalIgnoreCase))
+        {
+            return ReviewWorkCategory.MatchUncertainty;
+        }
+
+        if (item.Matcher.ProposedVisit is null)
+        {
+            return ReviewWorkCategory.DataQuality;
+        }
+
+        var max = item.MaxDeviationMinutes;
+        if (max is null)
+        {
+            return ReviewWorkCategory.DataQuality;
+        }
+
+        if (max >= 15)
+        {
+            return ReviewWorkCategory.ActionableDeviation;
+        }
+
+        if (max >= 5)
+        {
+            return ReviewWorkCategory.SmallDeviation;
+        }
+
+        return ReviewWorkCategory.Informational;
+    }
+
+    public static ReviewCase WithDerivedFields(ReviewCase item, bool recurringPattern)
+    {
+        var effective = ResolveEffectiveVisit(item);
+        var hasAnchor = HasReliableVisitAnchor(item);
+        var (start, end, max) = DeviationsForVisit(effective, hasAnchor);
+        var priority = FromDeviationMinutes(max);
+        var matcher = item.Matcher with
+        {
+            StartDeviationMinutes = start,
+            EndDeviationMinutes = end,
+            MaxDeviationMinutes = max,
+        };
+        var updated = item with
+        {
+            Matcher = matcher,
+            Priority = priority,
+            HasRecurringConfirmedPattern = recurringPattern &&
+                item.ReviewStatus == AdminReviewStatus.Confirmed,
+        };
+        return updated with { Category = Classify(updated) };
+    }
+
+    public static AdminReviewCategoryCounts CountCategories(IReadOnlyList<ReviewCase> cases)
+    {
+        var open = cases.Where(IsOpenForWork).ToArray();
+        return new AdminReviewCategoryCounts(
+            ToReview: open.Count(item =>
+                item.Category is ReviewWorkCategory.ActionableDeviation
+                    or ReviewWorkCategory.SmallDeviation),
+            MatchUncertainty: open.Count(item => item.Category == ReviewWorkCategory.MatchUncertainty),
+            DataQuality: open.Count(item => item.Category == ReviewWorkCategory.DataQuality),
+            Completed: cases.Count(item => item.Category == ReviewWorkCategory.Completed),
+            ActionableDeviation: open.Count(item =>
+                item.Category == ReviewWorkCategory.ActionableDeviation),
+            SmallDeviation: open.Count(item => item.Category == ReviewWorkCategory.SmallDeviation),
+            Informational: open.Count(item => item.Category == ReviewWorkCategory.Informational));
+    }
+
+    public static bool IsOpenForWork(ReviewCase item) =>
+        item.ReviewStatus is AdminReviewStatus.Pending or AdminReviewStatus.NeedsMoreInformation;
+
+    public static AdminReviewFilter DefaultWorklistFilter(int page = 1) =>
+        new(
+            Tab: ReviewWorkTab.ToReview,
+            Category: ReviewWorkCategory.ActionableDeviation,
+            Page: Math.Max(1, page),
+            PageSize: DefaultPageSize);
+
+    public static AdminReviewSearchResult ApplyFilterAndPage(
+        IReadOnlyList<ReviewCase> cases,
+        AdminReviewFilter filter,
+        int uniqueCaseCount,
+        int duplicatesRemoved,
+        int rawCaseCount)
+    {
+        var pageSize = filter.PageSize <= 0 ? DefaultPageSize : filter.PageSize;
+        var page = filter.Page <= 0 ? 1 : filter.Page;
+        var effective = NormalizeFilter(filter);
+        var counts = CountCategories(cases);
+        var filtered = ApplyFilter(cases, effective).ToArray();
+        var items = filtered
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToArray();
+
+        return new AdminReviewSearchResult(
+            Items: items,
+            TotalMatching: filtered.Length,
+            Page: page,
+            PageSize: pageSize,
+            Counts: counts,
+            UniqueCaseCount: uniqueCaseCount,
+            DuplicatesRemoved: duplicatesRemoved,
+            RawCaseCount: rawCaseCount);
+    }
+
+    public static AdminReviewFilter NormalizeFilter(AdminReviewFilter filter)
+    {
+        if (filter.Tab is null && filter.Category is null)
+        {
+            return DefaultWorklistFilter(filter.Page <= 0 ? 1 : filter.Page) with
+            {
+                Technician = filter.Technician,
+                FromDate = filter.FromDate,
+                ThroughDate = filter.ThroughDate,
+                ReviewStatus = filter.ReviewStatus,
+                MatcherStatus = filter.MatcherStatus,
+                MinimumDeviationMinutes = filter.MinimumDeviationMinutes,
+                HighPriorityOnly = filter.HighPriorityOnly,
+                PageSize = filter.PageSize <= 0 ? DefaultPageSize : filter.PageSize,
+            };
+        }
+
+        if (filter.Tab is { } tab && filter.Category is null)
+        {
+            return filter with
+            {
+                Category = tab switch
+                {
+                    ReviewWorkTab.ToReview => ReviewWorkCategory.ActionableDeviation,
+                    ReviewWorkTab.MatchUncertainty => ReviewWorkCategory.MatchUncertainty,
+                    ReviewWorkTab.DataQuality => ReviewWorkCategory.DataQuality,
+                    ReviewWorkTab.Completed => ReviewWorkCategory.Completed,
+                    _ => ReviewWorkCategory.ActionableDeviation,
+                },
+                PageSize = filter.PageSize <= 0 ? DefaultPageSize : filter.PageSize,
+                Page = filter.Page <= 0 ? 1 : filter.Page,
+            };
+        }
+
+        return filter with
+        {
+            PageSize = filter.PageSize <= 0 ? DefaultPageSize : filter.PageSize,
+            Page = filter.Page <= 0 ? 1 : filter.Page,
+        };
+    }
+
+    public static IEnumerable<ReviewCase> ApplyFilter(
         IReadOnlyList<ReviewCase> cases,
         AdminReviewFilter filter)
     {
-        IEnumerable<ReviewCase> query = cases.Where(NeedsHumanAttention);
+        IEnumerable<ReviewCase> query = cases;
+
+        if (filter.Category is { } category)
+        {
+            query = query.Where(item => item.Category == category);
+            if (category is not ReviewWorkCategory.Completed)
+            {
+                query = query.Where(IsOpenForWork);
+            }
+        }
+        else if (filter.Tab is ReviewWorkTab.ToReview)
+        {
+            query = query.Where(item =>
+                IsOpenForWork(item) &&
+                item.Category is ReviewWorkCategory.ActionableDeviation
+                    or ReviewWorkCategory.SmallDeviation);
+        }
+
+        // Default worklist never surfaces Informational or Completed unless explicitly requested.
+        if (filter.Category is null && filter.Tab is null)
+        {
+            query = query.Where(item =>
+                item.Category == ReviewWorkCategory.ActionableDeviation && IsOpenForWork(item));
+        }
 
         if (!string.IsNullOrWhiteSpace(filter.Technician))
         {
@@ -104,25 +299,9 @@ public static class SpotcheckPriorityCalculator
             query = query.Where(item => item.Priority == SpotcheckPriorityTier.HighPriority);
         }
 
-        if (filter.ProposedMatchesOnly)
-        {
-            query = query.Where(item => item.MatcherProposedAcceptance);
-        }
-
-        if (filter.AmbiguousOrUnresolvedOnly)
-        {
-            query = query.Where(item =>
-                item.MatcherStatus is "Ambiguous" or "Unresolved");
-        }
-
         return query
-            .OrderBy(item => item.MaxDeviationMinutes >= 30 ? 0
-                : item.MaxDeviationMinutes >= 15 ? 1
-                : item.RecurringSmallAdvantage ? 2
-                : 3)
-            .ThenByDescending(item => item.MaxDeviationMinutes)
-            .ThenBy(item => item.Date)
-            .ThenBy(item => item.PerformanceId)
-            .ToArray();
+            .OrderByDescending(item => item.Date)
+            .ThenByDescending(item => item.MaxDeviationMinutes ?? -1)
+            .ThenBy(item => item.PerformanceId);
     }
 }

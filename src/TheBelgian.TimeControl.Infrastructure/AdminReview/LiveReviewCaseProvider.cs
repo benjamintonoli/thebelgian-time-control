@@ -15,6 +15,12 @@ internal sealed class LiveReviewCaseProvider : IReviewCaseProvider
 
     public bool LoadsLockedHoldout => false;
 
+    public int RawCaseCount => 0;
+
+    public int UniqueCaseCount => 0;
+
+    public int DuplicatesRemoved => 0;
+
     public Task<IReadOnlyList<ReviewCase>> GetCasesAsync(CancellationToken cancellationToken)
     {
         throw new InvalidOperationException(

@@ -1,13 +1,14 @@
 @page "/Admin/Reviews/{performanceId:long}"
 @model TheBelgian.TimeControl.Web.Pages.Admin.Reviews.DetailsModel
 @using TheBelgian.TimeControl.Core.Models
+@using TheBelgian.TimeControl.Core.Services
 @{
     ViewData["Title"] = $"Review {Model.PerformanceId}";
     var item = Model.Case;
 }
 
 <div class="alert alert-warning" role="alert">
-    Read-only pilot — matcherresultaten vereisen menselijke bevestiging.
+    @MatcherUsagePolicy.BannerTitle — matcherresultaten vereisen menselijke bevestiging.
 </div>
 
 <p><a asp-page="./Index">&larr; Terug naar reviewlijst</a></p>
@@ -29,12 +30,13 @@ else
 {
     <h1>Review @item.PerformanceId</h1>
     <p class="text-muted mb-4">
-        Prioriteit: <strong>@item.Priority</strong>
-        · Matcher: <strong>@item.MatcherStatus</strong>
+        Prioriteit: <strong>@AdminReviewDisplay.Priority(item.Priority)</strong>
+        · Matcher: <strong>@AdminReviewDisplay.MatcherStatus(item.MatcherStatus)</strong>
         · Review: <strong>@item.ReviewStatus</strong>
-        @if (item.RecurringSmallAdvantage)
+        · Categorie: <strong>@item.Category</strong>
+        @if (item.HasRecurringConfirmedPattern)
         {
-            <span class="badge bg-light text-dark border">terugkerende kleine voordelen (reviewcontext)</span>
+            <span class="badge bg-light text-dark border">terugkerend bevestigd patroon (reviewcontext)</span>
         }
     </p>
 
@@ -50,7 +52,7 @@ else
                 <dt>Prestatie</dt>
                 <dd>@item.PerformanceId · @item.Date · @item.Technician</dd>
                 <dt>Tijd</dt>
-                <dd>@item.Source.PlenionStart.ToString("yyyy-MM-dd HH:mm") – @item.Source.PlenionEnd.ToString("HH:mm")</dd>
+                <dd class="text-nowrap">@item.Source.PlenionStart.ToString("yyyy-MM-dd HH:mm") – @item.Source.PlenionEnd.ToString("HH:mm")</dd>
                 <dt>Adres</dt>
                 <dd>@item.Source.PlenionAddress</dd>
                 <dt>Project / bon / klant</dt>
@@ -63,29 +65,31 @@ else
                 <dd>@(item.Source.PreviousPerformance ?? "—")</dd>
                 <dt>Volgende prestatie</dt>
                 <dd>@(item.Source.NextPerformance ?? "—")</dd>
+                <dt>Start / eindafwijking</dt>
+                <dd>
+                    @AdminReviewDisplay.Deviation(item.Matcher.StartDeviationMinutes)
+                    /
+                    @AdminReviewDisplay.Deviation(item.Matcher.EndDeviationMinutes)
+                </dd>
             </dl>
         </div>
         <div class="col-lg-4">
             <h2 class="h5">B. Powerfleet / matcher</h2>
             <dl class="small">
                 <dt>Status / reden</dt>
-                <dd>@item.Matcher.MatcherStatus — @item.Matcher.MatchReason</dd>
+                <dd>@AdminReviewDisplay.MatcherStatus(item.Matcher.MatcherStatus) — @item.Matcher.MatchReason</dd>
                 <dt>Geocodekwaliteit</dt>
                 <dd>@item.Matcher.GeocodeQuality</dd>
                 <dt>Voorgesteld bezoek</dt>
-                <dd class="font-monospace">@(item.Matcher.ProposedVisit?.VisitCandidateId ?? "—")</dd>
-                <dt>Matchercommit / confighash</dt>
-                <dd class="font-monospace small">@item.Matcher.MatcherCommit<br />@item.Matcher.ConfigurationHash</dd>
+                <dd>@AdminReviewDisplay.VisitSummary(item.Matcher.ProposedVisit)</dd>
             </dl>
             <h3 class="h6">Kandidaatbezoeken</h3>
             <div class="table-responsive">
                 <table class="table table-sm">
                     <thead>
                         <tr>
-                            <th>Id</th>
-                            <th>Stops</th>
-                            <th>Aankomst</th>
-                            <th>Vertrek</th>
+                            <th>Adres / tijd</th>
+                            <th>StopIds</th>
                             <th>m</th>
                             <th>Overlap</th>
                         </tr>
@@ -94,10 +98,8 @@ else
                     @foreach (var visit in item.Matcher.CandidateVisits)
                     {
                         <tr>
-                            <td class="font-monospace small">@visit.VisitCandidateId</td>
-                            <td class="small">@string.Join(", ", visit.ConstituentStopIds)</td>
-                            <td class="small">@visit.Arrival.ToString("HH:mm")</td>
-                            <td class="small">@visit.Departure.ToString("HH:mm")</td>
+                            <td class="small">@AdminReviewDisplay.VisitSummary(visit)</td>
+                            <td class="font-monospace small">@string.Join(", ", visit.ConstituentStopIds)</td>
                             <td>@(visit.DistanceMeters?.ToString("0") ?? "—")</td>
                             <td>@visit.OverlapMinutes / @visit.OverlapPercent.ToString("0")%</td>
                         </tr>
@@ -119,7 +121,7 @@ else
                         <option value="">(geen)</option>
                         @foreach (var visit in item.Matcher.CandidateVisits)
                         {
-                            <option value="@visit.VisitCandidateId">@visit.VisitCandidateId</option>
+                            <option value="@visit.VisitCandidateId">@AdminReviewDisplay.VisitSummary(visit) (@visit.VisitCandidateId)</option>
                         }
                     </select>
                 </div>
@@ -139,6 +141,20 @@ else
             </form>
         </div>
     </div>
+
+    <details class="mb-4">
+        <summary class="fw-semibold">Technische gegevens</summary>
+        <dl class="small mt-2">
+            <dt>Bronprovenance</dt>
+            <dd>@string.Join(", ", item.SourceProvenance)</dd>
+            <dt>Voorgesteld VisitCandidateId</dt>
+            <dd class="font-monospace">@(item.Matcher.ProposedVisit?.VisitCandidateId ?? "—")</dd>
+            <dt>Matchercommit</dt>
+            <dd class="font-monospace">@item.Matcher.MatcherCommit</dd>
+            <dt>Configuratiehash</dt>
+            <dd class="font-monospace">@item.Matcher.ConfigurationHash</dd>
+        </dl>
+    </details>
 
     <h2 class="h5">Audittrail</h2>
     @if (Model.AuditTrail.Count == 0)
@@ -166,10 +182,10 @@ else
                 @foreach (var row in Model.AuditTrail)
                 {
                     <tr>
-                        <td class="small">@row.DecidedAt.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                        <td class="small text-nowrap">@row.DecidedAt.ToString("yyyy-MM-dd HH:mm:ss")</td>
                         <td>@row.Reviewer</td>
                         <td>@row.Decision</td>
-                        <td>@row.OriginalMatcherStatus</td>
+                        <td>@AdminReviewDisplay.MatcherStatus(row.OriginalMatcherStatus)</td>
                         <td class="font-monospace small">@(row.ProposedVisitCandidateId ?? "—")</td>
                         <td class="font-monospace small">@(row.ChosenVisitCandidateId ?? "—")</td>
                         <td class="small">@(row.ReasonOrComment ?? "—")</td>

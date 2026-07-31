@@ -16,7 +16,7 @@ public static class MatcherUsagePolicy
     public const bool AutomaticAcceptanceAllowed = false;
     public const bool PlenionWritebackAllowed = false;
 
-    public const string BannerTitle = "MatcherUsageMode = HumanReviewRequired";
+    public const string BannerTitle = "Menselijke bevestiging verplicht";
 
     public const string BannerBody =
         "Read-only pilot — matcherresultaten vereisen menselijke bevestiging. " +
@@ -36,9 +36,27 @@ public enum AdminReviewStatus
 public enum SpotcheckPriorityTier
 {
     Informational = 0,
-    PatternRelevant = 1,
+    SmallDeviation = 1,
     IndividualException = 2,
     HighPriority = 3,
+}
+
+public enum ReviewWorkCategory
+{
+    ActionableDeviation = 0,
+    SmallDeviation = 1,
+    MatchUncertainty = 2,
+    DataQuality = 3,
+    Informational = 4,
+    Completed = 5,
+}
+
+public enum ReviewWorkTab
+{
+    ToReview = 0,
+    MatchUncertainty = 1,
+    DataQuality = 2,
+    Completed = 3,
 }
 
 /// <summary>Plenion / source facts. Never overwritten by admin decisions.</summary>
@@ -78,9 +96,9 @@ public sealed record MatcherAssessment(
     IReadOnlyList<ReviewVisitCandidate> CandidateVisits,
     string MatchReason,
     GeocodeQualityClass GeocodeQuality,
-    int StartDeviationMinutes,
-    int EndDeviationMinutes,
-    int MaxDeviationMinutes,
+    int? StartDeviationMinutes,
+    int? EndDeviationMinutes,
+    int? MaxDeviationMinutes,
     string MatcherCommit,
     string ConfigurationHash);
 
@@ -99,8 +117,10 @@ public sealed record ReviewCase(
     SourceEvidence Source,
     MatcherAssessment Matcher,
     AdminDecision Admin,
-    SpotcheckPriorityTier Priority,
-    bool RecurringSmallAdvantage,
+    SpotcheckPriorityTier? Priority,
+    ReviewWorkCategory Category,
+    bool HasRecurringConfirmedPattern,
+    IReadOnlyList<string> SourceProvenance,
     string? DeterministicExplanation = null)
 {
     public long PerformanceId => Source.PerformanceId;
@@ -108,7 +128,7 @@ public sealed record ReviewCase(
     public string Technician => Source.Technician;
     public AdminReviewStatus ReviewStatus => Admin.Status;
     public string MatcherStatus => Matcher.MatcherStatus;
-    public int MaxDeviationMinutes => Matcher.MaxDeviationMinutes;
+    public int? MaxDeviationMinutes => Matcher.MaxDeviationMinutes;
     public bool MatcherProposedAcceptance => Matcher.ProposedAcceptance;
 }
 
@@ -133,6 +153,8 @@ public sealed class AdminReviewDecisionAudit
 }
 
 public sealed record AdminReviewFilter(
+    ReviewWorkTab? Tab = null,
+    ReviewWorkCategory? Category = null,
     string? Technician = null,
     DateOnly? FromDate = null,
     DateOnly? ThroughDate = null,
@@ -140,5 +162,24 @@ public sealed record AdminReviewFilter(
     string? MatcherStatus = null,
     int? MinimumDeviationMinutes = null,
     bool HighPriorityOnly = false,
-    bool ProposedMatchesOnly = false,
-    bool AmbiguousOrUnresolvedOnly = false);
+    int Page = 1,
+    int PageSize = 25);
+
+public sealed record AdminReviewCategoryCounts(
+    int ToReview,
+    int MatchUncertainty,
+    int DataQuality,
+    int Completed,
+    int ActionableDeviation,
+    int SmallDeviation,
+    int Informational);
+
+public sealed record AdminReviewSearchResult(
+    IReadOnlyList<ReviewCase> Items,
+    int TotalMatching,
+    int Page,
+    int PageSize,
+    AdminReviewCategoryCounts Counts,
+    int UniqueCaseCount,
+    int DuplicatesRemoved,
+    int RawCaseCount);

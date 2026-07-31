@@ -6,7 +6,7 @@ public interface IAdminReviewService
 {
     string DataSourceName { get; }
 
-    Task<IReadOnlyList<ReviewCase>> SearchAsync(
+    Task<AdminReviewSearchResult> SearchAsync(
         AdminReviewFilter filter,
         CancellationToken cancellationToken);
 

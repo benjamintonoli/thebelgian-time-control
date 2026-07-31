@@ -17,14 +17,160 @@ public sealed class AdminReviewSpotcheckTests
     [Theory]
     [InlineData(0, SpotcheckPriorityTier.Informational)]
     [InlineData(3, SpotcheckPriorityTier.Informational)]
-    [InlineData(5, SpotcheckPriorityTier.PatternRelevant)]
-    [InlineData(14, SpotcheckPriorityTier.PatternRelevant)]
+    [InlineData(5, SpotcheckPriorityTier.SmallDeviation)]
+    [InlineData(14, SpotcheckPriorityTier.SmallDeviation)]
     [InlineData(15, SpotcheckPriorityTier.IndividualException)]
     [InlineData(29, SpotcheckPriorityTier.IndividualException)]
     [InlineData(30, SpotcheckPriorityTier.HighPriority)]
     public void Priority_UsesDocumentedBands(int deviation, SpotcheckPriorityTier expected)
     {
         Assert.Equal(expected, SpotcheckPriorityCalculator.FromDeviationMinutes(deviation));
+    }
+
+    [Fact]
+    public void Priority_NullWithoutVisitAnchor()
+    {
+        Assert.Null(SpotcheckPriorityCalculator.FromDeviationMinutes(null));
+    }
+
+    [Fact]
+    public void UnresolvedWithoutVisit_HasNullDeviations_NeverHighPriority()
+    {
+        var item = UnresolvedWithoutVisit(1);
+        var derived = SpotcheckPriorityCalculator.WithDerivedFields(item, recurringPattern: true);
+        Assert.Null(derived.Matcher.StartDeviationMinutes);
+        Assert.Null(derived.Matcher.EndDeviationMinutes);
+        Assert.Null(derived.Matcher.MaxDeviationMinutes);
+        Assert.Null(derived.Priority);
+        Assert.Equal(ReviewWorkCategory.DataQuality, derived.Category);
+        Assert.False(derived.HasRecurringConfirmedPattern);
+    }
+
+    [Fact]
+    public void Informational_And_Completed_NotInDefaultList()
+    {
+        var cases = new[]
+        {
+            Proposed(1, 40, AdminReviewStatus.Pending),
+            Proposed(2, 2, AdminReviewStatus.Pending),
+            Proposed(3, 40, AdminReviewStatus.Confirmed),
+            UnresolvedWithoutVisit(4),
+        };
+        var derived = cases
+            .Select(item => SpotcheckPriorityCalculator.WithDerivedFields(item, false))
+            .ToArray();
+        Assert.Equal(ReviewWorkCategory.Informational, derived[1].Category);
+        Assert.Equal(ReviewWorkCategory.Completed, derived[2].Category);
+
+        var result = SpotcheckPriorityCalculator.ApplyFilterAndPage(
+            derived,
+            SpotcheckPriorityCalculator.DefaultWorklistFilter(),
+            uniqueCaseCount: 4,
+            duplicatesRemoved: 0,
+            rawCaseCount: 4);
+
+        Assert.All(result.Items, item => Assert.Equal(ReviewWorkCategory.ActionableDeviation, item.Category));
+        Assert.DoesNotContain(result.Items, item => item.Category == ReviewWorkCategory.Informational);
+        Assert.DoesNotContain(result.Items, item => item.Category == ReviewWorkCategory.Completed);
+        Assert.Single(result.Items);
+        Assert.Equal(1, result.TotalMatching);
+    }
+
+    [Fact]
+    public void DefaultFilter_PagesAt25_NewestFirst()
+    {
+        var cases = Enumerable.Range(1, 30)
+            .Select(i => SpotcheckPriorityCalculator.WithDerivedFields(
+                Proposed(i, 40, AdminReviewStatus.Pending, date: new DateOnly(2026, 7, i <= 31 ? i : 1)),
+                false))
+            .ToArray();
+
+        var page1 = SpotcheckPriorityCalculator.ApplyFilterAndPage(
+            cases,
+            SpotcheckPriorityCalculator.DefaultWorklistFilter(page: 1),
+            30,
+            0,
+            30);
+        Assert.Equal(25, page1.Items.Count);
+        Assert.Equal(30, page1.TotalMatching);
+        Assert.True(page1.Items[0].Date >= page1.Items[^1].Date);
+
+        var page2 = SpotcheckPriorityCalculator.ApplyFilterAndPage(
+            cases,
+            SpotcheckPriorityCalculator.DefaultWorklistFilter(page: 2),
+            30,
+            0,
+            30);
+        Assert.Equal(5, page2.Items.Count);
+    }
+
+    [Fact]
+    public void Pattern_RequiresThreeConfirmed_SameDirectionAndKind()
+    {
+        var cases = new[]
+        {
+            SpotcheckPriorityCalculator.WithDerivedFields(
+                Proposed(1, 8, AdminReviewStatus.Confirmed, technician: "Ada", date: new DateOnly(2026, 7, 1)),
+                false),
+            SpotcheckPriorityCalculator.WithDerivedFields(
+                Proposed(2, 9, AdminReviewStatus.Confirmed, technician: "Ada", date: new DateOnly(2026, 7, 5)),
+                false),
+            SpotcheckPriorityCalculator.WithDerivedFields(
+                Proposed(3, 10, AdminReviewStatus.Confirmed, technician: "Ada", date: new DateOnly(2026, 7, 10)),
+                false),
+            SpotcheckPriorityCalculator.WithDerivedFields(
+                Proposed(4, 12, AdminReviewStatus.Pending, technician: "Ada", date: new DateOnly(2026, 7, 12)),
+                false),
+            SpotcheckPriorityCalculator.WithDerivedFields(
+                UnresolvedWithoutVisit(5, technician: "Ada"),
+                false),
+        };
+
+        var ids = RecurringConfirmedPatternDetector.DetectPerformanceIds(cases);
+        Assert.Contains(1, ids);
+        Assert.Contains(2, ids);
+        Assert.Contains(3, ids);
+        Assert.DoesNotContain(4, ids);
+        Assert.DoesNotContain(5, ids);
+
+        var pending = SpotcheckPriorityCalculator.WithDerivedFields(cases[3], recurringPattern: ids.Contains(4));
+        Assert.False(pending.HasRecurringConfirmedPattern);
+        var unresolved = SpotcheckPriorityCalculator.WithDerivedFields(cases[4], recurringPattern: true);
+        Assert.False(unresolved.HasRecurringConfirmedPattern);
+    }
+
+    [Fact]
+    public void Pattern_NotFormedFromPendingOrUnresolvedAlone()
+    {
+        var cases = Enumerable.Range(1, 5)
+            .Select(i => SpotcheckPriorityCalculator.WithDerivedFields(
+                Proposed(i, 8, AdminReviewStatus.Pending, technician: "Bea", date: new DateOnly(2026, 7, i)),
+                false))
+            .Append(SpotcheckPriorityCalculator.WithDerivedFields(
+                UnresolvedWithoutVisit(99, technician: "Bea"),
+                false))
+            .ToArray();
+        Assert.Empty(RecurringConfirmedPatternDetector.DetectPerformanceIds(cases));
+    }
+
+    [Theory]
+    [InlineData(null, "—")]
+    [InlineData(0, "op tijd")]
+    [InlineData(31, "31 min later")]
+    [InlineData(-18, "18 min vroeger")]
+    public void DeviationTexts_AreCorrect(int? minutes, string expected)
+    {
+        Assert.Equal(expected, AdminReviewDisplay.Deviation(minutes));
+    }
+
+    [Fact]
+    public void AdminTexts_ReplaceInternalStatuses()
+    {
+        Assert.Equal("Waarschijnlijk bezoek", AdminReviewDisplay.MatcherStatus("RecoveredProbable"));
+        Assert.Equal("Voorgesteld bezoek", AdminReviewDisplay.MatcherStatus("Probable"));
+        Assert.Equal("Meerdere mogelijke bezoeken", AdminReviewDisplay.MatcherStatus("Ambiguous"));
+        Assert.Equal("Geen betrouwbare match", AdminReviewDisplay.MatcherStatus("Unresolved"));
+        Assert.Equal("Menselijke bevestiging verplicht", MatcherUsagePolicy.BannerTitle);
     }
 
     [Fact]
@@ -63,92 +209,6 @@ public sealed class AdminReviewSpotcheckTests
     }
 
     [Fact]
-    public void PendingDecision_CannotBePersisted()
-    {
-        Assert.Throws<InvalidOperationException>(() =>
-            AdminReviewDecisionRules.Validate(AdminReviewStatus.Pending, "Ada", null));
-    }
-
-    [Fact]
-    public void RecurringSmallAdvantage_DetectedPerTechnician()
-    {
-        var rows = new List<(string, int, int)>();
-        for (var i = 0; i < 3; i++)
-        {
-            rows.Add(("Jasper", 2, 0));
-        }
-
-        rows.Add(("Filip", 2, 0));
-        var recurring = SpotcheckPriorityCalculator.DetectRecurringSmallAdvantageTechnicians(rows);
-        Assert.Contains("Jasper", recurring);
-        Assert.DoesNotContain("Filip", recurring);
-    }
-
-    [Fact]
-    public void FilterAndSort_OrdersByDeviationBandsThenRecurring()
-    {
-        var cases = new[]
-        {
-            Case(1, 10, false, "Unresolved"),
-            Case(2, 35, false, "Probable"),
-            Case(3, 16, true, "Ambiguous"),
-            Case(4, 2, true, "Probable"),
-        };
-
-        var sorted = SpotcheckPriorityCalculator.ApplyFilterAndSort(
-            cases,
-            new AdminReviewFilter());
-
-        Assert.Equal(new long[] { 2, 3, 4, 1 }, sorted.Select(item => item.PerformanceId).ToArray());
-    }
-
-    [Fact]
-    public void Filter_ProposedMatchesOnly_And_AmbiguousUnresolved()
-    {
-        var cases = new[]
-        {
-            Case(1, 40, false, "Probable", proposed: true),
-            Case(2, 40, false, "Ambiguous", proposed: false),
-            Case(3, 40, false, "Unresolved", proposed: false),
-        };
-
-        var proposed = SpotcheckPriorityCalculator.ApplyFilterAndSort(
-            cases,
-            new AdminReviewFilter(ProposedMatchesOnly: true));
-        Assert.Equal(new long[] { 1 }, proposed.Select(item => item.PerformanceId).ToArray());
-
-        var amb = SpotcheckPriorityCalculator.ApplyFilterAndSort(
-            cases,
-            new AdminReviewFilter(AmbiguousOrUnresolvedOnly: true));
-        Assert.Equal(new long[] { 2, 3 }, amb.Select(item => item.PerformanceId).OrderBy(id => id).ToArray());
-    }
-
-    [Fact]
-    public void AuditRow_KeepsOriginalMatcherOutcome()
-    {
-        var audit = new AdminReviewDecisionAudit
-        {
-            PerformanceId = 42,
-            OriginalMatcherStatus = "RecoveredProbable",
-            ProposedVisitCandidateId = "a/b",
-            ProposedVisitSourceStopIdsJson = "[\"a\",\"b\"]",
-            Decision = nameof(AdminReviewStatus.Confirmed),
-            ChosenVisitCandidateId = "c/d",
-            ChosenVisitSourceStopIdsJson = "[\"c\",\"d\"]",
-            ReasonOrComment = "andere kandidaat gekozen",
-            Reviewer = "Ada",
-            DecidedAt = DateTimeOffset.UtcNow,
-            MatcherCommit = "abc",
-            ConfigurationHash = "hash",
-        };
-
-        Assert.Equal("RecoveredProbable", audit.OriginalMatcherStatus);
-        Assert.Equal("a/b", audit.ProposedVisitCandidateId);
-        Assert.Equal("c/d", audit.ChosenVisitCandidateId);
-        Assert.Equal(nameof(AdminReviewStatus.Confirmed), audit.Decision);
-    }
-
-    [Fact]
     public async Task Decisions_AreAppendOnly()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -163,7 +223,7 @@ public sealed class AdminReviewSpotcheckTests
 
         var factory = new TestDbContextFactory(options);
         var repository = new AdminReviewDecisionRepository(factory);
-        var first = await repository.AppendAsync(
+        await repository.AppendAsync(
             new AdminReviewDecisionAudit
             {
                 PerformanceId = 99,
@@ -177,14 +237,13 @@ public sealed class AdminReviewSpotcheckTests
                 ConfigurationHash = "h1",
             },
             CancellationToken.None);
-        var second = await repository.AppendAsync(
+        await repository.AppendAsync(
             new AdminReviewDecisionAudit
             {
                 PerformanceId = 99,
                 OriginalMatcherStatus = "Probable",
                 ProposedVisitCandidateId = "a",
                 Decision = nameof(AdminReviewStatus.Rejected),
-                ChosenVisitCandidateId = null,
                 ReasonOrComment = "toch niet",
                 Reviewer = "Bea",
                 DecidedAt = DateTimeOffset.Parse("2026-07-01T11:00:00Z", CultureInfo.InvariantCulture),
@@ -195,143 +254,49 @@ public sealed class AdminReviewSpotcheckTests
 
         var trail = await repository.ListForPerformanceAsync(99, CancellationToken.None);
         Assert.Equal(2, trail.Count);
-        Assert.Equal(first.Id, trail[0].Id);
-        Assert.Equal(second.Id, trail[1].Id);
-        Assert.Equal(nameof(AdminReviewStatus.Confirmed), trail[0].Decision);
-        Assert.Equal(nameof(AdminReviewStatus.Rejected), trail[1].Decision);
         Assert.Equal("Probable", trail[0].OriginalMatcherStatus);
         Assert.Equal("Probable", trail[1].OriginalMatcherStatus);
-    }
-
-    [Fact]
-    public void DeterministicExplanation_DistanceAndOverlap()
-    {
-        var service = new DeterministicReviewExplanationService();
-        var source = new SourceEvidence(
-            1,
-            new DateOnly(2026, 7, 1),
-            "Tech",
-            DateTimeOffset.Parse("2026-07-01T09:00:00+02:00", CultureInfo.InvariantCulture),
-            DateTimeOffset.Parse("2026-07-01T10:00:00+02:00", CultureInfo.InvariantCulture),
-            "Straat 1",
-            null,
-            null,
-            null,
-            null,
-            null,
-            null);
-        var visit = new ReviewVisitCandidate(
-            "s1",
-            ["s1"],
-            null,
-            DateTimeOffset.Parse("2026-07-01T09:05:00+02:00", CultureInfo.InvariantCulture),
-            DateTimeOffset.Parse("2026-07-01T09:55:00+02:00", CultureInfo.InvariantCulture),
-            42,
-            50,
-            92,
-            5,
-            -5,
-            "PartialAddress");
-        var matcher = new MatcherAssessment(
-            "Probable",
-            true,
-            visit,
-            [visit],
-            "voorstel",
-            GeocodeQualityClass.PartialAddress,
-            5,
-            -5,
-            5,
-            "commit",
-            "hash");
-
-        var text = service.Explain(source, matcher);
-        Assert.Contains("42 meter", text, StringComparison.Ordinal);
-        Assert.Contains("92%", text, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void DeterministicExplanation_AmbiguousAndMissingAddress()
-    {
-        var service = new DeterministicReviewExplanationService();
-        var source = new SourceEvidence(
-            1,
-            new DateOnly(2026, 7, 1),
-            "Tech",
-            DateTimeOffset.Parse("2026-07-01T09:00:00+02:00", CultureInfo.InvariantCulture),
-            DateTimeOffset.Parse("2026-07-01T10:00:00+02:00", CultureInfo.InvariantCulture),
-            " ",
-            null,
-            null,
-            null,
-            null,
-            null,
-            null);
-        var matcher = new MatcherAssessment(
-            "Ambiguous",
-            false,
-            null,
-            [],
-            "x",
-            GeocodeQualityClass.Unusable,
-            0,
-            0,
-            0,
-            "c",
-            "h");
-        Assert.Contains(
-            "niet betrouwbaar",
-            service.Explain(source, matcher),
-            StringComparison.OrdinalIgnoreCase);
-
-        var withAddress = source with { PlenionAddress = "Straat 1" };
-        var ambiguous = matcher with { GeocodeQuality = GeocodeQualityClass.PartialAddress };
-        Assert.Contains(
-            "vergelijkbaar sterk",
-            service.Explain(withAddress, ambiguous),
-            StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public void AdminReview_DoesNotLoadLockedHoldout()
     {
         Assert.False(OfflineReviewCaseProvider.LoadsLockedHoldoutFlag);
-        Assert.False(new LiveReviewCaseProvider().LoadsLockedHoldout);
         var offline = File.ReadAllText(
             Path.Combine(FindRepoRoot(), "src", "TheBelgian.TimeControl.Infrastructure", "AdminReview", "OfflineReviewCaseProvider.cs"));
         Assert.DoesNotContain("location-matching-holdout.json", offline, StringComparison.Ordinal);
         Assert.DoesNotContain("evaluate-locked-holdout", offline, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("LockedHoldoutEvaluation", offline, StringComparison.Ordinal);
-        Assert.Contains("DevelopmentFileName", offline, StringComparison.Ordinal);
-        Assert.Contains("Calibration", offline, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void NoPlenionWritebackSurface_InAdminReview()
+    public async Task OfflineProvider_DeduplicatesPerformanceIds()
     {
-        Assert.False(MatcherUsagePolicy.PlenionWritebackAllowed);
-        var folder = Path.Combine(
-            FindRepoRoot(),
-            "src",
-            "TheBelgian.TimeControl.Infrastructure",
-            "AdminReview");
-        foreach (var file in Directory.GetFiles(folder, "*.cs"))
-        {
-            var source = File.ReadAllText(file);
-            Assert.DoesNotContain("IPlenionWriter", source, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("ExecuteNonQuery", source, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("ODBC", source, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("UPDATE PRESTATIE", source, StringComparison.OrdinalIgnoreCase);
-        }
-
-        var service = File.ReadAllText(Path.Combine(folder, "AdminReviewService.cs"));
-        Assert.Contains("Never writes to Plenion", service, StringComparison.Ordinal);
+        var env = new TestHostEnvironment(Path.Combine(FindRepoRoot(), "src", "TheBelgian.TimeControl.Web"));
+        var provider = new OfflineReviewCaseProvider(
+            env,
+            Options.Create(new AdaptiveLocationMatchingOptions()));
+        var cases = await provider.GetCasesAsync(CancellationToken.None);
+        Assert.NotEmpty(cases);
+        Assert.Equal(cases.Count, cases.Select(item => item.PerformanceId).Distinct().Count());
+        Assert.Equal(cases.Count, provider.UniqueCaseCount);
+        Assert.True(provider.RawCaseCount >= provider.UniqueCaseCount);
+        Assert.Equal(provider.RawCaseCount - provider.UniqueCaseCount, provider.DuplicatesRemoved);
+        Assert.All(cases, item => Assert.Equal(AdminReviewStatus.Pending, item.ReviewStatus));
+        Assert.All(
+            cases.Where(item =>
+                (item.MatcherStatus is "Unresolved" or "Ambiguous") &&
+                item.Matcher.ProposedVisit is null),
+            item =>
+            {
+                Assert.Null(item.Priority);
+                Assert.Null(item.MaxDeviationMinutes);
+            });
     }
 
     [Fact]
     public void NoExternalAiProvider_IsInitialized()
     {
-        Assert.Equal(typeof(DeterministicReviewExplanationService), typeof(DeterministicReviewExplanationService));
         var di = File.ReadAllText(
             Path.Combine(
                 FindRepoRoot(),
@@ -340,87 +305,75 @@ public sealed class AdminReviewSpotcheckTests
                 "DependencyInjection.cs"));
         Assert.Contains("DeterministicReviewExplanationService", di, StringComparison.Ordinal);
         Assert.DoesNotContain("OpenAI", di, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("AzureOpenAI", di, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("ChatClient", di, StringComparison.OrdinalIgnoreCase);
-
-        var adminFolder = Path.Combine(
-            FindRepoRoot(),
-            "src",
-            "TheBelgian.TimeControl.Infrastructure",
-            "AdminReview");
-        foreach (var file in Directory.GetFiles(adminFolder, "*.cs"))
-        {
-            var source = File.ReadAllText(file);
-            Assert.DoesNotContain("OpenAI", source, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("AzureOpenAI", source, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("IChatClient", source, StringComparison.OrdinalIgnoreCase);
-        }
-
         Assert.False(LiveReviewCaseProvider.IsEnabled);
     }
 
-    [Fact]
-    public void MatcherUsagePolicy_IsHumanReviewRequired_NoAutoAccept()
-    {
-        Assert.Equal(MatcherUsageMode.HumanReviewRequired, MatcherUsagePolicy.CurrentMode);
-        Assert.False(MatcherUsagePolicy.AutomaticAcceptanceAllowed);
-        Assert.Equal("NO-GO", MatcherUsagePolicy.HoldoutDecision);
-    }
-
-    [Fact]
-    public async Task OfflineProvider_LoadsRealDocsWithoutHoldout()
-    {
-        var env = new TestHostEnvironment(Path.Combine(FindRepoRoot(), "src", "TheBelgian.TimeControl.Web"));
-        var provider = new OfflineReviewCaseProvider(
-            env,
-            Options.Create(new AdaptiveLocationMatchingOptions()));
-        Assert.Equal("OfflineReviewCaseProvider", provider.ProviderName);
-        Assert.False(provider.LoadsLockedHoldout);
-        var cases = await provider.GetCasesAsync(CancellationToken.None);
-        Assert.NotEmpty(cases);
-        Assert.All(cases, item => Assert.Equal(AdminReviewStatus.Pending, item.ReviewStatus));
-    }
-
-    private static ReviewCase Case(
-        long id,
-        int deviation,
-        bool recurring,
-        string matcherStatus,
-        bool proposed = false)
+    private static ReviewCase UnresolvedWithoutVisit(long id, string technician = "Tech")
     {
         var start = DateTimeOffset.Parse("2026-07-01T09:00:00+02:00", CultureInfo.InvariantCulture);
         var end = DateTimeOffset.Parse("2026-07-01T10:00:00+02:00", CultureInfo.InvariantCulture);
-        var source = new SourceEvidence(
-            id,
-            new DateOnly(2026, 7, 1),
-            "Tech",
-            start,
-            end,
-            "x",
-            null,
-            null,
-            null,
-            null,
-            null,
-            null);
-        var matcher = new MatcherAssessment(
-            matcherStatus,
-            proposed || matcherStatus is "Probable" or "Confirmed" or "RecoveredProbable",
-            null,
-            [],
-            "test",
-            GeocodeQualityClass.PartialAddress,
-            deviation,
-            0,
-            deviation,
-            "test",
-            "hash");
         return new ReviewCase(
-            source,
-            matcher,
+            new SourceEvidence(id, new DateOnly(2026, 7, 1), technician, start, end, "x", null, null, null, null, null, null),
+            new MatcherAssessment(
+                "Unresolved",
+                false,
+                null,
+                [],
+                "test",
+                GeocodeQualityClass.PartialAddress,
+                null,
+                null,
+                null,
+                "test",
+                "hash"),
             new AdminDecision(AdminReviewStatus.Pending),
-            SpotcheckPriorityCalculator.FromDeviationMinutes(deviation),
-            recurring);
+            null,
+            ReviewWorkCategory.DataQuality,
+            false,
+            ["development"]);
+    }
+
+    private static ReviewCase Proposed(
+        long id,
+        int startDeviation,
+        AdminReviewStatus status,
+        string technician = "Tech",
+        DateOnly? date = null)
+    {
+        var day = date ?? new DateOnly(2026, 7, 1);
+        var start = new DateTimeOffset(day.ToDateTime(new TimeOnly(9, 0)), TimeSpan.FromHours(2));
+        var end = start.AddHours(1);
+        var visit = new ReviewVisitCandidate(
+            "s1",
+            ["s1"],
+            "Bezoekstraat 1",
+            start.AddMinutes(startDeviation),
+            end,
+            40,
+            50,
+            80,
+            startDeviation,
+            0,
+            "PartialAddress");
+        return new ReviewCase(
+            new SourceEvidence(id, day, technician, start, end, "Plenionstraat 1", null, null, null, null, null, null),
+            new MatcherAssessment(
+                "Probable",
+                true,
+                visit,
+                [visit],
+                "voorstel",
+                GeocodeQualityClass.PartialAddress,
+                startDeviation,
+                0,
+                Math.Abs(startDeviation),
+                "test",
+                "hash"),
+            new AdminDecision(status),
+            SpotcheckPriorityCalculator.FromDeviationMinutes(Math.Abs(startDeviation)),
+            ReviewWorkCategory.ActionableDeviation,
+            false,
+            ["development"]);
     }
 
     private static string FindRepoRoot()

@@ -15,13 +15,18 @@ internal sealed class AdminReviewService(
 {
     public string DataSourceName => caseProvider.ProviderName;
 
-    public async Task<IReadOnlyList<ReviewCase>> SearchAsync(
+    public async Task<AdminReviewSearchResult> SearchAsync(
         AdminReviewFilter filter,
         CancellationToken cancellationToken)
     {
         EnsureSafeProvider();
         var cases = await LoadWithAdminOverlayAsync(cancellationToken);
-        return SpotcheckPriorityCalculator.ApplyFilterAndSort(cases, filter);
+        return SpotcheckPriorityCalculator.ApplyFilterAndPage(
+            cases,
+            filter,
+            caseProvider.UniqueCaseCount,
+            caseProvider.DuplicatesRemoved,
+            caseProvider.RawCaseCount);
     }
 
     public async Task<ReviewCase?> GetAsync(
@@ -52,7 +57,7 @@ internal sealed class AdminReviewService(
         EnsureSafeProvider();
         var current = await GetAsync(performanceId, cancellationToken)
             ?? throw new InvalidOperationException(
-                $"Reviewcase {performanceId} niet gevonden in {caseProvider.ProviderName}.");
+                $"Reviewcase {performanceId} niet gevonden.");
 
         AdminReviewDecisionRules.Validate(
             decision,
@@ -116,7 +121,7 @@ internal sealed class AdminReviewService(
             baseCases.Select(item => item.PerformanceId).ToArray(),
             cancellationToken);
 
-        return baseCases
+        var withAdmin = baseCases
             .Select(item =>
             {
                 if (!latest.TryGetValue(item.PerformanceId, out var audit))
@@ -138,6 +143,13 @@ internal sealed class AdminReviewService(
                                 audit.ChosenVisitSourceStopIdsJson)),
                 };
             })
+            .ToArray();
+
+        var recurringIds = RecurringConfirmedPatternDetector.DetectPerformanceIds(withAdmin);
+        return withAdmin
+            .Select(item => SpotcheckPriorityCalculator.WithDerivedFields(
+                item,
+                recurringPattern: recurringIds.Contains(item.PerformanceId)))
             .ToArray();
     }
 

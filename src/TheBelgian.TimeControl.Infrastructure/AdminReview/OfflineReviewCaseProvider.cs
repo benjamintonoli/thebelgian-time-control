@@ -26,16 +26,22 @@ internal sealed class OfflineReviewCaseProvider(
     };
 
     private readonly object _gate = new();
-    private IReadOnlyList<ReviewCase>? _cache;
+    private ProviderCache? _cache;
 
     public string ProviderName => "OfflineReviewCaseProvider";
 
     public bool LoadsLockedHoldout => LoadsLockedHoldoutFlag;
 
+    public int RawCaseCount => LoadCached().RawCaseCount;
+
+    public int UniqueCaseCount => LoadCached().Cases.Count;
+
+    public int DuplicatesRemoved => LoadCached().DuplicatesRemoved;
+
     public Task<IReadOnlyList<ReviewCase>> GetCasesAsync(CancellationToken cancellationToken)
     {
         EnsureHoldoutNotUsed();
-        return Task.FromResult(LoadCached());
+        return Task.FromResult(LoadCached().Cases);
     }
 
     public Task<ReviewCase?> GetByPerformanceIdAsync(
@@ -43,11 +49,11 @@ internal sealed class OfflineReviewCaseProvider(
         CancellationToken cancellationToken)
     {
         EnsureHoldoutNotUsed();
-        var match = LoadCached().FirstOrDefault(item => item.PerformanceId == performanceId);
+        var match = LoadCached().Cases.FirstOrDefault(item => item.PerformanceId == performanceId);
         return Task.FromResult(match);
     }
 
-    private IReadOnlyList<ReviewCase> LoadCached()
+    private ProviderCache LoadCached()
     {
         lock (_gate)
         {
@@ -55,7 +61,7 @@ internal sealed class OfflineReviewCaseProvider(
         }
     }
 
-    private ReviewCase[] BuildCases()
+    private ProviderCache BuildCases()
     {
         // Read-only offline mapping; no Plenion writeback, no holdout reuse.
         var docsPath = ResolveDocsPath(environment.ContentRootPath);
@@ -66,43 +72,53 @@ internal sealed class OfflineReviewCaseProvider(
         var configurationHash = FrozenMatcherVerificationService.ComputeConfigurationHash(
             FrozenMatcherVerificationService.SnapshotOptions(options));
 
-        var byId = new Dictionary<long, LocationMatchingBenchmarkCase>();
-        foreach (var item in LoadDevelopment(docsPath))
+        var byId = new Dictionary<long, StagedCase>();
+        var rawCount = 0;
+
+        void Ingest(IEnumerable<LocationMatchingBenchmarkCase> items, string provenance)
         {
-            byId[item.PerformanceId] = item;
+            foreach (var item in items)
+            {
+                rawCount++;
+                if (!byId.TryGetValue(item.PerformanceId, out var existing))
+                {
+                    byId[item.PerformanceId] = new StagedCase(item, [provenance]);
+                    continue;
+                }
+
+                var mergedProvenance = existing.Provenance
+                    .Append(provenance)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+                var preferNew = CompletenessScore(item) > CompletenessScore(existing.Case);
+                var chosen = preferNew ? MergeEvidence(item, existing.Case) : MergeEvidence(existing.Case, item);
+                byId[item.PerformanceId] = new StagedCase(chosen, mergedProvenance);
+            }
         }
 
-        foreach (var item in LoadRecoveryAsBenchmark(docsPath))
-        {
-            byId[item.PerformanceId] = item;
-        }
+        Ingest(LoadDevelopment(docsPath), "development");
+        Ingest(LoadRecoveryAsBenchmark(docsPath), "recovery-audit");
+        Ingest(LocationMatchingBenchmarkService.LoadCalibrationCases(docsPath), "calibration");
 
-        foreach (var item in LocationMatchingBenchmarkService.LoadCalibrationCases(docsPath))
-        {
-            byId[item.PerformanceId] = item;
-        }
-
-        var built = byId.Values
-            .Select(item => MapCase(item, options, matcherCommit, configurationHash))
+        var cases = byId.Values
+            .Select(item => MapCase(
+                item.Case,
+                item.Provenance,
+                options,
+                matcherCommit,
+                configurationHash))
             .OrderBy(item => item.PerformanceId)
             .ToArray();
 
-        var recurring = SpotcheckPriorityCalculator.DetectRecurringSmallAdvantageTechnicians(
-            built.Select(item => (
-                item.Technician,
-                item.Matcher.StartDeviationMinutes,
-                item.Matcher.EndDeviationMinutes)));
-
-        return built
-            .Select(item => item with
-            {
-                RecurringSmallAdvantage = recurring.Contains(item.Technician),
-            })
-            .ToArray();
+        return new ProviderCache(
+            Cases: cases,
+            RawCaseCount: rawCount,
+            DuplicatesRemoved: Math.Max(0, rawCount - cases.Length));
     }
 
     private static ReviewCase MapCase(
         LocationMatchingBenchmarkCase item,
+        IReadOnlyList<string> provenance,
         AdaptiveLocationMatchingOptions options,
         string matcherCommit,
         string configurationHash)
@@ -112,6 +128,13 @@ internal sealed class OfflineReviewCaseProvider(
         var performanceMinutes = Math.Max(
             1,
             (int)Math.Round((item.End - item.Start).TotalMinutes, MidpointRounding.AwayFromZero));
+        var addressByStop = item.Candidates
+            .GroupBy(candidate => candidate.StopId, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(candidate => candidate.Address)
+                    .FirstOrDefault(address => !string.IsNullOrWhiteSpace(address)),
+                StringComparer.Ordinal);
 
         var candidates = visits
             .Select(visit =>
@@ -127,10 +150,13 @@ internal sealed class OfflineReviewCaseProvider(
                 var endDev = (int)Math.Round(
                     (visit.Departure - item.End).TotalMinutes,
                     MidpointRounding.AwayFromZero);
+                var address = visit.StopIds
+                    .Select(id => addressByStop.GetValueOrDefault(id))
+                    .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
                 return new ReviewVisitCandidate(
                     VisitCandidateId: string.Join('/', visit.StopIds),
                     ConstituentStopIds: visit.StopIds,
-                    Address: null,
+                    Address: address,
                     Arrival: visit.Arrival,
                     Departure: visit.Departure,
                     DistanceMeters: visit.DistanceMeters,
@@ -157,13 +183,9 @@ internal sealed class OfflineReviewCaseProvider(
             }
         }
 
-        var startDeviation = proposed?.StartDeviationMinutes
-            ?? candidates.FirstOrDefault()?.StartDeviationMinutes
-            ?? 0;
-        var endDeviation = proposed?.EndDeviationMinutes
-            ?? candidates.FirstOrDefault()?.EndDeviationMinutes
-            ?? 0;
-        var maxDeviation = SpotcheckPriorityCalculator.MaxDeviationMinutes(startDeviation, endDeviation);
+        // Deviations only when a concrete proposed visit exists — never from ExistingMatchStatus fallback.
+        var (startDeviation, endDeviation, maxDeviation) =
+            SpotcheckPriorityCalculator.DeviationsForVisit(proposed, proposed is not null);
 
         var matcher = new MatcherAssessment(
             MatcherStatus: status,
@@ -192,13 +214,74 @@ internal sealed class OfflineReviewCaseProvider(
             NextPerformance: item.NextPerformance,
             Lacleunik: item.Lacleunik);
 
-        return new ReviewCase(
+        var draft = new ReviewCase(
             Source: source,
             Matcher: matcher,
             Admin: new AdminDecision(AdminReviewDecisionRules.InitialReviewStatus()),
             Priority: SpotcheckPriorityCalculator.FromDeviationMinutes(maxDeviation),
-            RecurringSmallAdvantage: false);
+            Category: ReviewWorkCategory.DataQuality,
+            HasRecurringConfirmedPattern: false,
+            SourceProvenance: provenance);
+        return SpotcheckPriorityCalculator.WithDerivedFields(draft, recurringPattern: false);
     }
+
+    private static int CompletenessScore(LocationMatchingBenchmarkCase item)
+    {
+        var score = 0;
+        if (!string.IsNullOrWhiteSpace(item.PlenionAddress))
+        {
+            score += 2;
+        }
+
+        if (!string.IsNullOrWhiteSpace(item.PreviousPerformance))
+        {
+            score += 1;
+        }
+
+        if (!string.IsNullOrWhiteSpace(item.NextPerformance))
+        {
+            score += 1;
+        }
+
+        if (!string.IsNullOrWhiteSpace(item.Lacleunik))
+        {
+            score += 1;
+        }
+
+        if (!string.IsNullOrWhiteSpace(item.Label))
+        {
+            score += 2;
+        }
+
+        score += Math.Min(item.Candidates.Count, 5);
+        if (item.IsCalibrationCase)
+        {
+            score += 3;
+        }
+
+        return score;
+    }
+
+    private static LocationMatchingBenchmarkCase MergeEvidence(
+        LocationMatchingBenchmarkCase primary,
+        LocationMatchingBenchmarkCase secondary) =>
+        primary with
+        {
+            PreviousPerformance = FirstNonEmpty(primary.PreviousPerformance, secondary.PreviousPerformance),
+            NextPerformance = FirstNonEmpty(primary.NextPerformance, secondary.NextPerformance),
+            Lacleunik = FirstNonEmpty(primary.Lacleunik, secondary.Lacleunik),
+            PlenionAddress = string.IsNullOrWhiteSpace(primary.PlenionAddress)
+                ? secondary.PlenionAddress
+                : primary.PlenionAddress,
+            Candidates = primary.Candidates.Count >= secondary.Candidates.Count
+                ? primary.Candidates
+                : secondary.Candidates,
+            Label = FirstNonEmpty(primary.Label, secondary.Label),
+            DatasetRole = FirstNonEmpty(primary.DatasetRole, secondary.DatasetRole),
+        };
+
+    private static string? FirstNonEmpty(string? first, string? second) =>
+        !string.IsNullOrWhiteSpace(first) ? first : second;
 
     private static string ResolveStatus(
         LocationMatchingBenchmarkCase item,
@@ -254,13 +337,13 @@ internal sealed class OfflineReviewCaseProvider(
         if (prediction.Accepted && proposed is not null)
         {
             return prediction.UsedRecovery
-                ? $"RecoveredProbable voorstel op basis van overlap {proposed.OverlapMinutes} min."
-                : $"Matchervoorstel ({prediction.Decision}) op basis van afstand/overlap.";
+                ? $"Waarschijnlijk bezoek op basis van overlap {proposed.OverlapMinutes} min."
+                : "Voorgesteld bezoek op basis van afstand/overlap.";
         }
 
         if (candidates.Length == 0)
         {
-            return "Geen kandidaatbezoeken; Unresolved.";
+            return "Geen kandidaatbezoeken; geen betrouwbare match.";
         }
 
         return "Geen acceptatie; handmatige review vereist.";
@@ -362,4 +445,13 @@ internal sealed class OfflineReviewCaseProvider(
                 "Admin Review mag locked holdoutbestanden niet laden.");
         }
     }
+
+    private sealed record StagedCase(
+        LocationMatchingBenchmarkCase Case,
+        IReadOnlyList<string> Provenance);
+
+    private sealed record ProviderCache(
+        IReadOnlyList<ReviewCase> Cases,
+        int RawCaseCount,
+        int DuplicatesRemoved);
 }

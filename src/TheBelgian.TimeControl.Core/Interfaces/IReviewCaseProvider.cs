@@ -12,6 +12,12 @@ public interface IReviewCaseProvider
     /// <summary>Must remain false for all Admin Review providers.</summary>
     bool LoadsLockedHoldout { get; }
 
+    int RawCaseCount { get; }
+
+    int UniqueCaseCount { get; }
+
+    int DuplicatesRemoved { get; }
+
     Task<IReadOnlyList<ReviewCase>> GetCasesAsync(CancellationToken cancellationToken);
 
     Task<ReviewCase?> GetByPerformanceIdAsync(
