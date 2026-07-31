@@ -1,11 +1,23 @@
 ﻿@page
 @model IndexModel
+@using TheBelgian.TimeControl.Core.Models
 @{
     ViewData["Title"] = "Start";
 }
 
-<div class="py-5">
+<div class="alert alert-warning" role="alert">
+    <strong>@MatcherUsagePolicy.BannerTitle</strong><br />
+    @MatcherUsagePolicy.BannerBody
+</div>
+
+<div class="py-4">
     <h1 class="display-5">Time Control</h1>
     <p class="lead">Technische proof-of-concept voor de read-only vergelijking van Plenion en Powerfleet.</p>
-    <a class="btn btn-primary" asp-page="/Exceptions/Index">Open afwijkingen</a>
+    <p>
+        Locatiematcher-uitkomsten zijn voorstellen voor menselijke review
+        (<code>HumanReviewRequired</code>). Automatische acceptatie is niet toegestaan na de
+        locked holdout (NO-GO).
+    </p>
+    <a class="btn btn-primary me-2" asp-page="/Exceptions/Index">Open afwijkingen</a>
+    <a class="btn btn-outline-primary" asp-page="/Admin/Reviews">Admin Reviews</a>
 </div>

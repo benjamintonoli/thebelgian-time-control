@@ -126,3 +126,17 @@ dotnet run --project src/TheBelgian.TimeControl.Web -c Release --no-build --no-l
 - Schrijft `docs/location-matching-holdout-final.json` en `.md`.
 - Gebruikt geen live Plenion/Powerfleet/Geoapify.
 - Holdoutresultaten niet gebruiken om drempels te tunen.
+- **Niet opnieuw uitvoeren** na de finale NO-GO.
+
+## 9. Admin Review MVP
+
+Na holdout NO-GO: matcher alleen als voorstel + prioritering voor menselijke review.
+
+Zie `docs/admin-review.md`. Lokaal (Development):
+
+```powershell
+$env:ASPNETCORE_ENVIRONMENT = "Development"
+dotnet run --project src/TheBelgian.TimeControl.Web -c Release
+```
+
+Open `/Admin/Reviews`. Voer `--evaluate-locked-holdout` niet opnieuw uit.

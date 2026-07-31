@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using TheBelgian.TimeControl.Core.Configuration;
 using TheBelgian.TimeControl.Core.Interfaces;
 using TheBelgian.TimeControl.Core.Services;
+using TheBelgian.TimeControl.Infrastructure.AdminReview;
 using TheBelgian.TimeControl.Infrastructure.Configuration;
 using TheBelgian.TimeControl.Infrastructure.Geocoding;
 using TheBelgian.TimeControl.Infrastructure.Persistence;
@@ -133,6 +134,8 @@ public static class DependencyInjection
         services.AddScoped<LocationMatchingBenchmarkService>();
         services.AddScoped<CalibrationSingleReviewerEvaluationService>();
         services.AddScoped<LocationMatchingRecoveryAuditService>();
+        services.AddScoped<AdminReviewDecisionRepository>();
+        services.AddScoped<IAdminReviewService, AdminReviewService>();
         return services;
     }
 
@@ -173,6 +176,23 @@ public static class DependencyInjection
             );
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_LocationResolutionCacheEntries_AddressHash"
                 ON "LocationResolutionCacheEntries" ("AddressHash");
+            CREATE TABLE IF NOT EXISTS "AdminReviewDecisionAudits" (
+                "Id" INTEGER NOT NULL CONSTRAINT "PK_AdminReviewDecisionAudits" PRIMARY KEY AUTOINCREMENT,
+                "PerformanceId" INTEGER NOT NULL,
+                "OriginalMatcherDecision" TEXT NOT NULL,
+                "ProposedVisitCandidateId" TEXT NULL,
+                "ProposedVisitSourceStopIdsJson" TEXT NULL,
+                "AdminDecision" TEXT NOT NULL,
+                "ChosenVisitCandidateId" TEXT NULL,
+                "ChosenVisitSourceStopIdsJson" TEXT NULL,
+                "Comment" TEXT NULL,
+                "Reviewer" TEXT NOT NULL,
+                "DecidedAt" TEXT NOT NULL,
+                "MatcherCommit" TEXT NOT NULL,
+                "ConfigurationHashSha256" TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS "IX_AdminReviewDecisionAudits_PerformanceId_DecidedAt"
+                ON "AdminReviewDecisionAudits" ("PerformanceId", "DecidedAt");
             """,
             cancellationToken);
     }

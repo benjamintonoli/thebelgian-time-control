@@ -1,0 +1,156 @@
+@page "/Admin/Reviews/{performanceId:long}"
+@model TheBelgian.TimeControl.Web.Pages.Admin.Reviews.DetailsModel
+@using TheBelgian.TimeControl.Core.Models
+@{
+    ViewData["Title"] = $"Review {Model.PerformanceId}";
+    var item = Model.Case;
+}
+
+<div class="alert alert-warning" role="alert">
+    <strong>@MatcherUsagePolicy.BannerTitle</strong><br />
+    @MatcherUsagePolicy.BannerBody
+</div>
+
+<p>
+    <a asp-page="./Index">← Terug naar overzicht</a>
+</p>
+
+@if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+{
+    <div class="alert alert-danger">@Model.ErrorMessage</div>
+}
+@if (!string.IsNullOrWhiteSpace(Model.Message))
+{
+    <div class="alert alert-success">@Model.Message</div>
+}
+
+@if (item is null)
+{
+    <p>Case niet geladen.</p>
+}
+else
+{
+    <h1>Review @item.PerformanceId</h1>
+    <p class="text-muted">@item.Technician · @item.Date.ToString("yyyy-MM-dd") · review @item.ReviewStatus</p>
+
+    <div class="row g-4">
+        <div class="col-lg-6">
+            <h2 class="h4">Brongegevens</h2>
+            <ul class="list-unstyled">
+                <li><strong>Plenion:</strong> @item.PerformanceStart.ToString("HH:mm")–@item.PerformanceEnd.ToString("HH:mm")</li>
+                <li><strong>Adres:</strong> @item.PlenionAddress</li>
+                <li><strong>LACLEUNIK:</strong> @(item.Lacleunik ?? "—")</li>
+                <li><strong>Project/bon:</strong> @(item.ProjectOrBonContext ?? "—")</li>
+                <li><strong>Geocodekwaliteit:</strong> @item.GeocodeQuality</li>
+                <li><strong>Vorige:</strong> @(item.PreviousPerformance ?? "—")</li>
+                <li><strong>Volgende:</strong> @(item.NextPerformance ?? "—")</li>
+            </ul>
+
+            <h3 class="h5">Kandidaatbezoeken</h3>
+            <div class="table-responsive">
+                <table class="table table-sm">
+                    <thead>
+                        <tr>
+                            <th>ConstituentStopIds</th>
+                            <th>Adres</th>
+                            <th>Aankomst</th>
+                            <th>Vertrek</th>
+                            <th>Afstand</th>
+                            <th>Overlap</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var visit in item.CandidateVisits)
+                    {
+                        <tr>
+                            <td><code>@string.Join(", ", visit.ConstituentStopIds)</code></td>
+                            <td>@(visit.Address ?? "—")</td>
+                            <td>@visit.Arrival.ToString("HH:mm")</td>
+                            <td>@visit.Departure.ToString("HH:mm")</td>
+                            <td>@(visit.DistanceMeters?.ToString("0.0") ?? "—")</td>
+                            <td>@visit.OverlapMinutes / @visit.OverlapPercent.ToString("0.0")%</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="col-lg-6">
+            <h2 class="h4">Berekende informatie (voorstel)</h2>
+            <ul class="list-unstyled">
+                <li><strong>Matcherstatus:</strong> @item.MatcherStatus</li>
+                <li><strong>Reden:</strong> @item.MatchReason</li>
+                <li><strong>Voorgestelde VisitCandidate:</strong>
+                    @(item.ProposedVisit is null
+                        ? "—"
+                        : string.Join(", ", item.ProposedVisit.ConstituentStopIds))
+                </li>
+                <li><strong>Start-/eindafwijking:</strong>
+                    @(item.ProposedVisit is null
+                        ? "—"
+                        : $"{item.ProposedVisit.StartDeviationMinutes} / {item.ProposedVisit.EndDeviationMinutes} min")
+                </li>
+                <li><strong>Prioriteit:</strong> @item.Priority</li>
+                <li><strong>Matchercommit:</strong> <code>@item.MatcherCommit</code></li>
+                <li><strong>Configuratiehash:</strong> <code>@item.ConfigurationHashSha256</code></li>
+            </ul>
+
+            <h3 class="h5">Adminbeslissing</h3>
+            <form method="post" class="card card-body">
+                <input type="hidden" asp-for="PerformanceId" />
+                <input type="hidden" asp-for="Technician" />
+                <input type="hidden" asp-for="Date" />
+                <div class="mb-3">
+                    <label class="form-label" asp-for="Decision">Beslissing</label>
+                    <select class="form-select" asp-for="Decision" asp-items="Html.GetEnumSelectList<AdminReviewStatus>()"></select>
+                    <div class="form-text">Pending is startstatus; kies Confirmed / Rejected / …</div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" asp-for="Reviewer">Reviewer</label>
+                    <input class="form-control" asp-for="Reviewer" required />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" asp-for="Comment">Opmerking (verplicht bij Rejected)</label>
+                    <textarea class="form-control" asp-for="Comment" rows="3"></textarea>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" asp-for="ChosenVisitCandidateId">Andere kandidaat (optioneel)</label>
+                    <select class="form-select" asp-for="ChosenVisitCandidateId">
+                        <option value="">(behoud voorstel / geen)</option>
+                        @foreach (var visit in item.CandidateVisits)
+                        {
+                            <option value="@visit.VisitCandidateId">
+                                @string.Join(", ", visit.ConstituentStopIds) — @(visit.Address ?? "?")
+                            </option>
+                        }
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-primary">Opslaan (append-only)</button>
+            </form>
+
+            <h3 class="h5 mt-4">Audittrail</h3>
+            @if (Model.AuditTrail.Count == 0)
+            {
+                <p class="text-muted">Nog geen adminbeslissingen. Case staat op Pending.</p>
+            }
+            else
+            {
+                <ul class="list-group">
+                @foreach (var audit in Model.AuditTrail)
+                {
+                    <li class="list-group-item small">
+                        <strong>@audit.AdminDecision</strong> door @audit.Reviewer
+                        op @audit.DecidedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+                        · origineel matcher: @audit.OriginalMatcherDecision
+                        @if (!string.IsNullOrWhiteSpace(audit.Comment))
+                        {
+                            <br />@audit.Comment
+                        }
+                    </li>
+                }
+                </ul>
+            }
+        </div>
+    </div>
+}

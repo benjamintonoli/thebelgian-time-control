@@ -16,6 +16,8 @@ public sealed class TimeControlDbContext(DbContextOptions<TimeControlDbContext> 
     public DbSet<SynchronizationRun> SynchronizationRuns => Set<SynchronizationRun>();
     public DbSet<LocationResolutionCacheEntry> LocationResolutionCacheEntries =>
         Set<LocationResolutionCacheEntry>();
+    public DbSet<AdminReviewDecisionAudit> AdminReviewDecisionAudits =>
+        Set<AdminReviewDecisionAudit>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -31,6 +33,8 @@ public sealed class TimeControlDbContext(DbContextOptions<TimeControlDbContext> 
         modelBuilder.Entity<VehicleAssignment>()
             .HasIndex(item => new { item.TechnicianId, item.VehicleId, item.ValidFrom })
             .IsUnique();
+        modelBuilder.Entity<AdminReviewDecisionAudit>()
+            .HasIndex(item => new { item.PerformanceId, item.DecidedAt });
 
         modelBuilder.Entity<PlenionPerformance>().Property(item => item.Kilometres).HasPrecision(12, 3);
         modelBuilder.Entity<PowerfleetTrip>().Property(item => item.DistanceKilometres).HasPrecision(12, 3);

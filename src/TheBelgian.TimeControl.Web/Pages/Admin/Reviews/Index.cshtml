@@ -1,0 +1,168 @@
+@page "/Admin/Reviews"
+@model TheBelgian.TimeControl.Web.Pages.Admin.Reviews.IndexModel
+@using TheBelgian.TimeControl.Core.Models
+@{
+    ViewData["Title"] = "Admin Reviews";
+}
+
+<div class="alert alert-warning" role="alert">
+    <strong>@MatcherUsagePolicy.BannerTitle</strong><br />
+    @MatcherUsagePolicy.BannerBody
+</div>
+
+<div class="alert alert-info" role="status">
+    Read-only pilot: geen Plenion-writeback, geen automatische correcties.
+    Iedere geaccepteerde match start als <strong>Pending</strong> tot een admin bevestigt.
+</div>
+
+<h1>Admin Reviews — spotcheck</h1>
+
+<form method="get" class="card card-body mb-4">
+    <input type="hidden" name="Load" value="true" />
+    <div class="row g-3">
+        <div class="col-md-3">
+            <label class="form-label" asp-for="Technician">Technieker</label>
+            <input class="form-control" asp-for="Technician" list="tech-list" />
+            <datalist id="tech-list">
+                <option value="Filip Dekuyper" />
+                <option value="Jonas Deklerck" />
+                <option value="Jasper De Smet" />
+                <option value="Jarno Vergauwen" />
+                <option value="Dimitri Stiers" />
+            </datalist>
+        </div>
+        <div class="col-md-2">
+            <label class="form-label" asp-for="FromDate">Van</label>
+            <input class="form-control" asp-for="FromDate" type="date" />
+        </div>
+        <div class="col-md-2">
+            <label class="form-label" asp-for="ThroughDate">Tot</label>
+            <input class="form-control" asp-for="ThroughDate" type="date" />
+        </div>
+        <div class="col-md-2">
+            <label class="form-label" asp-for="ReviewStatus">Reviewstatus</label>
+            <select class="form-select" asp-for="ReviewStatus" asp-items="Html.GetEnumSelectList<AdminReviewStatus>()">
+                <option value="">(alle)</option>
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label" asp-for="MatcherStatus">Matcherstatus</label>
+            <select class="form-select" asp-for="MatcherStatus">
+                <option value="">(alle)</option>
+                <option>Confirmed</option>
+                <option>Probable</option>
+                <option>RecoveredProbable</option>
+                <option>Ambiguous</option>
+                <option>Unresolved</option>
+            </select>
+        </div>
+        <div class="col-md-2">
+            <label class="form-label" asp-for="MinimumDeviationMinutes">Min. afwijking (min)</label>
+            <input class="form-control" asp-for="MinimumDeviationMinutes" type="number" min="0" />
+        </div>
+        <div class="col-md-10 d-flex flex-wrap gap-3 align-items-end">
+            <div class="form-check">
+                <input class="form-check-input" asp-for="HighPriorityOnly" />
+                <label class="form-check-label" asp-for="HighPriorityOnly">Alleen hoge prioriteit</label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" asp-for="ProposedMatchesOnly" />
+                <label class="form-check-label" asp-for="ProposedMatchesOnly">Alleen voorgestelde matches</label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" asp-for="AmbiguousOrUnresolvedOnly" />
+                <label class="form-check-label" asp-for="AmbiguousOrUnresolvedOnly">Alleen Ambiguous/Unresolved</label>
+            </div>
+            <button type="submit" class="btn btn-primary">Laden (live, read-only)</button>
+        </div>
+    </div>
+</form>
+
+@if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+{
+    <div class="alert alert-danger">@Model.ErrorMessage</div>
+}
+
+@if (Model.Loaded)
+{
+    <p class="text-muted">@Model.Cases.Count reviewcases geladen. Sortering: ≥30 min → ≥15 min → terugkerende kleine voordelen → overige.</p>
+    <div class="table-responsive">
+        <table class="table table-sm table-striped align-middle">
+            <thead>
+                <tr>
+                    <th>Datum</th>
+                    <th>Technieker</th>
+                    <th>Plenion</th>
+                    <th>Adres</th>
+                    <th>Voorstel</th>
+                    <th>Aankomst–vertrek</th>
+                    <th>Afstand</th>
+                    <th>Overlap</th>
+                    <th>Δ start/eind</th>
+                    <th>Matcher</th>
+                    <th>Reden</th>
+                    <th>Review</th>
+                    <th>Prioriteit</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+            @foreach (var item in Model.Cases)
+            {
+                <tr>
+                    <td>@item.Date.ToString("yyyy-MM-dd")</td>
+                    <td>@item.Technician</td>
+                    <td>@item.PerformanceStart.ToString("HH:mm")–@item.PerformanceEnd.ToString("HH:mm")</td>
+                    <td>@item.PlenionAddress</td>
+                    <td>
+                        @if (item.ProposedVisit is null)
+                        {
+                            <span class="text-muted">—</span>
+                        }
+                        else
+                        {
+                            <code>@string.Join(", ", item.ProposedVisit.ConstituentStopIds)</code>
+                        }
+                    </td>
+                    <td>
+                        @(item.ProposedVisit is null
+                            ? "—"
+                            : $"{item.ProposedVisit.Arrival:HH:mm}–{item.ProposedVisit.Departure:HH:mm}")
+                    </td>
+                    <td>@(item.ProposedVisit?.DistanceMeters is null ? "—" : item.ProposedVisit.DistanceMeters.Value.ToString("0.0"))</td>
+                    <td>
+                        @(item.ProposedVisit is null
+                            ? "—"
+                            : $"{item.ProposedVisit.OverlapMinutes} min / {item.ProposedVisit.OverlapPercent:0.0}%")
+                    </td>
+                    <td>
+                        @(item.ProposedVisit is null
+                            ? "—"
+                            : $"{item.ProposedVisit.StartDeviationMinutes} / {item.ProposedVisit.EndDeviationMinutes}")
+                    </td>
+                    <td>@item.MatcherStatus</td>
+                    <td class="small">@item.MatchReason</td>
+                    <td>@item.ReviewStatus</td>
+                    <td>
+                        @item.Priority
+                        @if (item.RecurringSmallAdvantage)
+                        {
+                            <span class="badge text-bg-secondary">patroon</span>
+                        }
+                    </td>
+                    <td>
+                        <a asp-page="./Details"
+                           asp-route-performanceId="@item.PerformanceId"
+                           asp-route-technician="@item.Technician"
+                           asp-route-date="@item.Date.ToString("yyyy-MM-dd")">Detail</a>
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+}
+else
+{
+    <p class="text-muted">Kies filters en laad live cases. De holdout wordt hier niet geopend.</p>
+}
