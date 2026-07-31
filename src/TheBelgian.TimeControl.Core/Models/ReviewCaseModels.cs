@@ -19,9 +19,7 @@ public static class MatcherUsagePolicy
     public const string BannerTitle = "Menselijke bevestiging verplicht";
 
     public const string BannerBody =
-        "Read-only pilot — matcherresultaten vereisen menselijke bevestiging. " +
-        "Finale holdoutbeslissing: NO-GO voor automatische acceptatie. " +
-        "Geen Plenion-writeback, geen automatische tijdcorrecties.";
+        "De tool doet voorstellen en voert geen automatische correcties uit.";
 }
 
 public enum AdminReviewStatus
@@ -41,6 +39,15 @@ public enum SpotcheckPriorityTier
     HighPriority = 3,
 }
 
+/// <summary>Evidence strength is independent from time-impact priority.</summary>
+public enum EvidenceStrength
+{
+    StrongProposal = 0,
+    ProbableVisit = 1,
+    MultipleCandidates = 2,
+    NoReliableMatch = 3,
+}
+
 public enum ReviewWorkCategory
 {
     ActionableDeviation = 0,
@@ -53,10 +60,11 @@ public enum ReviewWorkCategory
 
 public enum ReviewWorkTab
 {
-    ToReview = 0,
-    MatchUncertainty = 1,
-    DataQuality = 2,
-    Completed = 3,
+    Exceptions = 0,
+    SmallDeviations = 1,
+    MatchUncertainty = 2,
+    DataQuality = 3,
+    Completed = 4,
 }
 
 /// <summary>Plenion / source facts. Never overwritten by admin decisions.</summary>
@@ -130,6 +138,7 @@ public sealed record ReviewCase(
     public string MatcherStatus => Matcher.MatcherStatus;
     public int? MaxDeviationMinutes => Matcher.MaxDeviationMinutes;
     public bool MatcherProposedAcceptance => Matcher.ProposedAcceptance;
+    public string DetailPath => $"/Admin/Reviews/{PerformanceId}";
 }
 
 /// <summary>
@@ -166,12 +175,12 @@ public sealed record AdminReviewFilter(
     int PageSize = 25);
 
 public sealed record AdminReviewCategoryCounts(
-    int ToReview,
+    int OpenOutstanding,
+    int Exceptions,
+    int SmallDeviation,
     int MatchUncertainty,
     int DataQuality,
     int Completed,
-    int ActionableDeviation,
-    int SmallDeviation,
     int Informational);
 
 public sealed record AdminReviewSearchResult(

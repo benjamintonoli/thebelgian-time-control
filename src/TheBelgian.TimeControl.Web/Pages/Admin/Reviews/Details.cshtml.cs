@@ -9,11 +9,20 @@ public sealed class DetailsModel(
     IAdminReviewService reviewService,
     ILogger<DetailsModel> logger) : PageModel
 {
+    public enum ReviewActionKind
+    {
+        ConfirmProposal = 0,
+        ChooseOtherCandidate = 1,
+        RejectProposal = 2,
+        NoReliableMatch = 3,
+        NeedsMoreInformation = 4,
+    }
+
     [BindProperty(SupportsGet = true)]
     public long PerformanceId { get; set; }
 
     [BindProperty]
-    public AdminReviewStatus Decision { get; set; } = AdminReviewStatus.Confirmed;
+    public ReviewActionKind Action { get; set; } = ReviewActionKind.ConfirmProposal;
 
     [BindProperty]
     public string Reviewer { get; set; } = string.Empty;
@@ -44,11 +53,6 @@ public sealed class DetailsModel(
             ?? Case.Matcher.ProposedVisit?.VisitCandidateId;
         Reviewer = Case.Admin.Reviewer ?? string.Empty;
         Comment = Case.Admin.Comment;
-        if (Case.ReviewStatus != AdminReviewStatus.Pending)
-        {
-            Decision = Case.ReviewStatus;
-        }
-
         return Page();
     }
 
@@ -56,28 +60,31 @@ public sealed class DetailsModel(
     {
         try
         {
-            IReadOnlyList<string>? stopIds = null;
             await LoadAsync(cancellationToken);
-            if (Case is not null && !string.IsNullOrWhiteSpace(ChosenVisitCandidateId))
+            if (Case is null)
+            {
+                return NotFound();
+            }
+
+            var (decision, chosenId) = MapAction(Case);
+            IReadOnlyList<string>? stopIds = null;
+            if (!string.IsNullOrWhiteSpace(chosenId))
             {
                 stopIds = Case.Matcher.CandidateVisits
                     .FirstOrDefault(item =>
-                        string.Equals(
-                            item.VisitCandidateId,
-                            ChosenVisitCandidateId,
-                            StringComparison.Ordinal))
+                        string.Equals(item.VisitCandidateId, chosenId, StringComparison.Ordinal))
                     ?.ConstituentStopIds;
             }
 
             await reviewService.RecordDecisionAsync(
                 PerformanceId,
-                Decision,
+                decision,
                 Reviewer,
                 Comment,
-                ChosenVisitCandidateId,
+                chosenId,
                 stopIds,
                 cancellationToken);
-            Message = "Beslissing opgeslagen (append-only audit). Geen Plenion-writeback.";
+            Message = "Beslissing opgeslagen in append-only audittrail. Geen Plenion-writeback.";
         }
         catch (Exception ex)
         {
@@ -92,6 +99,23 @@ public sealed class DetailsModel(
         }
 
         return Page();
+    }
+
+    private (AdminReviewStatus Decision, string? ChosenVisitId) MapAction(ReviewCase current)
+    {
+        return Action switch
+        {
+            ReviewActionKind.ConfirmProposal => (
+                AdminReviewStatus.Confirmed,
+                current.Matcher.ProposedVisit?.VisitCandidateId ?? ChosenVisitCandidateId),
+            ReviewActionKind.ChooseOtherCandidate => (
+                AdminReviewStatus.Confirmed,
+                ChosenVisitCandidateId),
+            ReviewActionKind.RejectProposal => (AdminReviewStatus.Rejected, null),
+            ReviewActionKind.NoReliableMatch => (AdminReviewStatus.NoReliableMatch, null),
+            ReviewActionKind.NeedsMoreInformation => (AdminReviewStatus.NeedsMoreInformation, null),
+            _ => throw new InvalidOperationException("Onbekende adminactie."),
+        };
     }
 
     private async Task LoadAsync(CancellationToken cancellationToken)

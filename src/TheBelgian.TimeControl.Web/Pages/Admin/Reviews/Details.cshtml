@@ -7,12 +7,6 @@
     var item = Model.Case;
 }
 
-<div class="alert alert-warning" role="alert">
-    @MatcherUsagePolicy.BannerTitle — matcherresultaten vereisen menselijke bevestiging.
-</div>
-
-<p><a asp-page="./Index">&larr; Terug naar reviewlijst</a></p>
-
 @if (!string.IsNullOrWhiteSpace(Model.Message))
 {
     <div class="alert alert-success">@Model.Message</div>
@@ -22,23 +16,45 @@
     <div class="alert alert-danger">@Model.Error</div>
 }
 
+<p class="mb-3"><a asp-page="./Index">&larr; Terug naar reviews</a></p>
+
 @if (item is null)
 {
     <p>Case niet gevonden.</p>
 }
 else
 {
-    <h1>Review @item.PerformanceId</h1>
-    <p class="text-muted mb-4">
-        Prioriteit: <strong>@AdminReviewDisplay.Priority(item.Priority)</strong>
-        · Matcher: <strong>@AdminReviewDisplay.MatcherStatus(item.MatcherStatus)</strong>
-        · Review: <strong>@item.ReviewStatus</strong>
-        · Categorie: <strong>@item.Category</strong>
-        @if (item.HasRecurringConfirmedPattern)
-        {
-            <span class="badge bg-light text-dark border">terugkerend bevestigd patroon (reviewcontext)</span>
-        }
-    </p>
+    var evidence = AdminReviewDisplay.Evidence(item.MatcherStatus);
+    <div class="review-detail-hero">
+        <div>
+            <div class="text-muted small">Technieker</div>
+            <div class="fw-semibold">@item.Technician</div>
+        </div>
+        <div>
+            <div class="text-muted small">Datum</div>
+            <div class="fw-semibold text-nowrap">@item.Date.ToString("yyyy-MM-dd")</div>
+        </div>
+        <div>
+            <div class="text-muted small">Geboekte tijd</div>
+            <div class="fw-semibold text-nowrap">
+                @item.Source.PlenionStart.ToString("HH:mm")–@item.Source.PlenionEnd.ToString("HH:mm")
+            </div>
+        </div>
+        <div>
+            <span class="badge @AdminReviewDisplay.ImpactBadgeClass(item.Priority)">
+                @AdminReviewDisplay.Impact(item.Priority)
+            </span>
+        </div>
+        <div>
+            <span class="badge @AdminReviewDisplay.EvidenceBadgeClass(evidence)">
+                @AdminReviewDisplay.EvidenceLabel(evidence)
+            </span>
+        </div>
+        <div>
+            <div class="text-muted small">Reviewstatus</div>
+            <div class="fw-semibold">@item.ReviewStatus</div>
+        </div>
+    </div>
 
     @if (!string.IsNullOrWhiteSpace(item.DeterministicExplanation))
     {
@@ -47,116 +63,157 @@ else
 
     <div class="row g-4 mb-4">
         <div class="col-lg-4">
-            <h2 class="h5">A. Plenion</h2>
-            <dl class="small">
-                <dt>Prestatie</dt>
-                <dd>@item.PerformanceId · @item.Date · @item.Technician</dd>
-                <dt>Tijd</dt>
-                <dd class="text-nowrap">@item.Source.PlenionStart.ToString("yyyy-MM-dd HH:mm") – @item.Source.PlenionEnd.ToString("HH:mm")</dd>
-                <dt>Adres</dt>
-                <dd>@item.Source.PlenionAddress</dd>
-                <dt>Project / bon / klant</dt>
-                <dd>
-                    @(item.Source.ProjectContext ?? "—")
-                    / @(item.Source.BonContext ?? "—")
-                    / @(item.Source.CustomerContext ?? "—")
-                </dd>
-                <dt>Vorige prestatie</dt>
-                <dd>@(item.Source.PreviousPerformance ?? "—")</dd>
-                <dt>Volgende prestatie</dt>
-                <dd>@(item.Source.NextPerformance ?? "—")</dd>
-                <dt>Start / eindafwijking</dt>
-                <dd>
-                    @AdminReviewDisplay.Deviation(item.Matcher.StartDeviationMinutes)
-                    /
-                    @AdminReviewDisplay.Deviation(item.Matcher.EndDeviationMinutes)
-                </dd>
-            </dl>
+            <section class="review-panel review-panel-booked">
+                <h2>A. Geboekte prestatie</h2>
+                <dl class="small mb-0">
+                    <dt>Prestatie</dt>
+                    <dd>@item.PerformanceId</dd>
+                    <dt>Plenion-start / -einde</dt>
+                    <dd class="text-nowrap">
+                        @item.Source.PlenionStart.ToString("yyyy-MM-dd HH:mm") –
+                        @item.Source.PlenionEnd.ToString("HH:mm")
+                    </dd>
+                    <dt>Adres</dt>
+                    <dd>@item.Source.PlenionAddress</dd>
+                    <dt>Klant / project / bon</dt>
+                    <dd>
+                        @(item.Source.CustomerContext ?? "—") /
+                        @(item.Source.ProjectContext ?? "—") /
+                        @(item.Source.BonContext ?? "—")
+                    </dd>
+                    <dt>Vorige prestatie</dt>
+                    <dd>@(item.Source.PreviousPerformance ?? "—")</dd>
+                    <dt>Volgende prestatie</dt>
+                    <dd>@(item.Source.NextPerformance ?? "—")</dd>
+                    <dt>Aankomst / vertrek t.o.v. boeking</dt>
+                    <dd>
+                        @AdminReviewDisplay.Deviation(item.Matcher.StartDeviationMinutes)
+                        /
+                        @AdminReviewDisplay.Deviation(item.Matcher.EndDeviationMinutes)
+                    </dd>
+                </dl>
+            </section>
         </div>
         <div class="col-lg-4">
-            <h2 class="h5">B. Powerfleet / matcher</h2>
-            <dl class="small">
-                <dt>Status / reden</dt>
-                <dd>@AdminReviewDisplay.MatcherStatus(item.Matcher.MatcherStatus) — @item.Matcher.MatchReason</dd>
-                <dt>Geocodekwaliteit</dt>
-                <dd>@item.Matcher.GeocodeQuality</dd>
-                <dt>Voorgesteld bezoek</dt>
-                <dd>@AdminReviewDisplay.VisitSummary(item.Matcher.ProposedVisit)</dd>
-            </dl>
-            <h3 class="h6">Kandidaatbezoeken</h3>
-            <div class="table-responsive">
-                <table class="table table-sm">
-                    <thead>
-                        <tr>
-                            <th>Adres / tijd</th>
-                            <th>StopIds</th>
-                            <th>m</th>
-                            <th>Overlap</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                    @foreach (var visit in item.Matcher.CandidateVisits)
-                    {
-                        <tr>
-                            <td class="small">@AdminReviewDisplay.VisitSummary(visit)</td>
-                            <td class="font-monospace small">@string.Join(", ", visit.ConstituentStopIds)</td>
-                            <td>@(visit.DistanceMeters?.ToString("0") ?? "—")</td>
-                            <td>@visit.OverlapMinutes / @visit.OverlapPercent.ToString("0")%</td>
-                        </tr>
-                    }
-                    </tbody>
-                </table>
-            </div>
-        </div>
-        <div class="col-lg-4">
-            <h2 class="h5">C. Adminbeslissing</h2>
-            <form method="post" class="border rounded p-3">
-                <div class="mb-2">
-                    <label class="form-label" asp-for="Decision">Beslissing</label>
-                    <select class="form-select" asp-for="Decision" asp-items="Html.GetEnumSelectList<AdminReviewStatus>()"></select>
-                </div>
-                <div class="mb-2">
-                    <label class="form-label" asp-for="ChosenVisitCandidateId">Gekozen bezoek</label>
-                    <select class="form-select" asp-for="ChosenVisitCandidateId">
-                        <option value="">(geen)</option>
+            <section class="review-panel review-panel-evidence">
+                <h2>B. Powerfleet-bewijs</h2>
+                <dl class="small">
+                    <dt>Voorgesteld bezoek</dt>
+                    <dd>
+                        @if (item.Matcher.ProposedVisit is null)
+                        {
+                            <span>—</span>
+                        }
+                        else
+                        {
+                            <span class="visit-line-primary">@AdminReviewDisplay.VisitAddressLine(item.Matcher.ProposedVisit)</span>
+                            <span class="visit-line-secondary">@AdminReviewDisplay.VisitMetricsLine(item.Matcher.ProposedVisit)</span>
+                        }
+                    </dd>
+                    <dt>Geocodekwaliteit</dt>
+                    <dd>@item.Matcher.GeocodeQuality</dd>
+                    <dt>ConstituentStopIds (voorstel)</dt>
+                    <dd class="font-monospace">
+                        @(item.Matcher.ProposedVisit is null
+                            ? "—"
+                            : string.Join(", ", item.Matcher.ProposedVisit.ConstituentStopIds))
+                    </dd>
+                    <dt>Matchreden</dt>
+                    <dd>@item.Matcher.MatchReason</dd>
+                </dl>
+                <h3 class="h6">Alternatieve kandidaatbezoeken</h3>
+                <div class="table-responsive">
+                    <table class="table table-sm mb-0">
+                        <thead>
+                            <tr>
+                                <th>Bezoek</th>
+                                <th>StopIds</th>
+                                <th>m</th>
+                                <th>Overlap</th>
+                            </tr>
+                        </thead>
+                        <tbody>
                         @foreach (var visit in item.Matcher.CandidateVisits)
                         {
-                            <option value="@visit.VisitCandidateId">@AdminReviewDisplay.VisitSummary(visit) (@visit.VisitCandidateId)</option>
+                            <tr>
+                                <td class="small">
+                                    <span class="visit-line-primary">@AdminReviewDisplay.VisitAddressLine(visit)</span>
+                                    <span class="visit-line-secondary text-nowrap">@visit.Arrival.ToString("HH:mm")–@visit.Departure.ToString("HH:mm")</span>
+                                </td>
+                                <td class="font-monospace small">@string.Join(", ", visit.ConstituentStopIds)</td>
+                                <td>@(visit.DistanceMeters?.ToString("0") ?? "—")</td>
+                                <td>@visit.OverlapMinutes / @visit.OverlapPercent.ToString("0")%</td>
+                            </tr>
                         }
-                    </select>
+                        </tbody>
+                    </table>
                 </div>
-                <div class="mb-2">
-                    <label class="form-label" asp-for="Reviewer">Reviewer</label>
-                    <input class="form-control" asp-for="Reviewer" required />
-                </div>
-                <div class="mb-2">
-                    <label class="form-label" asp-for="Comment">Opmerking / reden</label>
-                    <textarea class="form-control" asp-for="Comment" rows="3"></textarea>
-                </div>
-                <button type="submit" class="btn btn-primary">Opslaan</button>
-                <p class="small text-muted mt-2 mb-0">
-                    Confirmed vereist reviewer. Rejected vereist reden.
-                    Andere kandidaat vereist opmerking. Geen Plenion-writeback.
-                </p>
-            </form>
+            </section>
+        </div>
+        <div class="col-lg-4">
+            <section class="review-panel review-panel-decision">
+                <h2>C. Beoordeling</h2>
+                <form method="post">
+                    <div class="mb-3">
+                        <label class="form-label" asp-for="Action">Actie</label>
+                        <select class="form-select" asp-for="Action">
+                            <option value="@((int)DetailsModel.ReviewActionKind.ConfirmProposal)">Voorstel bevestigen</option>
+                            <option value="@((int)DetailsModel.ReviewActionKind.ChooseOtherCandidate)">Andere kandidaat kiezen</option>
+                            <option value="@((int)DetailsModel.ReviewActionKind.RejectProposal)">Voorstel afwijzen</option>
+                            <option value="@((int)DetailsModel.ReviewActionKind.NoReliableMatch)">Geen betrouwbare match</option>
+                            <option value="@((int)DetailsModel.ReviewActionKind.NeedsMoreInformation)">Meer informatie nodig</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" asp-for="ChosenVisitCandidateId">Kandidaatbezoek</label>
+                        <select class="form-select" asp-for="ChosenVisitCandidateId">
+                            <option value="">(geen)</option>
+                            @foreach (var visit in item.Matcher.CandidateVisits)
+                            {
+                                <option value="@visit.VisitCandidateId">
+                                    @AdminReviewDisplay.VisitAddressLine(visit) · @visit.Arrival.ToString("HH:mm")–@visit.Departure.ToString("HH:mm")
+                                </option>
+                            }
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" asp-for="Reviewer">Reviewer</label>
+                        <input class="form-control" asp-for="Reviewer" required />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" asp-for="Comment">Opmerking / reden</label>
+                        <textarea class="form-control" asp-for="Comment" rows="3"></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-success">Beslissing opslaan</button>
+                    <p class="small text-muted mt-2 mb-0">
+                        Reviewer verplicht. Afwijzing vereist reden. Andere kandidaat vereist opmerking.
+                        Oorspronkelijke matcheruitkomst blijft bewaard. Geen Plenion-writeback.
+                    </p>
+                </form>
+            </section>
         </div>
     </div>
 
     <details class="mb-4">
-        <summary class="fw-semibold">Technische gegevens</summary>
+        <summary class="fw-semibold">Technische informatie</summary>
         <dl class="small mt-2">
             <dt>Bronprovenance</dt>
             <dd>@string.Join(", ", item.SourceProvenance)</dd>
-            <dt>Voorgesteld VisitCandidateId</dt>
-            <dd class="font-monospace">@(item.Matcher.ProposedVisit?.VisitCandidateId ?? "—")</dd>
+            <dt>Interne matcherstatus</dt>
+            <dd class="font-monospace">@item.Matcher.MatcherStatus</dd>
             <dt>Matchercommit</dt>
             <dd class="font-monospace">@item.Matcher.MatcherCommit</dd>
             <dt>Configuratiehash</dt>
             <dd class="font-monospace">@item.Matcher.ConfigurationHash</dd>
+            <dt>Holdoutbeslissing</dt>
+            <dd>@MatcherUsagePolicy.HoldoutDecision</dd>
         </dl>
     </details>
 
     <h2 class="h5">Audittrail</h2>
+    <p class="audit-note">
+        Beslissingen zijn append-only: eerdere rijen blijven staan en worden nooit overschreven.
+    </p>
     @if (Model.AuditTrail.Count == 0)
     {
         <p class="text-muted">Nog geen beslissingen.</p>
@@ -167,13 +224,12 @@ else
             <table class="table table-sm">
                 <thead>
                     <tr>
-                        <th>Tijd</th>
+                        <th>Tijdstip</th>
                         <th>Reviewer</th>
                         <th>Beslissing</th>
+                        <th>Gekozen bezoek</th>
+                        <th>Reden / opmerking</th>
                         <th>Oorspr. matcher</th>
-                        <th>Voorstel</th>
-                        <th>Gekozen</th>
-                        <th>Reden</th>
                         <th>Commit</th>
                         <th>Config</th>
                     </tr>
@@ -182,13 +238,12 @@ else
                 @foreach (var row in Model.AuditTrail)
                 {
                     <tr>
-                        <td class="small text-nowrap">@row.DecidedAt.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                        <td class="small text-nowrap">@row.DecidedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
                         <td>@row.Reviewer</td>
                         <td>@row.Decision</td>
-                        <td>@AdminReviewDisplay.MatcherStatus(row.OriginalMatcherStatus)</td>
-                        <td class="font-monospace small">@(row.ProposedVisitCandidateId ?? "—")</td>
                         <td class="font-monospace small">@(row.ChosenVisitCandidateId ?? "—")</td>
                         <td class="small">@(row.ReasonOrComment ?? "—")</td>
+                        <td>@AdminReviewDisplay.EvidenceLabel(row.OriginalMatcherStatus)</td>
                         <td class="font-monospace small">@row.MatcherCommit</td>
                         <td class="font-monospace small">@row.ConfigurationHash[..Math.Min(12, row.ConfigurationHash.Length)]…</td>
                     </tr>

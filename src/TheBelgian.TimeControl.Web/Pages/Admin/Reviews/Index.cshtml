@@ -3,28 +3,37 @@
 @using TheBelgian.TimeControl.Core.Models
 @using TheBelgian.TimeControl.Core.Services
 @{
-    ViewData["Title"] = "Admin Reviews";
+    ViewData["Title"] = "Reviews";
     var counts = Model.Result.Counts;
     var totalPages = Math.Max(1, (int)Math.Ceiling(Model.Result.TotalMatching / (double)Model.Result.PageSize));
-    string PriorityBadgeClass(SpotcheckPriorityTier? tier) => tier switch
-    {
-        SpotcheckPriorityTier.HighPriority => "bg-danger",
-        SpotcheckPriorityTier.IndividualException => "bg-warning text-dark",
-        SpotcheckPriorityTier.SmallDeviation => "bg-info text-dark",
-        SpotcheckPriorityTier.Informational => "bg-secondary",
-        _ => "bg-light text-dark border"
-    };
     string TabClass(ReviewWorkTab tab) =>
         Model.Tab == tab ? "nav-link active" : "nav-link";
 }
 
-<div class="alert alert-warning" role="alert">
+<div class="alert alert-warning mb-3" role="alert">
     <strong>@MatcherUsagePolicy.BannerTitle</strong><br />
     @MatcherUsagePolicy.BannerBody
 </div>
 
-<h1>Admin Reviews</h1>
-<p class="text-muted">Werklijst voor menselijke bevestiging van matchervoorstellen.</p>
+<details class="mb-4">
+    <summary class="fw-semibold">Technische informatie</summary>
+    <dl class="small mt-2 mb-0">
+        <dt>Finale holdoutbeslissing</dt>
+        <dd>@MatcherUsagePolicy.HoldoutDecision — geen verdere holdouttuning</dd>
+        <dt>Provider</dt>
+        <dd>@Model.DataSourceName</dd>
+        <dt>Automatische acceptatie / writeback</dt>
+        <dd>
+            Auto-accept: @MatcherUsagePolicy.AutomaticAcceptanceAllowed ·
+            Plenion-writeback: @MatcherUsagePolicy.PlenionWritebackAllowed
+        </dd>
+        <dt>Matchercommit / configuratiehash</dt>
+        <dd class="text-muted">Per case zichtbaar op de detailpagina (inklapbaar).</dd>
+    </dl>
+</details>
+
+<h1 class="mb-1">Reviews</h1>
+<p class="text-muted mb-4">Werklijst: openen → begrijpen → bewijs vergelijken → beslissen → audit controleren.</p>
 
 @if (!string.IsNullOrWhiteSpace(Model.Error))
 {
@@ -32,26 +41,28 @@
 }
 
 <div class="row g-3 mb-4">
-    <div class="col-md-3">
+    <div class="col-lg-3 col-md-6">
         <div class="border rounded p-3 h-100">
-            <div class="text-muted small">Te beoordelen</div>
-            <div class="fs-3">@counts.ToReview</div>
-            <div class="small text-muted">@counts.ActionableDeviation actie · @counts.SmallDeviation klein</div>
+            <div class="text-muted small">Openstaand</div>
+            <div class="fs-3">@counts.OpenOutstanding</div>
+            <div class="small text-muted">
+                @counts.Exceptions uitzonderingen · @counts.SmallDeviation kleine afwijkingen
+            </div>
         </div>
     </div>
-    <div class="col-md-3">
+    <div class="col-lg-3 col-md-6">
         <div class="border rounded p-3 h-100">
             <div class="text-muted small">Koppeling onzeker</div>
             <div class="fs-3">@counts.MatchUncertainty</div>
         </div>
     </div>
-    <div class="col-md-3">
+    <div class="col-lg-3 col-md-6">
         <div class="border rounded p-3 h-100">
             <div class="text-muted small">Datakwaliteit</div>
             <div class="fs-3">@counts.DataQuality</div>
         </div>
     </div>
-    <div class="col-md-3">
+    <div class="col-lg-3 col-md-6">
         <div class="border rounded p-3 h-100">
             <div class="text-muted small">Afgehandeld</div>
             <div class="fs-3">@counts.Completed</div>
@@ -59,16 +70,27 @@
     </div>
 </div>
 
-<ul class="nav nav-tabs mb-3">
+<ul class="nav nav-tabs mb-3 flex-wrap">
     <li class="nav-item">
-        <a class="@TabClass(ReviewWorkTab.ToReview)"
+        <a class="@TabClass(ReviewWorkTab.Exceptions)"
            asp-page="./Index"
-           asp-route-tab="@ReviewWorkTab.ToReview"
+           asp-route-tab="@ReviewWorkTab.Exceptions"
            asp-route-category="@ReviewWorkCategory.ActionableDeviation"
            asp-route-technician="@Model.Technician"
            asp-route-fromDate="@Model.FromDate?.ToString("yyyy-MM-dd")"
            asp-route-throughDate="@Model.ThroughDate?.ToString("yyyy-MM-dd")">
-            Te beoordelen (@counts.ToReview)
+            Uitzonderingen (@counts.Exceptions)
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="@TabClass(ReviewWorkTab.SmallDeviations)"
+           asp-page="./Index"
+           asp-route-tab="@ReviewWorkTab.SmallDeviations"
+           asp-route-category="@ReviewWorkCategory.SmallDeviation"
+           asp-route-technician="@Model.Technician"
+           asp-route-fromDate="@Model.FromDate?.ToString("yyyy-MM-dd")"
+           asp-route-throughDate="@Model.ThroughDate?.ToString("yyyy-MM-dd")">
+            Kleine afwijkingen (@counts.SmallDeviation)
         </a>
     </li>
     <li class="nav-item">
@@ -129,62 +151,75 @@
 </form>
 
 <p class="text-muted">
-    @Model.Result.TotalMatching resultaat(en)
+    @Model.Result.TotalMatching zichtbaar in deze tab
     · pagina @Model.Result.Page / @totalPages
-    · standaard: te beoordelen afwijkingen ≥ 15 min (Pending / NeedsMoreInformation)
+    · max @Model.Result.PageSize per pagina
 </p>
 
 <div class="admin-review-table-wrap table-responsive">
-    <table class="table table-sm table-striped align-middle admin-review-table">
+    <table class="table table-hover align-middle admin-review-table">
         <thead>
             <tr>
-                <th>Prioriteit</th>
+                <th>Impact</th>
                 <th>Datum</th>
                 <th>Technieker</th>
-                <th>Plenion-tijd</th>
+                <th>Geboekte tijd</th>
                 <th>Plenion-adres</th>
                 <th>Voorgesteld bezoek</th>
-                <th>Startafwijking</th>
-                <th>Eindafwijking</th>
-                <th>Matcherstatus</th>
+                <th>Aankomst t.o.v. boeking</th>
+                <th>Vertrek t.o.v. boeking</th>
+                <th>Bewijs</th>
                 <th>Reviewstatus</th>
+                <th></th>
             </tr>
         </thead>
         <tbody>
         @foreach (var item in Model.Result.Items)
         {
-            <tr>
+            var evidence = AdminReviewDisplay.Evidence(item.MatcherStatus);
+            <tr class="review-row"
+                tabindex="0"
+                data-href="@item.DetailPath"
+                role="link"
+                aria-label="Review @item.PerformanceId openen">
                 <td>
-                    @if (item.Priority is { } priority)
-                    {
-                        <span class="badge @PriorityBadgeClass(priority)">@AdminReviewDisplay.Priority(priority)</span>
-                    }
-                    else
+                    <span class="badge @AdminReviewDisplay.ImpactBadgeClass(item.Priority)">
+                        @AdminReviewDisplay.Impact(item.Priority)
+                    </span>
+                </td>
+                <td class="text-nowrap">@item.Date.ToString("yyyy-MM-dd")</td>
+                <td>@item.Technician</td>
+                <td class="text-nowrap">
+                    @item.Source.PlenionStart.ToString("HH:mm")–@item.Source.PlenionEnd.ToString("HH:mm")
+                </td>
+                <td class="col-address" title="@item.Source.PlenionAddress">
+                    @AdminReviewDisplay.Truncate(item.Source.PlenionAddress, 42)
+                </td>
+                <td class="col-visit" title="@(item.Matcher.ProposedVisit?.Address)">
+                    @if (item.Matcher.ProposedVisit is null)
                     {
                         <span class="text-muted">—</span>
                     }
-                    @if (item.HasRecurringConfirmedPattern)
+                    else
                     {
-                        <span class="badge bg-light text-dark border" title="Terugkerend bevestigd patroon (reviewcontext).">patroon</span>
+                        <span class="visit-line-primary">@AdminReviewDisplay.VisitAddressLine(item.Matcher.ProposedVisit)</span>
+                        <span class="visit-line-secondary">@AdminReviewDisplay.VisitMetricsLine(item.Matcher.ProposedVisit)</span>
                     }
-                </td>
-                <td class="text-nowrap">
-                    <a asp-page="./Details" asp-route-performanceId="@item.PerformanceId">@item.Date.ToString("yyyy-MM-dd")</a>
-                </td>
-                <td>@item.Technician</td>
-                <td class="small text-nowrap">
-                    @item.Source.PlenionStart.ToString("HH:mm")–@item.Source.PlenionEnd.ToString("HH:mm")
-                </td>
-                <td class="small" title="@item.Source.PlenionAddress">
-                    @AdminReviewDisplay.Truncate(item.Source.PlenionAddress)
-                </td>
-                <td class="small" title="@(item.Matcher.ProposedVisit?.Address)">
-                    @AdminReviewDisplay.VisitSummary(item.Matcher.ProposedVisit)
                 </td>
                 <td class="text-nowrap">@AdminReviewDisplay.Deviation(item.Matcher.StartDeviationMinutes)</td>
                 <td class="text-nowrap">@AdminReviewDisplay.Deviation(item.Matcher.EndDeviationMinutes)</td>
-                <td>@AdminReviewDisplay.MatcherStatus(item.MatcherStatus)</td>
+                <td>
+                    <span class="badge @AdminReviewDisplay.EvidenceBadgeClass(evidence)">
+                        @AdminReviewDisplay.EvidenceLabel(evidence)
+                    </span>
+                </td>
                 <td>@item.ReviewStatus</td>
+                <td class="text-end">
+                    <a class="btn btn-sm btn-outline-secondary"
+                       asp-page="./Details"
+                       asp-route-performanceId="@item.PerformanceId"
+                       onclick="event.stopPropagation()">Bekijken →</a>
+                </td>
             </tr>
         }
         </tbody>
@@ -193,7 +228,7 @@
 
 @if (totalPages > 1)
 {
-    <nav aria-label="Paginering">
+    <nav class="mt-3" aria-label="Paginering">
         <ul class="pagination">
             <li class="page-item @(Model.Result.Page <= 1 ? "disabled" : null)">
                 <a class="page-link"
@@ -218,4 +253,24 @@
             </li>
         </ul>
     </nav>
+}
+
+@section Scripts {
+<script>
+(() => {
+  const go = (row) => {
+    const href = row?.getAttribute('data-href');
+    if (href) window.location.href = href;
+  };
+  document.querySelectorAll('tr.review-row').forEach((row) => {
+    row.addEventListener('click', () => go(row));
+    row.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        go(row);
+      }
+    });
+  });
+})();
+</script>
 }

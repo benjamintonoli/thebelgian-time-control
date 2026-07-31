@@ -1,4 +1,7 @@
 ﻿@inject IWebHostEnvironment HostEnvironment
+@{
+    var isAdmin = Context.Request.Path.StartsWithSegments("/Admin");
+}
 <!DOCTYPE html>
 <html lang="nl">
 <head>
@@ -12,30 +15,37 @@
 <body>
     <header>
         <nav class="navbar navbar-expand-sm navbar-toggleable-sm navbar-light bg-white border-bottom box-shadow mb-3">
-            <div class="container">
+            <div class="@(isAdmin ? "admin-shell" : "container")">
                 <a class="navbar-brand" asp-area="" asp-page="/Index">The Belgian Time Control</a>
                 <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target=".navbar-collapse" aria-controls="navbarSupportedContent"
                         aria-expanded="false" aria-label="Toggle navigation">
                     <span class="navbar-toggler-icon"></span>
                 </button>
                 <div class="navbar-collapse collapse d-sm-inline-flex justify-content-between">
-                    <ul class="navbar-nav flex-grow-1">
+                    <ul class="navbar-nav flex-grow-1 align-items-sm-center">
                         <li class="nav-item">
-                            <a class="nav-link text-dark" asp-area="" asp-page="/Index">Home</a>
+                            <a class="nav-link text-dark" asp-page="/Admin/Reviews/Index">Reviews</a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link text-dark" asp-area="" asp-page="/Exceptions/Index">Afwijkingen</a>
+                            <a class="nav-link text-dark"
+                               asp-page="/Admin/Reviews/Index"
+                               asp-route-tab="Completed"
+                               asp-route-category="Completed">Afgehandeld</a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link text-dark" asp-page="/Admin/Reviews/Index">Admin Reviews</a>
+                            <a class="nav-link text-dark" asp-page="/Admin/Patterns/Index">Patronen</a>
                         </li>
                         @if (HostEnvironment.IsDevelopment())
                         {
-                            <li class="nav-item">
-                                <a class="nav-link text-dark" asp-page="/Pilot/Index">Read-only pilot</a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link text-dark" asp-page="/Pilot/Broader">Bredere validatie</a>
+                            <li class="nav-item dropdown">
+                                <a class="nav-link dropdown-toggle text-dark" href="#" id="devNav" role="button"
+                                   data-bs-toggle="dropdown" aria-expanded="false">Development</a>
+                                <ul class="dropdown-menu" aria-labelledby="devNav">
+                                    <li><a class="dropdown-item" asp-page="/Exceptions/Index">Afwijkingen</a></li>
+                                    <li><a class="dropdown-item" asp-page="/Pilot/Index">Read-only pilot</a></li>
+                                    <li><a class="dropdown-item" asp-page="/Pilot/Broader">Bredere validatie</a></li>
+                                    <li><a class="dropdown-item" asp-page="/Pilot/BenchmarkReview">Benchmark review</a></li>
+                                </ul>
                             </li>
                         }
                     </ul>
@@ -43,14 +53,14 @@
             </div>
         </nav>
     </header>
-    <div class="container">
+    <div class="@(isAdmin ? "admin-shell" : "container")">
         <main role="main" class="pb-3">
             @RenderBody()
         </main>
     </div>
 
     <footer class="border-top footer text-muted">
-        <div class="container">
+        <div class="@(isAdmin ? "admin-shell" : "container")">
             &copy; 2026 The Belgian · fase 1 · read-only
         </div>
     </footer>

@@ -141,16 +141,15 @@ public static class SpotcheckPriorityCalculator
     public static AdminReviewCategoryCounts CountCategories(IReadOnlyList<ReviewCase> cases)
     {
         var open = cases.Where(IsOpenForWork).ToArray();
+        var exceptions = open.Count(item => item.Category == ReviewWorkCategory.ActionableDeviation);
+        var small = open.Count(item => item.Category == ReviewWorkCategory.SmallDeviation);
         return new AdminReviewCategoryCounts(
-            ToReview: open.Count(item =>
-                item.Category is ReviewWorkCategory.ActionableDeviation
-                    or ReviewWorkCategory.SmallDeviation),
+            OpenOutstanding: exceptions + small,
+            Exceptions: exceptions,
+            SmallDeviation: small,
             MatchUncertainty: open.Count(item => item.Category == ReviewWorkCategory.MatchUncertainty),
             DataQuality: open.Count(item => item.Category == ReviewWorkCategory.DataQuality),
             Completed: cases.Count(item => item.Category == ReviewWorkCategory.Completed),
-            ActionableDeviation: open.Count(item =>
-                item.Category == ReviewWorkCategory.ActionableDeviation),
-            SmallDeviation: open.Count(item => item.Category == ReviewWorkCategory.SmallDeviation),
             Informational: open.Count(item => item.Category == ReviewWorkCategory.Informational));
     }
 
@@ -159,7 +158,7 @@ public static class SpotcheckPriorityCalculator
 
     public static AdminReviewFilter DefaultWorklistFilter(int page = 1) =>
         new(
-            Tab: ReviewWorkTab.ToReview,
+            Tab: ReviewWorkTab.Exceptions,
             Category: ReviewWorkCategory.ActionableDeviation,
             Page: Math.Max(1, page),
             PageSize: DefaultPageSize);
@@ -213,14 +212,7 @@ public static class SpotcheckPriorityCalculator
         {
             return filter with
             {
-                Category = tab switch
-                {
-                    ReviewWorkTab.ToReview => ReviewWorkCategory.ActionableDeviation,
-                    ReviewWorkTab.MatchUncertainty => ReviewWorkCategory.MatchUncertainty,
-                    ReviewWorkTab.DataQuality => ReviewWorkCategory.DataQuality,
-                    ReviewWorkTab.Completed => ReviewWorkCategory.Completed,
-                    _ => ReviewWorkCategory.ActionableDeviation,
-                },
+                Category = CategoryForTab(tab),
                 PageSize = filter.PageSize <= 0 ? DefaultPageSize : filter.PageSize,
                 Page = filter.Page <= 0 ? 1 : filter.Page,
             };
@@ -232,6 +224,17 @@ public static class SpotcheckPriorityCalculator
             Page = filter.Page <= 0 ? 1 : filter.Page,
         };
     }
+
+    public static ReviewWorkCategory CategoryForTab(ReviewWorkTab tab) =>
+        tab switch
+        {
+            ReviewWorkTab.Exceptions => ReviewWorkCategory.ActionableDeviation,
+            ReviewWorkTab.SmallDeviations => ReviewWorkCategory.SmallDeviation,
+            ReviewWorkTab.MatchUncertainty => ReviewWorkCategory.MatchUncertainty,
+            ReviewWorkTab.DataQuality => ReviewWorkCategory.DataQuality,
+            ReviewWorkTab.Completed => ReviewWorkCategory.Completed,
+            _ => ReviewWorkCategory.ActionableDeviation,
+        };
 
     public static IEnumerable<ReviewCase> ApplyFilter(
         IReadOnlyList<ReviewCase> cases,
@@ -247,15 +250,8 @@ public static class SpotcheckPriorityCalculator
                 query = query.Where(IsOpenForWork);
             }
         }
-        else if (filter.Tab is ReviewWorkTab.ToReview)
-        {
-            query = query.Where(item =>
-                IsOpenForWork(item) &&
-                item.Category is ReviewWorkCategory.ActionableDeviation
-                    or ReviewWorkCategory.SmallDeviation);
-        }
 
-        // Default worklist never surfaces Informational or Completed unless explicitly requested.
+        // Default worklist: exceptions only.
         if (filter.Category is null && filter.Tab is null)
         {
             query = query.Where(item =>

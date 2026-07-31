@@ -38,10 +38,13 @@ public sealed class IndexModel(
         0,
         0);
 
+    public string DataSourceName { get; private set; } = string.Empty;
+
     public string? Error { get; private set; }
 
     public async Task OnGetAsync(CancellationToken cancellationToken)
     {
+        DataSourceName = reviewService.DataSourceName;
         try
         {
             var filter = new AdminReviewFilter(

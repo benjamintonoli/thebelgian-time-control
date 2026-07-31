@@ -1,0 +1,62 @@
+@page "/Admin/Patterns"
+@model TheBelgian.TimeControl.Web.Pages.Admin.Patterns.IndexModel
+@using TheBelgian.TimeControl.Core.Services
+@{
+    ViewData["Title"] = "Patronen";
+}
+
+<h1>Patronen</h1>
+<p class="text-muted">
+    Terugkerende bevestigde afwijkingen per technieker (reviewcontext).
+    Geen loon-, fraude- of disciplinaire conclusie.
+</p>
+
+@if (!string.IsNullOrWhiteSpace(Model.Error))
+{
+    <div class="alert alert-danger">@Model.Error</div>
+}
+
+@if (Model.PatternCases.Count == 0)
+{
+    <div class="alert alert-secondary">
+        Nog geen terugkerende patronen. Een patroon vereist minstens drie
+        <strong>Confirmed</strong> beslissingen voor dezelfde technieker, binnen 30 dagen,
+        met dezelfde richting en afwijkingssoort (≥ 5 min).
+    </div>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-sm align-middle">
+            <thead>
+                <tr>
+                    <th>Technieker</th>
+                    <th>Datum</th>
+                    <th>Impact</th>
+                    <th>Aankomst</th>
+                    <th>Vertrek</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+            @foreach (var item in Model.PatternCases)
+            {
+                <tr>
+                    <td>@item.Technician</td>
+                    <td class="text-nowrap">@item.Date.ToString("yyyy-MM-dd")</td>
+                    <td>
+                        <span class="badge @AdminReviewDisplay.ImpactBadgeClass(item.Priority)">
+                            @AdminReviewDisplay.Impact(item.Priority)
+                        </span>
+                    </td>
+                    <td>@AdminReviewDisplay.Deviation(item.Matcher.StartDeviationMinutes)</td>
+                    <td>@AdminReviewDisplay.Deviation(item.Matcher.EndDeviationMinutes)</td>
+                    <td>
+                        <a asp-page="/Admin/Reviews/Details" asp-route-performanceId="@item.PerformanceId">Bekijken</a>
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+}
