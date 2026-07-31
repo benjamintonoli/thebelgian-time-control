@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using TheBelgian.TimeControl.Core.Configuration;
 using TheBelgian.TimeControl.Core.Interfaces;
 using TheBelgian.TimeControl.Core.Services;
+using TheBelgian.TimeControl.Infrastructure.AdminReview;
 using TheBelgian.TimeControl.Infrastructure.Configuration;
 using TheBelgian.TimeControl.Infrastructure.Geocoding;
 using TheBelgian.TimeControl.Infrastructure.Persistence;
@@ -133,6 +134,12 @@ public static class DependencyInjection
         services.AddScoped<LocationMatchingBenchmarkService>();
         services.AddScoped<CalibrationSingleReviewerEvaluationService>();
         services.AddScoped<LocationMatchingRecoveryAuditService>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<IReviewExplanationService, DeterministicReviewExplanationService>();
+        services.AddScoped<IReviewCaseProvider, OfflineReviewCaseProvider>();
+        services.AddScoped<LiveReviewCaseProvider>();
+        services.AddScoped<AdminReviewDecisionRepository>();
+        services.AddScoped<IAdminReviewService, AdminReviewService>();
         return services;
     }
 
@@ -173,6 +180,23 @@ public static class DependencyInjection
             );
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_LocationResolutionCacheEntries_AddressHash"
                 ON "LocationResolutionCacheEntries" ("AddressHash");
+            CREATE TABLE IF NOT EXISTS "AdminReviewDecisionAudits" (
+                "Id" INTEGER NOT NULL CONSTRAINT "PK_AdminReviewDecisionAudits" PRIMARY KEY AUTOINCREMENT,
+                "PerformanceId" INTEGER NOT NULL,
+                "OriginalMatcherStatus" TEXT NOT NULL,
+                "ProposedVisitCandidateId" TEXT NULL,
+                "ProposedVisitSourceStopIdsJson" TEXT NULL,
+                "ChosenVisitCandidateId" TEXT NULL,
+                "ChosenVisitSourceStopIdsJson" TEXT NULL,
+                "Decision" TEXT NOT NULL,
+                "ReasonOrComment" TEXT NULL,
+                "Reviewer" TEXT NOT NULL,
+                "DecidedAt" TEXT NOT NULL,
+                "MatcherCommit" TEXT NOT NULL,
+                "ConfigurationHash" TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS "IX_AdminReviewDecisionAudits_PerformanceId_DecidedAt"
+                ON "AdminReviewDecisionAudits" ("PerformanceId", "DecidedAt");
             """,
             cancellationToken);
     }

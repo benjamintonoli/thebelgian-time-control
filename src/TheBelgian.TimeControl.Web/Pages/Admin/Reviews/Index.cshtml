@@ -1,0 +1,131 @@
+@page "/Admin/Reviews"
+@model TheBelgian.TimeControl.Web.Pages.Admin.Reviews.IndexModel
+@using TheBelgian.TimeControl.Core.Models
+@{
+    ViewData["Title"] = "Admin Reviews";
+    string PriorityBadge(SpotcheckPriorityTier tier) => tier switch
+    {
+        SpotcheckPriorityTier.HighPriority => "bg-danger",
+        SpotcheckPriorityTier.IndividualException => "bg-warning text-dark",
+        SpotcheckPriorityTier.PatternRelevant => "bg-info text-dark",
+        _ => "bg-secondary"
+    };
+}
+
+<div class="alert alert-warning" role="alert">
+    <strong>@MatcherUsagePolicy.BannerTitle</strong><br />
+    @MatcherUsagePolicy.BannerBody
+</div>
+
+<div class="alert alert-info" role="status">
+    Read-only pilot — matcherresultaten vereisen menselijke bevestiging.
+    Bron: <code>@Model.DataSourceName</code> (geen locked holdout).
+</div>
+
+<h1>Admin Reviews</h1>
+
+@if (!string.IsNullOrWhiteSpace(Model.Error))
+{
+    <div class="alert alert-danger">@Model.Error</div>
+}
+
+<form method="get" class="border rounded p-3 mb-4">
+    <div class="row g-3">
+        <div class="col-md-3">
+            <label class="form-label" asp-for="Technician">Technieker</label>
+            <input class="form-control" asp-for="Technician" />
+        </div>
+        <div class="col-md-2">
+            <label class="form-label" asp-for="FromDate">Van</label>
+            <input class="form-control" asp-for="FromDate" type="date" />
+        </div>
+        <div class="col-md-2">
+            <label class="form-label" asp-for="ThroughDate">Tot</label>
+            <input class="form-control" asp-for="ThroughDate" type="date" />
+        </div>
+        <div class="col-md-2">
+            <label class="form-label" asp-for="ReviewStatus">Reviewstatus</label>
+            <select class="form-select" asp-for="ReviewStatus" asp-items="Html.GetEnumSelectList<AdminReviewStatus>()">
+                <option value="">(alle)</option>
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label" asp-for="MatcherStatus">Matcherstatus</label>
+            <select class="form-select" asp-for="MatcherStatus">
+                <option value="">(alle)</option>
+                <option>Confirmed</option>
+                <option>Probable</option>
+                <option>RecoveredProbable</option>
+                <option>Ambiguous</option>
+                <option>Unresolved</option>
+            </select>
+        </div>
+        <div class="col-md-2">
+            <label class="form-label" asp-for="MinimumDeviationMinutes">Min. afwijking (min)</label>
+            <input class="form-control" asp-for="MinimumDeviationMinutes" type="number" min="0" />
+        </div>
+        <div class="col-md-10 d-flex flex-wrap gap-3 align-items-end">
+            <div class="form-check">
+                <input class="form-check-input" asp-for="HighPriorityOnly" />
+                <label class="form-check-label" asp-for="HighPriorityOnly">Alleen hoge prioriteit</label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" asp-for="ProposedMatchesOnly" />
+                <label class="form-check-label" asp-for="ProposedMatchesOnly">Alleen voorgestelde matches</label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" asp-for="AmbiguousOrUnresolvedOnly" />
+                <label class="form-check-label" asp-for="AmbiguousOrUnresolvedOnly">Alleen Ambiguous/Unresolved</label>
+            </div>
+            <button type="submit" class="btn btn-primary">Filteren</button>
+        </div>
+    </div>
+</form>
+
+<p class="text-muted">@Model.Cases.Count reviewcase(s) (standaard: menselijke aandacht).</p>
+
+<div class="table-responsive">
+    <table class="table table-sm table-striped align-middle">
+        <thead>
+            <tr>
+                <th>Prioriteit</th>
+                <th>Datum</th>
+                <th>Technieker</th>
+                <th>Plenion-tijd</th>
+                <th>Adres</th>
+                <th>Voorgesteld bezoek</th>
+                <th>Startafwijking</th>
+                <th>Eindafwijking</th>
+                <th>Matcherstatus</th>
+                <th>Reviewstatus</th>
+            </tr>
+        </thead>
+        <tbody>
+        @foreach (var item in Model.Cases)
+        {
+            <tr>
+                <td>
+                    <span class="badge @PriorityBadge(item.Priority)">@item.Priority</span>
+                    @if (item.RecurringSmallAdvantage)
+                    {
+                        <span class="badge bg-light text-dark border" title="Reviewcontext: terugkerende kleine voordelen. Geen loon-/fraudeconclusie.">patroon</span>
+                    }
+                </td>
+                <td>
+                    <a asp-page="./Details" asp-route-performanceId="@item.PerformanceId">@item.Date.ToString("yyyy-MM-dd")</a>
+                </td>
+                <td>@item.Technician</td>
+                <td class="small">
+                    @item.Source.PlenionStart.ToString("HH:mm")–@item.Source.PlenionEnd.ToString("HH:mm")
+                </td>
+                <td class="small">@item.Source.PlenionAddress</td>
+                <td class="small font-monospace">@(item.Matcher.ProposedVisit?.VisitCandidateId ?? "—")</td>
+                <td>@item.Matcher.StartDeviationMinutes</td>
+                <td>@item.Matcher.EndDeviationMinutes</td>
+                <td>@item.MatcherStatus</td>
+                <td>@item.ReviewStatus</td>
+            </tr>
+        }
+        </tbody>
+    </table>
+</div>
