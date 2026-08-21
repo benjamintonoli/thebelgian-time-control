@@ -1,0 +1,415 @@
+[
+  {
+    "PerformanceId": 260420,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Geen Plenion-adres en geen kandidaatstop met tijdsoverlap; de stops liggen uren voor of na de prestatie."
+  },
+  {
+    "PerformanceId": 260439,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Er zijn geen kandidaatstops."
+  },
+  {
+    "PerformanceId": 260460,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Er zijn geen kandidaatstops."
+  },
+  {
+    "PerformanceId": 261721,
+    "Label": "Ambiguous",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "Medium",
+    "ReviewerNote": "Geen Plenion-adres. De stop aan Laarbeeklaan overlapt gedeeltelijk maar loopt vooral door tijdens de volgende prestatie."
+  },
+  {
+    "PerformanceId": 261722,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Er zijn geen kandidaatstops."
+  },
+  {
+    "PerformanceId": 261727,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Er zijn geen kandidaatstops."
+  },
+  {
+    "PerformanceId": 261728,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Er zijn geen kandidaatstops."
+  },
+  {
+    "PerformanceId": 261738,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Er zijn geen kandidaatstops."
+  },
+  {
+    "PerformanceId": 261740,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "De enige kandidaat ligt ruim 11 km verder en eindigt vóór de prestatie."
+  },
+  {
+    "PerformanceId": 261742,
+    "Label": "Ambiguous",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "Medium",
+    "ReviewerNote": "Geen Plenion-adres. Eén stop overlapt de volledige prestatie, maar de locatie kan niet onafhankelijk worden bevestigd."
+  },
+  {
+    "PerformanceId": 261743,
+    "Label": "Ambiguous",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "Medium",
+    "ReviewerNote": "Geen Plenion-adres. Dezelfde stop overlapt slechts het laatste deel en loopt door tijdens de volgende prestatie."
+  },
+  {
+    "PerformanceId": 261750,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Alle kandidaatstops liggen kilometers verder en vinden 's avonds na de prestatie plaats."
+  },
+  {
+    "PerformanceId": 261753,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "De enige kandidaat ligt meer dan 4 km verder en vindt vele uren vóór de prestatie plaats."
+  },
+  {
+    "PerformanceId": 261771,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Alle kandidaatstops liggen kilometers verder en na de prestatie."
+  },
+  {
+    "PerformanceId": 261772,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Alle kandidaatstops liggen kilometers verder en vele uren na de prestatie."
+  },
+  {
+    "PerformanceId": 261957,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Er zijn geen kandidaatstops."
+  },
+  {
+    "PerformanceId": 262592,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Geen Plenion-adres en de enige kandidaatstop ligt uren na de prestatie."
+  },
+  {
+    "PerformanceId": 262594,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "De enige kandidaat ligt ruim 16 km verder en vele uren na de prestatie."
+  },
+  {
+    "PerformanceId": 262595,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "De enige kandidaat ligt ruim 16 km verder en na de prestatie."
+  },
+  {
+    "PerformanceId": 262596,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "De enige kandidaat ligt ruim 16 km verder en uren na de prestatie."
+  },
+  {
+    "PerformanceId": 262599,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Beide kandidaatstops liggen 15–20 km verder en buiten de prestatietijd."
+  },
+  {
+    "PerformanceId": 262624,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Er zijn geen kandidaatstops."
+  },
+  {
+    "PerformanceId": 263033,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Alle kandidaatstops liggen ver van het Plenion-adres en hebben geen tijdsoverlap."
+  },
+  {
+    "PerformanceId": 263035,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "Medium",
+    "ReviewerNote": "De tijdsoverlap is sterk, maar de kandidaat ligt ongeveer 2,5 km van het Plenion-adres; dat is onvoldoende locatiebewijs."
+  },
+  {
+    "PerformanceId": 263036,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "De enige temporeel nabije stop ligt circa 2,5 km verder en overlapt slechts twee minuten aan het einde."
+  },
+  {
+    "PerformanceId": 263037,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Alle kandidaatstops liggen kilometers verder en na de prestatie."
+  },
+  {
+    "PerformanceId": 263044,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Alle kandidaatstops liggen meer dan 6 km verder en buiten de prestatietijd."
+  },
+  {
+    "PerformanceId": 263045,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Alle kandidaatstops liggen meer dan 6 km verder en buiten de prestatietijd."
+  },
+  {
+    "PerformanceId": 263091,
+    "Label": "CorrectCandidate",
+    "ExpectedStopId": "255051975/255102002",
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Reepstraat 108 ligt 17,5 m van het Plenion-adres en overlapt 92,2% van de prestatie."
+  },
+  {
+    "PerformanceId": 263188,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Er zijn geen kandidaatstops."
+  },
+  {
+    "PerformanceId": 263468,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "De enige kandidaat ligt circa 4 km verder en vele uren vóór de prestatie."
+  },
+  {
+    "PerformanceId": 263479,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Geen Plenion-adres en de enige kandidaatstop ligt uren vóór de prestatie."
+  },
+  {
+    "PerformanceId": 263487,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "De enige kandidaat ligt ruim 32 km verder en overlapt slechts zes minuten aan het begin."
+  },
+  {
+    "PerformanceId": 263571,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "De enige kandidaat ligt ruim 24 km verder en na de prestatie."
+  },
+  {
+    "PerformanceId": 264201,
+    "Label": "CorrectCandidate",
+    "ExpectedStopId": "257860296/257881616",
+    "ReviewerConfidence": "Medium",
+    "ReviewerNote": "Het kandidaatadres heeft hetzelfde straat- en huisnummer als Plenion en overlapt 14 minuten; de grote berekende afstand lijkt een geocodeafwijking."
+  },
+  {
+    "PerformanceId": 264241,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Alle kandidaatstops liggen kilometers verder en buiten de prestatietijd."
+  },
+  {
+    "PerformanceId": 264242,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Alle kandidaatstops liggen kilometers verder en buiten de prestatietijd."
+  },
+  {
+    "PerformanceId": 264424,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "De enige kandidaat ligt circa 4,6 km verder en bijna twee uur na de prestatie."
+  },
+  {
+    "PerformanceId": 264425,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "De enige kandidaat ligt circa 4,6 km verder en bijna drie uur na de prestatie."
+  },
+  {
+    "PerformanceId": 264426,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "De enige kandidaat ligt circa 5,5 km verder en meer dan drie uur na de prestatie."
+  },
+  {
+    "PerformanceId": 264428,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Er zijn geen kandidaatstops."
+  },
+  {
+    "PerformanceId": 264429,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Er zijn geen kandidaatstops."
+  },
+  {
+    "PerformanceId": 264430,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "De kandidaat ligt circa 420 m verder en begint pas na het einde van de prestatie."
+  },
+  {
+    "PerformanceId": 264431,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "De kandidaat ligt circa 420 m verder en begint ruim anderhalf uur na de prestatie."
+  },
+  {
+    "PerformanceId": 265056,
+    "Label": "CorrectCandidate",
+    "ExpectedStopId": "259110179/259138007",
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Exact hetzelfde adres, 29 m afstand en volledige tijdsoverlap."
+  },
+  {
+    "PerformanceId": 265057,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "De stop op het juiste adres overlapt slechts de laatste vier minuten en hoort temporeel vooral bij de volgende prestatie."
+  },
+  {
+    "PerformanceId": 265058,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Alle kandidaatstops liggen tientallen kilometers verder en na de prestatie."
+  },
+  {
+    "PerformanceId": 265059,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Er zijn geen kandidaatstops."
+  },
+  {
+    "PerformanceId": 265098,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "De enige overlappende kandidaat ligt meer dan 73 km van het Plenion-adres."
+  },
+  {
+    "PerformanceId": 265359,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "De enige kandidaat ligt ruim 18 km verder en overlapt slechts negen minuten."
+  },
+  {
+    "PerformanceId": 265494,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Er zijn geen kandidaatstops."
+  },
+  {
+    "PerformanceId": 265550,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Er zijn geen kandidaatstops."
+  },
+  {
+    "PerformanceId": 265551,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Er zijn geen kandidaatstops."
+  },
+  {
+    "PerformanceId": 265552,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Er zijn geen kandidaatstops."
+  },
+  {
+    "PerformanceId": 265553,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Er zijn geen kandidaatstops."
+  },
+  {
+    "PerformanceId": 265555,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "De enige kandidaat ligt circa 1,8 km verder en eindigt uren vóór de prestatie."
+  },
+  {
+    "PerformanceId": 265560,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Er zijn geen kandidaatstops."
+  },
+  {
+    "PerformanceId": 265561,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Er zijn geen kandidaatstops."
+  },
+  {
+    "PerformanceId": 265661,
+    "Label": "NoValidCandidate",
+    "ExpectedStopId": null,
+    "ReviewerConfidence": "High",
+    "ReviewerNote": "Er zijn geen kandidaatstops."
+  }
+]
