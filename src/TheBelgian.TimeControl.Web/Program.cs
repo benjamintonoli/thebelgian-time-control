@@ -1171,15 +1171,25 @@ if (isBroader || isCoverageGap || isActivity || isAdaptive ||
 
 var webBuilder = WebApplication.CreateBuilder(args);
 
+webBuilder.Host.UseWindowsService(options =>
+    options.ServiceName = webBuilder.Configuration["WindowsService:ServiceName"]
+        ?? "TheBelgian.TimeControl");
+
 webBuilder.Logging.ClearProviders();
 webBuilder.Logging.AddConsole();
 webBuilder.Logging.AddDebug();
+if (OperatingSystem.IsWindows())
+{
+    AddWindowsEventLog(
+        webBuilder.Logging,
+        webBuilder.Configuration["WindowsService:ServiceName"] ?? "TheBelgian.TimeControl");
+}
 webBuilder.Logging.AddFilter("System.Net.Http.HttpClient", LogLevel.Warning);
 
-var dataProtectionDirectory = Path.Combine(
-    webBuilder.Environment.ContentRootPath,
-    "data",
-    "data-protection-keys");
+var configuredDataProtectionDirectory = webBuilder.Configuration["DataProtection:KeysPath"];
+var dataProtectionDirectory = string.IsNullOrWhiteSpace(configuredDataProtectionDirectory)
+    ? Path.Combine(webBuilder.Environment.ContentRootPath, "data", "data-protection-keys")
+    : Path.GetFullPath(configuredDataProtectionDirectory);
 Directory.CreateDirectory(dataProtectionDirectory);
 
 webBuilder.Services.AddRazorPages();
@@ -1208,10 +1218,24 @@ app.UseRouting();
 
 app.UseAuthorization();
 
+app.MapGet("/health", () => Results.Ok(new
+{
+    status = "ok",
+    service = "TheBelgian.TimeControl",
+    version = typeof(Program).Assembly.GetName().Version?.ToString() ?? "unknown",
+}));
 app.MapRazorPages();
 await app.Services.InitializeTimeControlDatabaseAsync();
 
 app.Run();
+
+[System.Runtime.Versioning.SupportedOSPlatform("windows")]
+static void AddWindowsEventLog(ILoggingBuilder logging, string sourceName)
+{
+#pragma warning disable CA1416
+    logging.AddEventLog(options => options.SourceName = sourceName);
+#pragma warning restore CA1416
+}
 
 static DateOnly ParseDate(string[] arguments, string name, DateOnly fallback)
 {

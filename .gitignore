@@ -13,6 +13,7 @@ obj/
 data/
 **/appsettings.Development.json
 **/appsettings.Local.json
+**/appsettings.Production.json
 **/secrets.json
 TestResults/
 coverage/

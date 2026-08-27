@@ -5,6 +5,9 @@ param(
     [Parameter(Mandatory)] [string]$DatabasePath,
     [Parameter(Mandatory)] [string]$LogPath,
     [Parameter(Mandatory)] [string]$ServiceAccount,
+    [string]$Actor = 'SYSTEM_VEHICLE_SYNC',
+    [ValidateRange(1048576, 1073741824)] [long]$MaxLogBytes = 26214400,
+    [ValidateRange(1, 100)] [int]$RetainedLogs = 12,
     [PSCredential]$Credential,
     [switch]$ServiceAccountIsGmsa
 )
@@ -28,10 +31,26 @@ if (Test-Path -LiteralPath $appExe -PathType Leaf) {
 $shell = (Get-Command pwsh -ErrorAction SilentlyContinue).Source
 if (-not $shell) { $shell = (Get-Command powershell.exe -ErrorAction Stop).Source }
 $logDirectory = [IO.Path]::GetDirectoryName($log)
+$productionConfig = Join-Path $publish 'appsettings.Production.json'
+if (-not (Test-Path -LiteralPath $productionConfig -PathType Leaf)) {
+    throw "Productieconfig ontbreekt: $productionConfig"
+}
+$safeActor = $Actor.Trim()
+if ([string]::IsNullOrWhiteSpace($safeActor)) { throw 'Actor is verplicht.' }
 $command = @"
 `$ErrorActionPreference = 'Stop'
 [IO.Directory]::CreateDirectory('$($logDirectory.Replace("'", "''"))') | Out-Null
-$launch --vehicle-assignment-sync --database '$($database.Replace("'", "''"))' --actor 'windows-scheduled-task' *>> '$($log.Replace("'", "''"))'
+`$env:ASPNETCORE_ENVIRONMENT = 'Production'
+`$logPath = '$($log.Replace("'", "''"))'
+if ((Test-Path -LiteralPath `$logPath) -and (Get-Item -LiteralPath `$logPath).Length -ge $MaxLogBytes) {
+    `$rotated = `$logPath + '.' + (Get-Date -Format 'yyyyMMdd-HHmmss')
+    Move-Item -LiteralPath `$logPath -Destination `$rotated
+    Get-ChildItem -LiteralPath '$($logDirectory.Replace("'", "''"))' -File |
+        Where-Object Name -Like '$([IO.Path]::GetFileName($log).Replace("'", "''")).*' |
+        Sort-Object LastWriteTime -Descending | Select-Object -Skip $RetainedLogs |
+        Remove-Item -Force
+}
+$launch --vehicle-assignment-sync --database '$($database.Replace("'", "''"))' --actor '$($safeActor.Replace("'", "''"))' *>> `$logPath
 exit `$LASTEXITCODE
 "@
 $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
