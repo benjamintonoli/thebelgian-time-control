@@ -14,9 +14,13 @@ internal static partial class PilotLocationMatcher
     {
         var stops = new List<PilotStop>();
         foreach (var dailyTrips in trips
-                     .GroupBy(trip =>
-                         DateOnly.FromDateTime(trip.StartDateTime.DateTime))
-                     .OrderBy(group => group.Key))
+                     .GroupBy(trip => new
+                     {
+                         Date = DateOnly.FromDateTime(trip.StartDateTime.DateTime),
+                         Stream = PowerfleetVehicleStreamIdentity.ReconstructionKey(trip),
+                     })
+                     .OrderBy(group => group.Key.Date)
+                     .ThenBy(group => group.Key.Stream, StringComparer.OrdinalIgnoreCase))
         {
             var ordered = dailyTrips
                 .OrderBy(trip => trip.StartDateTime)
@@ -55,7 +59,7 @@ internal static partial class PilotLocationMatcher
                     MidpointRounding.AwayFromZero);
                 stops.Add(new PilotStop(
                     $"{incoming.ExternalId}/{outgoing.ExternalId}",
-                    dailyTrips.Key,
+                    dailyTrips.Key.Date,
                     incoming.ExternalId,
                     outgoing.ExternalId,
                     incoming.EndDateTime,
@@ -75,7 +79,9 @@ internal static partial class PilotLocationMatcher
                     continuity,
                     continuity
                         ? "Aankomst- en vertrekpunt zijn adresmatig of coördinaatmatig gelijk."
-                        : "Aankomst- en vertrekpunt verschillen; stopadres is onzeker."));
+                        : "Aankomst- en vertrekpunt verschillen; stopadres is onzeker.",
+                    incoming.ObjectId ?? outgoing.ObjectId,
+                    incoming.ObjectName ?? outgoing.ObjectName));
             }
         }
 

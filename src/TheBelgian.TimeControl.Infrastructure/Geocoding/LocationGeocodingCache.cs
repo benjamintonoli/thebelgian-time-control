@@ -14,6 +14,21 @@ internal sealed class LocationGeocodingCache(
     IGeocodingService geocodingService,
     TimeProvider timeProvider)
 {
+    public async Task<CachedGeocodingLookup> TryGetAsync(
+        string originalAddress,
+        CancellationToken cancellationToken)
+    {
+        var normalizedAddress = NormalizeAddress(originalAddress);
+        var addressHash = Hash(normalizedAddress);
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var existing = await context.LocationResolutionCacheEntries
+            .AsNoTracking()
+            .SingleOrDefaultAsync(item => item.AddressHash == addressHash, cancellationToken);
+        return existing is null
+            ? new CachedGeocodingLookup(normalizedAddress, addressHash, false, null)
+            : new CachedGeocodingLookup(normalizedAddress, addressHash, true, FromEntry(existing));
+    }
+
     public async Task<CachedGeocodingResult> ResolveAsync(
         string? deliveryAddressExternalId,
         string originalAddress,
@@ -182,3 +197,9 @@ internal sealed record CachedGeocodingResult(
     string NormalizedAddress,
     string AddressHash,
     GeocodingResult Geocoding);
+
+internal sealed record CachedGeocodingLookup(
+    string NormalizedAddress,
+    string AddressHash,
+    bool Found,
+    GeocodingResult? Geocoding);

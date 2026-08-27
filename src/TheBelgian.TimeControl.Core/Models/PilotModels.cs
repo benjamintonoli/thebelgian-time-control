@@ -133,7 +133,9 @@ public sealed record PilotStop(
     string? DriverId,
     string? DriverName,
     bool LocationContinuity,
-    string ContinuityAssessment);
+    string ContinuityAssessment,
+    string? ObjectId = null,
+    string? ObjectName = null);
 
 public enum PilotMatchStatus
 {

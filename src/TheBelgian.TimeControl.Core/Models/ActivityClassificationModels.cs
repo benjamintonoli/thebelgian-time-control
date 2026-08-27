@@ -6,6 +6,7 @@ public enum PerformanceActivityType
     SiteWork,
     OfficeWork,
     Travel,
+    WaitingTime,
     Administration,
     RemoteWork,
     Break,

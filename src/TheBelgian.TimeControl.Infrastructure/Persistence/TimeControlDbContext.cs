@@ -20,6 +20,24 @@ public sealed class TimeControlDbContext(DbContextOptions<TimeControlDbContext> 
         Set<AdminReviewDecisionAudit>();
     public DbSet<AdminReviewSessionMetric> AdminReviewSessionMetrics =>
         Set<AdminReviewSessionMetric>();
+    public DbSet<DailyReviewActionAudit> DailyReviewActionAudits =>
+        Set<DailyReviewActionAudit>();
+    public DbSet<DailyCorrectionProposal> DailyCorrectionProposals =>
+        Set<DailyCorrectionProposal>();
+    public DbSet<DailyGeneratedFactualReport> DailyGeneratedFactualReports =>
+        Set<DailyGeneratedFactualReport>();
+    public DbSet<PhysicalVehicle> PhysicalVehicles => Set<PhysicalVehicle>();
+    public DbSet<TechnicianVehicleAssignment> TechnicianVehicleAssignments =>
+        Set<TechnicianVehicleAssignment>();
+    public DbSet<TechnicianVehicleAssignmentAudit> TechnicianVehicleAssignmentAudits =>
+        Set<TechnicianVehicleAssignmentAudit>();
+    public DbSet<TechnicianTrackingEligibility> TechnicianTrackingEligibilities =>
+        Set<TechnicianTrackingEligibility>();
+    public DbSet<VehicleAssignmentSyncRun> VehicleAssignmentSyncRuns =>
+        Set<VehicleAssignmentSyncRun>();
+    public DbSet<MonthlyReviewPeriod> MonthlyReviewPeriods => Set<MonthlyReviewPeriod>();
+    public DbSet<MonthlyReviewCaseSnapshot> MonthlyReviewCaseSnapshots =>
+        Set<MonthlyReviewCaseSnapshot>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -39,6 +57,31 @@ public sealed class TimeControlDbContext(DbContextOptions<TimeControlDbContext> 
             .HasIndex(item => new { item.PerformanceId, item.DecidedAt });
         modelBuilder.Entity<AdminReviewSessionMetric>()
             .HasIndex(item => new { item.PerformanceId, item.OpenedAt });
+        modelBuilder.Entity<DailyReviewActionAudit>()
+            .HasIndex(item => new { item.CaseId, item.ReviewedAt });
+        modelBuilder.Entity<DailyCorrectionProposal>()
+            .HasIndex(item => new { item.CaseId, item.CreatedAt });
+        modelBuilder.Entity<DailyGeneratedFactualReport>()
+            .HasIndex(item => new { item.Technician, item.GeneratedAt });
+        modelBuilder.Entity<PhysicalVehicle>()
+            .HasIndex(item => item.ObjectId)
+            .IsUnique();
+        modelBuilder.Entity<TechnicianVehicleAssignment>()
+            .HasIndex(item => new { item.TechnicianExternalId, item.ValidFrom });
+        modelBuilder.Entity<TechnicianVehicleAssignment>()
+            .HasIndex(item => new { item.ObjectId, item.ValidFrom });
+        modelBuilder.Entity<TechnicianVehicleAssignmentAudit>()
+            .HasIndex(item => new { item.AssignmentId, item.ChangedAt });
+        modelBuilder.Entity<TechnicianTrackingEligibility>()
+            .HasIndex(item => new { item.TechnicianExternalId, item.ValidFrom });
+        modelBuilder.Entity<VehicleAssignmentSyncRun>()
+            .HasIndex(item => new { item.Status, item.FinishedAt });
+        modelBuilder.Entity<MonthlyReviewPeriod>()
+            .HasIndex(item => new { item.Year, item.Month })
+            .IsUnique();
+        modelBuilder.Entity<MonthlyReviewCaseSnapshot>()
+            .HasIndex(item => new { item.MonthlyReviewPeriodId, item.CaseId })
+            .IsUnique();
 
         modelBuilder.Entity<PlenionPerformance>().Property(item => item.Kilometres).HasPrecision(12, 3);
         modelBuilder.Entity<PowerfleetTrip>().Property(item => item.DistanceKilometres).HasPrecision(12, 3);

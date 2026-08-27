@@ -61,6 +61,28 @@ public sealed class PerformanceActivityClassifierTests
         Assert.False(result.RequiresGeographicMatch);
     }
 
+    [Theory]
+    [InlineData("5", "Onderhoud 26500697", PerformanceActivityType.Travel)]
+    [InlineData("23", "Montagebon I.R.6300156", PerformanceActivityType.WaitingTime)]
+    [InlineData("9", "Montagebon I.R.6300155", PerformanceActivityType.SiteWork)]
+    public void Classify_VerifiedMainTaskSemantics_PrecedeProjectAndAddressMarkers(
+        string mainTaskExternalId,
+        string description,
+        PerformanceActivityType expected)
+    {
+        var performance = Performance(
+            description,
+            deliveryAddressId: "site",
+            mainTaskExternalId: mainTaskExternalId);
+
+        var result = PerformanceActivityClassifier.Classify(performance, "Tech", null);
+
+        Assert.Equal(expected, result.ActivityType);
+        Assert.Equal(
+            expected is PerformanceActivityType.CustomerWork or PerformanceActivityType.SiteWork,
+            result.RequiresGeographicMatch);
+    }
+
     [Fact]
     public void Analyze_RecalculatesMatchRateForLocationBoundOnly()
     {
@@ -189,7 +211,8 @@ public sealed class PerformanceActivityClassifierTests
     private static NormalizedPilotPerformance Performance(
         string description,
         string? deliveryAddressId,
-        long id = 1) =>
+        long id = 1,
+        string mainTaskExternalId = "t1") =>
         new(
             id,
             "1",
@@ -201,7 +224,7 @@ public sealed class PerformanceActivityClassifierTests
             60,
             0m,
             "p",
-            "t1",
+            mainTaskExternalId,
             "b1",
             description,
             null,

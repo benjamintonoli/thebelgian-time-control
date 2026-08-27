@@ -1,0 +1,88 @@
+@page "/Admin/TimeControl/VehicleAssignments"
+@model TheBelgian.TimeControl.Web.Pages.Admin.TimeControl.VehicleAssignmentsModel
+@using TheBelgian.TimeControl.Infrastructure.VehicleAssignments
+@{
+    ViewData["Title"] = "Voertuigtoewijzingen juli 2026";
+}
+
+<div class="d-flex justify-content-between align-items-start mb-4">
+    <div>
+        <div class="text-uppercase small text-muted fw-semibold">Eenmalige historische initialisatie</div>
+        <h1>Voertuigtoewijzingen — juli 2026</h1>
+        <p class="text-muted">Identity-evidence stelt kandidaten voor. Alleen een expliciete adminactie maakt masterdata.</p>
+        <p class="small text-muted mb-0">Reviewer: <strong>@Model.DefaultReviewer</strong></p>
+        <p class="small text-muted mb-0">Laatste voertuigsynchronisatie: <strong>@(Model.LastSuccessfulVehicleAssignmentSyncAt?.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss") ?? "nog niet uitgevoerd")</strong></p>
+    </div>
+    <a class="btn btn-outline-secondary" asp-route-refresh="true">Bewijs opnieuw ophalen</a>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(Model.Message)) { <div class="alert alert-success">@Model.Message</div> }
+@if (!string.IsNullOrWhiteSpace(Model.Error)) { <div class="alert alert-danger">@Model.Error</div> }
+
+@if (Model.Result is null)
+{
+    <div class="alert alert-info">Kandidaten worden read-only uit Plenion en PowerFleet opgebouwd.</div>
+}
+else
+{
+    <div class="row g-2 mb-4">
+        <div class="col"><div class="border rounded p-3"><strong>@Model.Result.Technicians</strong><br /><span class="text-muted">techniekers</span></div></div>
+        <div class="col"><div class="border rounded p-3"><strong>@Model.Result.AlreadyConfirmed</strong><br /><span class="text-muted">bevestigd</span></div></div>
+        <div class="col"><div class="border rounded p-3"><strong>@Model.Result.HighConfidenceCandidate</strong><br /><span class="text-muted">high confidence</span></div></div>
+        <div class="col"><div class="border rounded p-3"><strong>@Model.Result.TransferSuspected</strong><br /><span class="text-muted">transferverdacht</span></div></div>
+        <div class="col"><div class="border rounded p-3"><strong>@Model.Result.MultipleCandidates</strong><br /><span class="text-muted">meerdere</span></div></div>
+        <div class="col"><div class="border rounded p-3"><strong>@Model.Result.NoCandidate</strong><br /><span class="text-muted">geen kandidaat</span></div></div>
+        <div class="col"><div class="border rounded p-3"><strong>@Model.Result.NoTrackAndTrace</strong><br /><span class="text-muted">geen Track & Trace</span></div></div>
+    </div>
+
+    <form id="bulk-form" method="post" asp-page-handler="BulkConfirm">
+        <div class="d-flex gap-2 align-items-center mb-3">
+            <button class="btn btn-dark" type="submit">Bevestig geselecteerde HighConfidenceCandidates</button>
+            <span class="small text-muted">De hieronder zichtbare maandassignments worden aangemaakt; de volledige bulkactie faalt bij één overlap.</span>
+        </div>
+    </form>
+        <div class="table-responsive">
+            <table class="table table-sm align-middle">
+                <thead><tr><th></th><th>Technieker</th><th>Voertuig</th><th>Periode</th><th>Status</th><th>Bewijs</th><th>Actie</th></tr></thead>
+                <tbody>
+                @foreach (var item in Model.Result.Candidates)
+                {
+                    <tr>
+                        <td>@if (item.Status == HistoricalVehicleCandidateStatus.HighConfidenceCandidate) { <input type="checkbox" form="bulk-form" name="SelectedCandidateKeys" value="@item.CandidateKey" aria-label="@item.Technician selecteren" /> }</td>
+                        <td><strong>@item.Technician</strong><br /><span class="font-monospace">@item.TechnicianCode</span><br /><small>@item.AuditableTechnicianDays technieker-dagen</small></td>
+                        <td>@(item.RegistrationPlate ?? "—")<br /><span class="font-monospace">@(item.ProposedObjectId ?? "—")</span><br /><small>@item.Make @item.Model</small></td>
+                        <td>@item.From.ToString("dd/MM")–@item.Through.ToString("dd/MM")</td>
+                        <td>@if (item.Status == HistoricalVehicleCandidateStatus.NoTrackAndTrace) { <span class="badge text-bg-secondary">Geen Track &amp; Trace</span> } else { <span class="badge text-bg-@(item.Status == HistoricalVehicleCandidateStatus.HighConfidenceCandidate ? "success" : item.Status == HistoricalVehicleCandidateStatus.AlreadyConfirmed ? "primary" : "warning")">@item.Status</span> }</td>
+                        <td><details><summary>@item.JulyTripDays actieve dagen / @item.JulyTrips ritten</summary><ul class="small mb-0">@foreach (var evidence in item.Evidence) { <li>@evidence</li> } @foreach (var alternative in item.Alternatives) { <li>Alternatief: @alternative.ObjectId / @(alternative.RegistrationPlate ?? "—") — @alternative.JulyTripDays dagen</li> }</ul></details></td>
+                        <td>@if (item.Status != HistoricalVehicleCandidateStatus.NoTrackAndTrace) { <button type="button" class="btn btn-sm btn-outline-dark" data-bs-toggle="collapse" data-bs-target="#actions-@item.TechnicianExternalId">Beoordelen</button> }</td>
+                    </tr>
+                    @if (item.Status != HistoricalVehicleCandidateStatus.NoTrackAndTrace)
+                    {
+                    <tr class="collapse" id="actions-@item.TechnicianExternalId">
+                        <td colspan="7">
+                            <form method="post" class="border rounded p-3 row g-2">
+                                <input type="hidden" name="CandidateKey" value="@item.CandidateKey" />
+                                <input type="hidden" name="TechnicianCode" value="@item.TechnicianCode" />
+                                <input type="hidden" name="From" value="@item.From.ToString("yyyy-MM-dd")" />
+                                <input type="hidden" name="Through" value="@item.Through.ToString("yyyy-MM-dd")" />
+                                <div class="small text-muted mb-2">Controleer vóór bevestiging: @item.TechnicianCode → @(item.ProposedObjectId ?? "ObjectId invullen"), @item.From.ToString("dd/MM/yyyy")–@item.Through.ToString("dd/MM/yyyy").</div>
+                                <div class="col-md-2"><input class="form-control form-control-sm" name="ObjectId" value="@item.ProposedObjectId" placeholder="Nieuw/ObjectId" /></div>
+                                <div class="col-md-2"><input class="form-control form-control-sm" name="PreviousObjectId" placeholder="Vorig ObjectId bij transfer" /></div>
+                                <div class="col-md-2"><input class="form-control form-control-sm" name="TransferDate" type="date" /></div>
+                                <div class="col-md-2"><input class="form-control form-control-sm" name="EvidenceNote" placeholder="Bewijs/notitie" /></div>
+                                <div class="col-12 d-flex flex-wrap gap-2">
+                                    @if (item.ProposedObjectId is not null && item.Status != HistoricalVehicleCandidateStatus.AlreadyConfirmed) { <button class="btn btn-sm btn-success" type="submit" formaction="?handler=Confirm">Voorgesteld voertuig bevestigen</button> }
+                                    <button class="btn btn-sm btn-outline-primary" type="submit" formaction="?handler=Custom">Ingevuld ander voertuig bevestigen</button>
+                                    <button class="btn btn-sm btn-outline-warning" type="submit" formaction="?handler=Transfer">Transfer registreren</button>
+                                    <button class="btn btn-sm btn-outline-secondary" type="submit" formaction="?handler=Insufficient">Onvoldoende info</button>
+                                </div>
+                            </form>
+                        </td>
+                    </tr>
+                    }
+                }
+                </tbody>
+            </table>
+        </div>
+    <p class="small text-muted">HighConfidenceCandidate is een voorstel, geen juridische bevestiging. DriverId is uitsluitend ondersteunend. GPS-fit wordt nooit gebruikt.</p>
+}

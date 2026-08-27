@@ -4,7 +4,481 @@ using TheBelgian.TimeControl.Core.Interfaces;
 using TheBelgian.TimeControl.Core.Models;
 using TheBelgian.TimeControl.Infrastructure;
 using TheBelgian.TimeControl.Infrastructure.Pilot;
+using TheBelgian.TimeControl.Infrastructure.VehicleAssignments;
 using TheBelgian.TimeControl.Web.Pages.Pilot;
+
+var isPrepareMonthlyReview = args.Contains(
+    "--prepare-monthly-review", StringComparer.OrdinalIgnoreCase);
+if (isPrepareMonthlyReview)
+{
+    var database = ParseRequiredText(args, "--database");
+    var builder = WebApplication.CreateBuilder(args);
+    builder.Configuration.AddUserSecrets(typeof(Program).Assembly, optional: false);
+    builder.Configuration["ConnectionStrings:TimeControl"] = $"Data Source={database}";
+    builder.Logging.ClearProviders();
+    builder.Logging.AddConsole();
+    builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.Warning);
+    builder.Logging.AddFilter("System.Net.Http.HttpClient", LogLevel.Warning);
+    builder.Services.AddTimeControlInfrastructure(builder.Configuration);
+    await using var host = builder.Build();
+    await host.Services.InitializeTimeControlDatabaseAsync();
+    await using var scope = host.Services.CreateAsyncScope();
+    var service = scope.ServiceProvider.GetRequiredService<IMonthlyReviewService>();
+    var monthText = ParseOptionalText(args, "--month");
+    var month = string.IsNullOrWhiteSpace(monthText)
+        ? service.GetDefaultMonth(DateTimeOffset.Now)
+        : ParseReviewMonth(monthText);
+    var actor = ParseText(args, "--actor", "SYSTEM");
+    var result = await service.PrepareAsync(
+        month,
+        actor,
+        ParseOptionalText(args, "--evidence-json"),
+        true,
+        CancellationToken.None);
+    Console.WriteLine($"Month={month.Key}");
+    Console.WriteLine($"Status={result.Period.Status}");
+    Console.WriteLine($"PreparedAt={result.Period.PreparedAt:O}");
+    Console.WriteLine($"LastRefreshedAt={result.Period.LastRefreshedAt:O}");
+    Console.WriteLine($"LastVehicleSyncAt={result.Period.LastVehicleSyncAt:O}");
+    Console.WriteLine($"Cases={result.Cases}");
+    Console.WriteLine($"NewCases={result.NewCases}");
+    Console.WriteLine($"ChangedCases={result.ChangedCases}");
+    Console.WriteLine($"UnchangedCases={result.UnchangedCases}");
+    Console.WriteLine($"EvidenceSource={result.EvidenceSource}");
+    return;
+}
+
+var isInitializeJulyVehicleAssignments = args.Contains(
+    "--initialize-july-vehicle-assignments", StringComparer.OrdinalIgnoreCase);
+if (isInitializeJulyVehicleAssignments)
+{
+    var database = ParseRequiredText(args, "--database");
+    var builder = WebApplication.CreateBuilder(args);
+    builder.Configuration.AddUserSecrets(typeof(Program).Assembly, optional: false);
+    builder.Configuration["ConnectionStrings:TimeControl"] = $"Data Source={database}";
+    builder.Logging.ClearProviders();
+    builder.Logging.AddConsole();
+    builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.Warning);
+    builder.Logging.AddFilter("System.Net.Http.HttpClient", LogLevel.Warning);
+    builder.Services.AddTimeControlInfrastructure(builder.Configuration);
+    await using var host = builder.Build();
+    await host.Services.InitializeTimeControlDatabaseAsync();
+    await using var scope = host.Services.CreateAsyncScope();
+    var reviewer = builder.Configuration["VehicleAssignments:DefaultReviewer"];
+    if (string.IsNullOrWhiteSpace(reviewer))
+        throw new InvalidOperationException("VehicleAssignments:DefaultReviewer ontbreekt.");
+    var noTrack = await scope.ServiceProvider
+        .GetRequiredService<TechnicianTrackingEligibilityService>()
+        .RegisterNoTrackAndTraceAsync(
+            ["JDO", "KDC", "MAJ", "SFA", "TDN", "WTE", "ECO", "AVC"],
+            new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.FromHours(2)),
+            "Geen persoonlijk Track & Trace voertuig",
+            "BusinessConfirmation",
+            reviewer,
+            CancellationToken.None);
+    var candidateCache = scope.ServiceProvider.GetRequiredService<HistoricalVehicleCandidateCache>();
+    var candidates = await candidateCache.GetAsync(true, CancellationToken.None);
+    var high = candidates.Candidates
+        .Where(item => item.Status == HistoricalVehicleCandidateStatus.HighConfidenceCandidate)
+        .ToArray();
+    if (high.Length != 33)
+        throw new InvalidOperationException(
+            $"Veiligheidscontrole faalde: exact 33 HighConfidenceCandidates verwacht, {high.Length} gevonden.");
+    var assignments = await scope.ServiceProvider
+        .GetRequiredService<HistoricalVehicleAssignmentWorkflowService>()
+        .ConfirmCandidatesAsync(high.Select(item => item.CandidateKey).ToArray(), reviewer, true,
+            CancellationToken.None);
+    Console.WriteLine($"Database={Path.GetFullPath(database)}");
+    Console.WriteLine($"Reviewer={reviewer}");
+    Console.WriteLine($"NoTrackAndTraceRegistered={noTrack.Count}");
+    foreach (var item in noTrack.OrderBy(item => item.TechnicianCode))
+        Console.WriteLine($"NoTrackAndTrace={item.TechnicianCode}|{item.TechnicianExternalId}|{item.Reason}");
+    Console.WriteLine($"HighConfidenceCandidatesConfirmed={assignments.Count}");
+    foreach (var item in assignments.OrderBy(item => item.TechnicianCode))
+        Console.WriteLine($"Confirmed={item.TechnicianCode}|{item.ObjectId}|{item.ValidFrom:O}|{item.ValidTo:O}|{item.ReviewedBy}");
+    return;
+}
+
+var isJulyVehicleAssignmentCandidates = args.Contains(
+    "--july-vehicle-assignment-candidates", StringComparer.OrdinalIgnoreCase);
+if (isJulyVehicleAssignmentCandidates)
+{
+    var database = ParseRequiredText(args, "--database");
+    var output = ParseText(args, "--output",
+        @"C:\Temp\timecontrol-july-vehicle-assignment-candidates.json");
+    var builder = WebApplication.CreateBuilder(args);
+    builder.Configuration.AddUserSecrets(typeof(Program).Assembly, optional: false);
+    builder.Configuration["ConnectionStrings:TimeControl"] = $"Data Source={database}";
+    builder.Logging.ClearProviders();
+    builder.Logging.AddConsole();
+    builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.Warning);
+    builder.Logging.AddFilter("System.Net.Http.HttpClient", LogLevel.Warning);
+    builder.Services.AddTimeControlInfrastructure(builder.Configuration);
+    await using var host = builder.Build();
+    await host.Services.InitializeTimeControlDatabaseAsync();
+    await using var scope = host.Services.CreateAsyncScope();
+    var result = await scope.ServiceProvider
+        .GetRequiredService<HistoricalVehicleAssignmentCandidateService>()
+        .GenerateAsync(new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31),
+            CancellationToken.None);
+    var directory = Path.GetDirectoryName(output);
+    if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
+    await File.WriteAllTextAsync(output, System.Text.Json.JsonSerializer.Serialize(
+        result, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+    Console.WriteLine($"Technicians={result.Technicians}");
+    Console.WriteLine($"AlreadyConfirmed={result.AlreadyConfirmed}");
+    Console.WriteLine($"HighConfidenceCandidate={result.HighConfidenceCandidate}");
+    Console.WriteLine($"TransferSuspected={result.TransferSuspected}");
+    Console.WriteLine($"MultipleCandidates={result.MultipleCandidates}");
+    Console.WriteLine($"NoCandidate={result.NoCandidate}");
+    Console.WriteLine($"NoTrackAndTrace={result.NoTrackAndTrace}");
+    Console.WriteLine($"TheoreticallyAuditableDays={result.TheoreticallyAuditableDaysAfterHighConfidenceConfirmation}");
+    foreach (var candidate in result.Candidates.Where(item => new[]
+             { "Bart Willocx", "Yarne Vereecken", "Ibrahima Diallo", "Nabil Jadaoui", "Rajco Cools" }
+             .Contains(item.Technician, StringComparer.OrdinalIgnoreCase)))
+    {
+        Console.WriteLine($"Focus={candidate.Technician}|{candidate.TechnicianCode}|" +
+                          $"{candidate.Status}|{candidate.ProposedObjectId}|" +
+                          $"{candidate.RegistrationPlate}|Days={candidate.JulyTripDays}|" +
+                          $"Alternatives={string.Join(',', candidate.Alternatives.Select(item => item.ObjectId))}");
+    }
+    Console.WriteLine($"Json={output}");
+    return;
+}
+
+var isVehicleAssignmentSync = args.Contains(
+    "--vehicle-assignment-sync", StringComparer.OrdinalIgnoreCase);
+if (isVehicleAssignmentSync)
+{
+    var database = ParseRequiredText(args, "--database");
+    using var executionGuard = VehicleAssignmentSyncExecutionGuard.TryAcquire(database);
+    var builder = WebApplication.CreateBuilder(args);
+    builder.Configuration.AddUserSecrets(typeof(Program).Assembly, optional: false);
+    builder.Configuration["ConnectionStrings:TimeControl"] = $"Data Source={database}";
+    builder.Logging.ClearProviders();
+    builder.Logging.AddConsole();
+    builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.Warning);
+    builder.Logging.AddFilter("System.Net.Http.HttpClient", LogLevel.Warning);
+    builder.Services.AddTimeControlInfrastructure(builder.Configuration);
+    await using var host = builder.Build();
+    await host.Services.InitializeTimeControlDatabaseAsync();
+    await using var scope = host.Services.CreateAsyncScope();
+    if (!executionGuard.Acquired)
+    {
+        await scope.ServiceProvider.GetRequiredService<VehicleAssignmentSyncHistoryService>()
+            .RecordSkippedAlreadyRunningAsync(CancellationToken.None);
+        var skippedAt = DateTimeOffset.Now;
+        Console.WriteLine($"StartedAt={skippedAt:O}");
+        Console.WriteLine($"FinishedAt={skippedAt:O}");
+        Console.WriteLine("DurationSeconds=0.000");
+        Console.WriteLine("Status=SkippedAlreadyRunning");
+        Console.WriteLine("Errors=0");
+        return;
+    }
+    var actor = ParseText(args, "--actor", "vehicle-assignment-sync");
+    var cliStartedAt = DateTimeOffset.Now;
+    Console.WriteLine($"StartedAt={cliStartedAt:O}");
+    VehicleAssignmentSyncResult result;
+    try
+    {
+        result = await scope.ServiceProvider
+            .GetRequiredService<TechnicianVehicleAssignmentSyncService>()
+            .RunAsync(actor, CancellationToken.None);
+    }
+    catch (Exception exception)
+    {
+        Console.WriteLine($"FinishedAt={DateTimeOffset.Now:O}");
+        Console.WriteLine("Status=Failed");
+        Console.WriteLine($"Errors=1|{exception.GetType().Name}: {exception.Message}");
+        throw;
+    }
+    Console.WriteLine($"StartedAt={result.StartedAt:O}");
+    Console.WriteLine($"FinishedAt={result.FinishedAt:O}");
+    Console.WriteLine($"DurationSeconds={result.DurationSeconds:F3}");
+    Console.WriteLine("Status=Succeeded");
+    Console.WriteLine($"VehiclesRead={result.Vehicles}");
+    Console.WriteLine($"PhysicalVehiclesObserved={result.PhysicalVehiclesObserved}");
+    Console.WriteLine($"ExactMapped={result.ExactMapped}");
+    Console.WriteLine($"Unmapped={result.Unmapped}");
+    Console.WriteLine($"Ambiguous={result.Ambiguous}");
+    Console.WriteLine($"ResourcesWithoutPersonalVehicle={result.ResourcesWithoutPersonalVehicle}");
+    Console.WriteLine($"AssignmentsOpened={result.AssignmentsOpened}");
+    Console.WriteLine($"AssignmentsClosed={result.AssignmentsClosed}");
+    Console.WriteLine($"AssignmentsObserved={result.AssignmentsObserved}");
+    Console.WriteLine($"SkippedNoTrackAndTrace={result.SkippedNoTrackAndTrace}");
+    Console.WriteLine("Errors=0");
+    foreach (var name in result.UnmappedNames) Console.WriteLine($"UnmappedVehicleName={name}");
+    foreach (var name in result.AmbiguousNames) Console.WriteLine($"AmbiguousVehicleName={name}");
+    return;
+}
+
+var isVehicleAssignmentBackfill = args.Contains(
+    "--vehicle-assignment-backfill", StringComparer.OrdinalIgnoreCase);
+if (isVehicleAssignmentBackfill)
+{
+    var database = ParseRequiredText(args, "--database");
+    var builder = WebApplication.CreateBuilder(args);
+    builder.Configuration.AddUserSecrets(typeof(Program).Assembly, optional: false);
+    builder.Configuration["ConnectionStrings:TimeControl"] = $"Data Source={database}";
+    builder.Logging.ClearProviders();
+    builder.Logging.AddConsole();
+    builder.Services.AddTimeControlInfrastructure(builder.Configuration);
+    await using var host = builder.Build();
+    await host.Services.InitializeTimeControlDatabaseAsync();
+    await using var scope = host.Services.CreateAsyncScope();
+    var validFrom = DateTimeOffset.Parse(
+        ParseRequiredText(args, "--valid-from"), System.Globalization.CultureInfo.InvariantCulture);
+    var validToText = ParseOptionalText(args, "--valid-to");
+    var assignment = await scope.ServiceProvider
+        .GetRequiredService<TechnicianVehicleAssignmentBackfillService>()
+        .RegisterAsync(new VehicleAssignmentBackfillRequest(
+            ParseRequiredText(args, "--technician-code"),
+            ParseRequiredText(args, "--object-id"),
+            validFrom,
+            string.IsNullOrWhiteSpace(validToText) ? null : DateTimeOffset.Parse(
+                validToText, System.Globalization.CultureInfo.InvariantCulture),
+            ParseRequiredText(args, "--source"),
+            ParseRequiredText(args, "--evidence"),
+            ParseRequiredText(args, "--actor")), CancellationToken.None);
+    Console.WriteLine($"Assignment={assignment.TechnicianCode}|{assignment.ObjectId}|" +
+                      $"{assignment.ValidFrom:O}|{assignment.ValidTo:O}|{assignment.Source}");
+    return;
+}
+
+var isKnownWorkLocationAudit = args.Contains(
+    "--known-work-location-audit",
+    StringComparer.OrdinalIgnoreCase);
+if (isKnownWorkLocationAudit)
+{
+    var builder = WebApplication.CreateBuilder(args);
+    builder.Configuration.AddUserSecrets(typeof(Program).Assembly, optional: false);
+    builder.Logging.ClearProviders();
+    builder.Logging.AddConsole();
+    builder.Logging.AddFilter("System.Net.Http.HttpClient", LogLevel.Warning);
+    builder.Services.AddTimeControlInfrastructure(builder.Configuration);
+    await using var host = builder.Build();
+    await using var scope = host.Services.CreateAsyncScope();
+    var targets = new[]
+    {
+        new KnownWorkTargetSpec(new DateOnly(2026, 7, 6), "Garrit Broeders"),
+        new KnownWorkTargetSpec(new DateOnly(2026, 7, 7), "Garrit Broeders"),
+        new KnownWorkTargetSpec(new DateOnly(2026, 7, 10), "Garrit Broeders"),
+        new KnownWorkTargetSpec(new DateOnly(2026, 7, 13), "Garrit Broeders"),
+        new KnownWorkTargetSpec(new DateOnly(2026, 7, 24), "Garrit Broeders"),
+        new KnownWorkTargetSpec(new DateOnly(2026, 7, 2), "Eden Catry"),
+        new KnownWorkTargetSpec(new DateOnly(2026, 7, 22), "Eden Catry"),
+        new KnownWorkTargetSpec(new DateOnly(2026, 7, 23), "Eden Catry"),
+        new KnownWorkTargetSpec(new DateOnly(2026, 7, 24), "Eden Catry"),
+        new KnownWorkTargetSpec(new DateOnly(2026, 7, 13), "Shane Van Geldorp"),
+        new KnownWorkTargetSpec(new DateOnly(2026, 7, 21), "Shane Van Geldorp"),
+        new KnownWorkTargetSpec(new DateOnly(2026, 7, 23), "Shane Van Geldorp"),
+        new KnownWorkTargetSpec(new DateOnly(2026, 7, 28), "Shane Van Geldorp"),
+        new KnownWorkTargetSpec(new DateOnly(2026, 7, 29), "Joris Rottiers"),
+    };
+    var controls = new[]
+    {
+        new KnownWorkTargetSpec(new DateOnly(2026, 7, 2), "Joris Rottiers"),
+        new KnownWorkTargetSpec(new DateOnly(2026, 7, 8), "Joris Rottiers"),
+        new KnownWorkTargetSpec(new DateOnly(2026, 7, 9), "Joris Rottiers"),
+        new KnownWorkTargetSpec(new DateOnly(2026, 7, 30), "Joris Rottiers"),
+        new KnownWorkTargetSpec(new DateOnly(2026, 7, 31), "Joris Rottiers"),
+    };
+    var diagnostics = new[]
+    {
+        @"C:\Temp\eden-catry-daily-boundary-audit-2026-07-boundary.json",
+        @"C:\Temp\shane-van-geldorp-daily-boundary-audit-2026-07-boundary.json",
+        @"C:\Temp\joris-rottiers-daily-boundary-audit-2026-07-boundary.json",
+        @"C:\Temp\garrit-broeders-daily-boundary-audit-2026-07-boundary.json",
+    };
+    var output = ParseText(args, "--output", @"C:\Temp\known-work-location-audit-2026-07.csv");
+    var json = ParseText(args, "--json", @"C:\Temp\known-work-location-audit-2026-07.json");
+    var result = await scope.ServiceProvider.GetRequiredService<KnownWorkLocationAuditService>()
+        .RunAsync(new KnownWorkLocationAuditRequest(diagnostics, targets, controls, output, json), CancellationToken.None);
+    Console.WriteLine($"LinkedPlenionLocations={result.LinkedPlenionLocations}");
+    Console.WriteLine($"LocallyGeocodedCandidates={result.LocallyGeocodedCandidates}");
+    Console.WriteLine($"UsableIndexedLocations={result.UsableIndexedLocations}");
+    foreach (var radius in result.RadiusSummaries)
+    {
+        Console.WriteLine($"Radius={radius.RadiusMeters}|KnownContextStops={radius.KnownContextStops}|Known={radius.BoundariesWithKnownLocation}|SameJob={radius.SameJobContext}|SameCustomer={radius.SameCustomerContext}|Other={radius.OtherKnownWorkLocation}|None={radius.NoWorkEvidence}|ControlMatches={radius.NegativeControlMatches}|ControlRelated={radius.NegativeControlRelatedMatches}");
+    }
+    Console.WriteLine($"Csv={result.OutputPath}");
+    Console.WriteLine($"Json={result.JsonPath}");
+    return;
+}
+
+var isDailyHoursAudit = args.Contains("--daily-hours-audit", StringComparer.OrdinalIgnoreCase);
+if (isDailyHoursAudit)
+{
+    var builder = WebApplication.CreateBuilder(args);
+    builder.Configuration.AddUserSecrets(typeof(Program).Assembly, optional: false);
+    var assignmentDatabase = ParseOptionalText(args, "--database");
+    if (!string.IsNullOrWhiteSpace(assignmentDatabase))
+    {
+        builder.Configuration["ConnectionStrings:TimeControl"] = $"Data Source={assignmentDatabase}";
+    }
+    builder.Logging.ClearProviders();
+    builder.Logging.AddConsole();
+    builder.Logging.AddFilter("System.Net.Http.HttpClient", LogLevel.Warning);
+    builder.Services.AddTimeControlInfrastructure(builder.Configuration);
+    await using var host = builder.Build();
+    if (!string.IsNullOrWhiteSpace(assignmentDatabase))
+    {
+        await host.Services.InitializeTimeControlDatabaseAsync();
+    }
+    await using var scope = host.Services.CreateAsyncScope();
+    var from = ParseDate(args, "--from", new DateOnly(2026, 7, 1));
+    var through = ParseDate(args, "--to", new DateOnly(2026, 7, 31));
+    var output = ParseText(
+        args,
+        "--output",
+        @"C:\Temp\timecontrol-daily-hours-audit-2026-07.csv");
+    var diagnostics = ParseOptionalText(args, "--diagnostics");
+    var technician = ParseOptionalText(args, "--technician");
+    var detailedDiagnostics = args.Contains(
+        "--detailed-diagnostics",
+        StringComparer.OrdinalIgnoreCase);
+    var result = await scope.ServiceProvider.GetRequiredService<DailyHoursAuditService>()
+        .RunAsync(
+            new DailyHoursAuditRequest(
+                from,
+                through,
+                output,
+                diagnostics,
+                technician,
+                detailedDiagnostics),
+            CancellationToken.None);
+    Console.WriteLine($"TechnicianDays={result.TechnicianDays}");
+    Console.WriteLine($"ReliableDays={result.ReliableDays}");
+    Console.WriteLine($"PartialDays={result.PartialDays}");
+    Console.WriteLine($"UnresolvedDays={result.UnresolvedDays}");
+    Console.WriteLine($"DeviatingDays={result.DeviatingDays}");
+    Console.WriteLine($"ExcludedWeekend={result.ExcludedWeekend}");
+    Console.WriteLine($"ExcludedPublicHoliday={result.ExcludedPublicHoliday}");
+    Console.WriteLine($"ExcludedLeave={result.ExcludedLeave}");
+    Console.WriteLine($"ExcludedSickness={result.ExcludedSickness}");
+    Console.WriteLine($"ExcludedWaitingPerformances={result.ExcludedWaitingPerformances}");
+    Console.WriteLine($"ExcludedWaitingDays={result.ExcludedWaitingDays}");
+    Console.WriteLine($"ExcludedTravelPerformances={result.ExcludedTravelPerformances}");
+    Console.WriteLine($"FirstReliableBoundaries={result.FirstReliableBoundaries}");
+    Console.WriteLine($"LastReliableBoundaries={result.LastReliableBoundaries}");
+    Console.WriteLine($"ExactSiteBoundaries={result.ExactSiteBoundaries}");
+    Console.WriteLine($"ContextSupportedBoundaries={result.ContextSupportedBoundaries}");
+    Console.WriteLine($"ConfirmedDeviationsOver5={result.ConfirmedDeviationsOver5}");
+    Console.WriteLine($"ConfirmedDeviationsOver15={result.ConfirmedDeviationsOver15}");
+    Console.WriteLine($"ReviewPotentialDeviationsOver5={result.ReviewPotentialDeviationsOver5}");
+    Console.WriteLine($"ReviewPotentialDeviationsOver15={result.ReviewPotentialDeviationsOver15}");
+    Console.WriteLine($"TotalPositiveRawExactSiteDeviationMinutes={result.TotalPositiveRawExactSiteDeviationMinutes}");
+    Console.WriteLine($"ConfirmedEffectiveDeviationMinutes={result.ConfirmedEffectiveDeviationMinutes}");
+    Console.WriteLine($"ReviewPotentialDeviationMinutes={result.ReviewPotentialDeviationMinutes}");
+    Console.WriteLine($"SourceExtractDuration={result.SourceExtractDuration}");
+    Console.WriteLine($"ExactSiteDuration={result.ExactSiteDuration}");
+    Console.WriteLine($"ContextSupportedDuration={result.ContextSupportedDuration}");
+    Console.WriteLine($"WorksiteSessionDuration={result.WorksiteSessionDuration}");
+    Console.WriteLine($"WorksiteSessionBoundariesConsidered={result.WorksiteSessionBoundariesConsidered}");
+    Console.WriteLine($"WorksiteSessionBoundariesChanged={result.WorksiteSessionBoundariesChanged}");
+    Console.WriteLine($"AmbiguousWorksiteSessions={result.AmbiguousWorksiteSessions}");
+    Console.WriteLine($"WorksiteSessionClusters={result.WorksiteSessionClusters}");
+    Console.WriteLine($"WorksiteSessionHistoricalLookups={result.WorksiteSessionHistoricalLookups}");
+    Console.WriteLine($"TotalDuration={result.TotalDuration}");
+    Console.WriteLine($"ContextBoundariesConsidered={result.ContextBoundariesConsidered}");
+    Console.WriteLine($"ContextBoundariesSkippedNoTemporalStop={result.ContextBoundariesSkippedNoTemporalStop}");
+    Console.WriteLine($"AddressMatchesWithoutGeocoding={result.AddressMatchesWithoutGeocoding}");
+    Console.WriteLine($"GeocodeCacheHits={result.GeocodeCacheHits}");
+    Console.WriteLine($"GeocodeCacheMisses={result.GeocodeCacheMisses}");
+    Console.WriteLine($"ExternalGeocodeCalls={result.ExternalGeocodeCalls}");
+    Console.WriteLine($"UniquePlenionLocationsGeocoded={result.UniquePlenionLocationsGeocoded}");
+    Console.WriteLine($"NegativeCacheHits={result.NegativeCacheHits}");
+    Console.WriteLine($"AmbiguousVehicleAssignments={result.AmbiguousVehicleAssignments}");
+    Console.WriteLine($"InsufficientVehicleAssignments={result.InsufficientVehicleAssignments}");
+    Console.WriteLine($"ExcludedNoTrackAndTrace={result.ExcludedNoTrackAndTrace}");
+    Console.WriteLine($"DaysWithValidVehicleAssignment={result.DaysWithValidVehicleAssignment}");
+    Console.WriteLine($"ConfirmedDeviations={result.ConfirmedDeviations}");
+    Console.WriteLine($"ConfirmedDeviationsOver30={result.ConfirmedDeviationsOver30}");
+    Console.WriteLine($"ReviewPotentialDeviations={result.ReviewPotentialDeviations}");
+    Console.WriteLine($"ReviewPotentialDeviationsOver30={result.ReviewPotentialDeviationsOver30}");
+    foreach (var risk in result.VehicleStreamRisks)
+    {
+        Console.WriteLine(
+            $"VehicleStream={risk.Date:yyyy-MM-dd}|{risk.Technician}|Streams={risk.PhysicalStreamCount}|" +
+            $"Ids={string.Join(',', risk.StreamIdentities)}|OverlapMinutes={risk.OverlapMinutes}|" +
+            $"Status={risk.Status}|{risk.Reason}");
+    }
+    foreach (var exclusion in result.Exclusions)
+    {
+        Console.WriteLine($"Excluded={exclusion.Date:yyyy-MM-dd}|{exclusion.Technician}|{exclusion.Status}|{exclusion.Reason}");
+    }
+    foreach (var change in result.BoundaryClassificationChanges)
+    {
+        Console.WriteLine($"ClassificationChanged={change.Date:yyyy-MM-dd}|{change.Technician}|" +
+                          $"First={change.FirstPerformanceId}|Last={change.LastPerformanceId}|" +
+                          $"Before={string.Join('/', change.ExcludedBeforeFirst)}|" +
+                          $"After={string.Join('/', change.ExcludedAfterLast)}");
+    }
+    Console.WriteLine($"Csv={result.OutputPath}");
+    foreach (var row in result.Rows.Take(30))
+    {
+        Console.WriteLine(
+            $"Top={row.Date:yyyy-MM-dd}|{row.Technician}|First={row.FirstPerformanceId}|" +
+            $"Last={row.LastPerformanceId}|Start={row.StartDeviationMinutes}|" +
+            $"End={row.EndDeviationMinutes}|Confirmed={row.TotalConfirmedDeviation}|" +
+            $"ReviewPotential={row.TotalReviewPotentialDeviation}|{row.ReviewStatus}");
+    }
+
+    return;
+}
+
+var isHoursAudit = args.Contains("--hours-audit", StringComparer.OrdinalIgnoreCase);
+if (isHoursAudit)
+{
+    var builder = WebApplication.CreateBuilder(args);
+    builder.Configuration.AddUserSecrets(typeof(Program).Assembly, optional: false);
+    builder.Logging.ClearProviders();
+    builder.Logging.AddConsole();
+    builder.Logging.AddFilter("System.Net.Http.HttpClient", LogLevel.Warning);
+    builder.Services.AddTimeControlInfrastructure(builder.Configuration);
+    await using var host = builder.Build();
+    await using var scope = host.Services.CreateAsyncScope();
+    var from = ParseDate(args, "--from", new DateOnly(2026, 7, 1));
+    var through = ParseDate(args, "--to", new DateOnly(2026, 7, 31));
+    var output = ParseText(
+        args,
+        "--output",
+        @"C:\Temp\timecontrol-hours-audit-2026-07.csv");
+    var service = scope.ServiceProvider.GetRequiredService<HoursAuditService>();
+    var result = await service.RunAsync(
+        new HoursAuditRequest(from, through, output),
+        CancellationToken.None);
+    Console.WriteLine($"ExaminedPerformances={result.ExaminedPerformances}");
+    Console.WriteLine($"ReliableMatches={result.ReliableMatches}");
+    Console.WriteLine($"DeviatingPerformances={result.DeviatingPerformances}");
+    Console.WriteLine($"Ambiguous={result.Ambiguous}");
+    Console.WriteLine($"Unresolved={result.Unresolved}");
+    Console.WriteLine($"NotReliablyAssessable={result.Ambiguous + result.Unresolved}");
+    Console.WriteLine($"NonLocationBound={result.NonLocationBound}");
+    Console.WriteLine($"TotalDeviationMinutes={result.TotalDeviationMinutes}");
+    Console.WriteLine($"Csv={result.OutputPath}");
+    foreach (var technician in result.MissingMappings)
+    {
+        Console.WriteLine($"MissingMapping={technician}");
+    }
+
+    foreach (var warning in result.Warnings)
+    {
+        Console.WriteLine($"Warning={warning}");
+    }
+
+    foreach (var row in result.Rows.Take(30))
+    {
+        Console.WriteLine(
+            $"Top={row.Date:yyyy-MM-dd}|{row.Technician}|{row.PerformanceId}|" +
+            $"Start={row.StartDeviationMinutes}|End={row.EndDeviationMinutes}|" +
+            $"Total={row.TotalDeviationMinutes}|{row.MatcherStatus}|" +
+            $"Score={row.Score:0.0}|Distance={row.DistanceMeters:0.0}|" +
+            $"Overlap={row.OverlapMinutes}");
+    }
+
+    return;
+}
 
 var isExportLockedHoldoutReview = args.Contains(
     "--export-locked-holdout-review",
@@ -752,6 +1226,41 @@ static DateOnly ParseDate(string[] arguments, string name, DateOnly fallback)
     return DateOnly.TryParse(arguments[index + 1], out var parsed)
         ? parsed
         : fallback;
+}
+
+static string ParseText(string[] arguments, string name, string fallback)
+{
+    var index = Array.FindIndex(
+        arguments,
+        item => item.Equals(name, StringComparison.OrdinalIgnoreCase));
+    return index >= 0 && index + 1 < arguments.Length
+        ? arguments[index + 1]
+        : fallback;
+}
+
+static string ParseRequiredText(string[] arguments, string name)
+{
+    var value = ParseOptionalText(arguments, name);
+    return string.IsNullOrWhiteSpace(value)
+        ? throw new ArgumentException($"Verplichte parameter ontbreekt: {name}.")
+        : value;
+}
+
+static string? ParseOptionalText(string[] arguments, string name)
+{
+    var index = Array.FindIndex(
+        arguments,
+        item => item.Equals(name, StringComparison.OrdinalIgnoreCase));
+    return index >= 0 && index + 1 < arguments.Length
+        ? arguments[index + 1]
+        : null;
+}
+
+static ReviewMonth ParseReviewMonth(string value)
+{
+    if (!DateOnly.TryParseExact(value + "-01", "yyyy-MM-dd", out var parsed))
+        throw new ArgumentException("--month moet YYYY-MM zijn.");
+    return new ReviewMonth(parsed.Year, parsed.Month);
 }
 
 static int ParseReviewer(string[] arguments)

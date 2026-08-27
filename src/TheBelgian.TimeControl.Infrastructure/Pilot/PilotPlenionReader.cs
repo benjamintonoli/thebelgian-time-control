@@ -38,6 +38,131 @@ internal sealed class PilotPlenionReader(
             cancellationToken);
     }
 
+    public async Task<IReadOnlyList<Technician>> ReadTechniciansWithPerformancesAsync(
+        DateOnly fromDate,
+        DateOnly throughDate,
+        CancellationToken cancellationToken)
+    {
+        OfflineOnlyGuard.EnsureLiveAccessAllowed("PlenionODBC");
+        ValidateConfiguration();
+        const string sql = """
+            SELECT DISTINCT R.IDRESOURCE, R.RESCODE, R.OMSCHR
+            FROM Resource R
+            INNER JOIN PROJ_Prest P ON P.IDRESOURCE = R.IDRESOURCE
+            WHERE R.SOORT = 1 AND P.DATUM >= ? AND P.DATUM <= ?
+            ORDER BY R.OMSCHR, R.IDRESOURCE
+            """;
+        await using var connection = new OdbcConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = new OdbcCommand(sql, connection);
+        command.Parameters.Add("fromDate", OdbcType.Date).Value =
+            fromDate.ToDateTime(TimeOnly.MinValue);
+        command.Parameters.Add("throughDate", OdbcType.Date).Value =
+            throughDate.ToDateTime(TimeOnly.MinValue);
+        var technicians = new List<Technician>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            technicians.Add(new Technician
+            {
+                ExternalId = RequiredText(reader, "IDRESOURCE"),
+                Code = OptionalText(reader, "RESCODE") ?? string.Empty,
+                Name = OptionalText(reader, "OMSCHR") ?? string.Empty,
+                Kind = 1,
+            });
+        }
+
+        return technicians;
+    }
+
+    public async Task<IReadOnlyList<PlenionCalendarAbsence>> ReadCalendarAbsencesAsync(
+        IReadOnlySet<string> resourceIds,
+        DateOnly fromDate,
+        DateOnly throughDate,
+        CancellationToken cancellationToken)
+    {
+        OfflineOnlyGuard.EnsureLiveAccessAllowed("PlenionODBC");
+        ValidateConfiguration();
+        const string sql = """
+            SELECT IDKALENDER, IDResource, DATUM, DATUMTOT, UURVAN, UURTOT,
+                   ONDERWERP, status, geschrapt
+            FROM KALENDER
+            WHERE DATUM <= ? AND (DATUMTOT IS NULL OR DATUMTOT >= ?)
+              AND status = 255 AND geschrapt = 0
+            ORDER BY IDResource, DATUM, IDKALENDER
+            """;
+        await using var connection = new OdbcConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = new OdbcCommand(sql, connection);
+        command.Parameters.Add("throughDate", OdbcType.Date).Value =
+            throughDate.ToDateTime(TimeOnly.MinValue);
+        command.Parameters.Add("fromDate", OdbcType.Date).Value =
+            fromDate.ToDateTime(TimeOnly.MinValue);
+        var absences = new List<PlenionCalendarAbsence>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var resourceId = RequiredText(reader, "IDResource");
+            if (!resourceIds.Contains(resourceId))
+            {
+                continue;
+            }
+
+            var subject = OptionalText(reader, "ONDERWERP") ?? string.Empty;
+            var kind = ClassifyCalendarAbsence(subject);
+            if (kind is null)
+            {
+                continue;
+            }
+
+            var startDate = DateOnly.FromDateTime(
+                Convert.ToDateTime(reader["DATUM"], CultureInfo.InvariantCulture));
+            var endDate = reader["DATUMTOT"] is DBNull
+                ? startDate
+                : DateOnly.FromDateTime(
+                    Convert.ToDateTime(reader["DATUMTOT"], CultureInfo.InvariantCulture));
+            absences.Add(new PlenionCalendarAbsence(
+                Convert.ToInt64(reader["IDKALENDER"], CultureInfo.InvariantCulture),
+                resourceId,
+                startDate,
+                endDate,
+                ReadCalendarTime(reader["UURVAN"], TimeOnly.MinValue),
+                ReadCalendarTime(reader["UURTOT"], TimeOnly.MaxValue),
+                kind.Value,
+                subject));
+        }
+
+        return absences;
+    }
+
+    private static PlenionCalendarAbsenceKind? ClassifyCalendarAbsence(string subject)
+    {
+        if (subject.Contains("ziek", StringComparison.OrdinalIgnoreCase) ||
+            subject.Contains("afwezig", StringComparison.OrdinalIgnoreCase) ||
+            subject.Contains("arbeidsongeschikt", StringComparison.OrdinalIgnoreCase))
+        {
+            return PlenionCalendarAbsenceKind.Sickness;
+        }
+
+        return subject.Contains("verlof", StringComparison.OrdinalIgnoreCase)
+            ? PlenionCalendarAbsenceKind.Leave
+            : null;
+    }
+
+    private static TimeOnly ReadCalendarTime(object value, TimeOnly fallback) =>
+        value switch
+        {
+            DBNull => fallback,
+            TimeSpan time => TimeOnly.FromTimeSpan(time),
+            DateTime dateTime => TimeOnly.FromDateTime(dateTime),
+            _ when TimeOnly.TryParse(
+                Convert.ToString(value, CultureInfo.InvariantCulture),
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out var parsed) => parsed,
+            _ => fallback,
+        };
+
     private static async Task<Technician> FindTechnicianAsync(
         OdbcConnection connection,
         string query,
@@ -65,6 +190,19 @@ internal sealed class PilotPlenionReader(
                 Name = RequiredText(reader, "OMSCHR"),
                 Kind = 1,
             });
+        }
+
+        if (matches.Count > 1)
+        {
+            var exact = matches.Where(item =>
+                    string.Equals(item.ExternalId, trimmed, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(item.Code, trimmed, StringComparison.OrdinalIgnoreCase))
+                .DistinctBy(item => item.ExternalId, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            if (exact.Length == 1)
+            {
+                return exact[0];
+            }
         }
 
         return matches.Count switch

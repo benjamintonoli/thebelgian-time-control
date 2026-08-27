@@ -37,5 +37,7 @@ public sealed record VisitCandidate(
             ConstituentStops.Count > 0 ? ConstituentStops[0].DriverId : null,
             ConstituentStops.Count > 0 ? ConstituentStops[0].DriverName : null,
             ConstituentStopIds,
-            TotalDwellMinutes < options.PassThroughMaxDurationMinutes);
+            TotalDwellMinutes < options.PassThroughMaxDurationMinutes,
+            ConstituentStops.Count > 0 ? ConstituentStops[0].ObjectId : null,
+            ConstituentStops.Count > 0 ? ConstituentStops[0].VehiclePlate : null);
 }

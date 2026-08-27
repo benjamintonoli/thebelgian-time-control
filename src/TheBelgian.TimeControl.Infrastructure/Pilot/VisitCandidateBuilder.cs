@@ -13,13 +13,14 @@ internal static class VisitCandidateBuilder
     public static IReadOnlyList<VisitCandidate> Build(
         IReadOnlyList<PilotStop> stops,
         AdaptiveLocationMatchingOptions options,
-        IDistanceCalculator distanceCalculator)
+        IDistanceCalculator distanceCalculator,
+        bool requireLocationContinuity = true)
     {
         var ordered = stops
             .Where(stop =>
                 stop.Latitude is not null &&
                 stop.Longitude is not null &&
-                stop.LocationContinuity)
+                (!requireLocationContinuity || stop.LocationContinuity))
             .OrderBy(stop => stop.Arrival)
             .ThenBy(stop => stop.StopId, StringComparer.Ordinal)
             .ToArray();
@@ -72,6 +73,11 @@ internal static class VisitCandidateBuilder
             current.DriverId,
             StringComparison.OrdinalIgnoreCase);
         if (!sameDriver)
+        {
+            return false;
+        }
+
+        if (!PowerfleetVehicleStreamIdentity.SamePhysicalStream(last, current))
         {
             return false;
         }

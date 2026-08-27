@@ -79,7 +79,9 @@ public sealed record MergedPilotStop(
     string? DriverId,
     string? DriverName,
     IReadOnlyList<string> SourceStopIds,
-    bool IsPassThrough);
+    bool IsPassThrough,
+    string? ObjectId = null,
+    string? VehiclePlate = null);
 
 public sealed record HistoricalLocationCluster(
     string ClusterId,

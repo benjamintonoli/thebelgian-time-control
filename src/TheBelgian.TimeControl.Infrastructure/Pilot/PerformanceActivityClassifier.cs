@@ -86,6 +86,11 @@ internal static class PerformanceActivityClassifier
         NormalizedPilotPerformance performance,
         string normalizedText)
     {
+        if (VerifiedMainTaskSemantics.TryClassify(performance.MainTaskExternalId, out var verified))
+        {
+            return verified;
+        }
+
         if (ContainsAny(normalizedText, AbsenceMarkers))
         {
             return (PerformanceActivityType.Absence, "Afwezigheidsmarkering in omschrijving/project.");
@@ -182,4 +187,38 @@ internal static class PerformanceActivityClassifier
     private static bool ContainsAny(string text, IReadOnlyList<string> markers) =>
         markers.Any(marker =>
             text.Contains(marker, StringComparison.OrdinalIgnoreCase));
+}
+
+internal static class VerifiedMainTaskSemantics
+{
+    internal const string TravelMainTaskExternalId = "5";
+    internal const string TravelDescription = "Verplaatsingen";
+    internal const string TravelCode = "verpl";
+    internal const string WaitingMainTaskExternalId = "23";
+    internal const string WaitingDescription = "Werkuren Wachtdienst";
+    internal const string WaitingCode = "WWD";
+
+    public static bool TryClassify(
+        string? mainTaskExternalId,
+        out (PerformanceActivityType Type, string Reason) classification)
+    {
+        if (string.Equals(mainTaskExternalId, TravelMainTaskExternalId, StringComparison.Ordinal))
+        {
+            classification = (
+                PerformanceActivityType.Travel,
+                $"Geverifieerde Plenion HFDTAAK {TravelMainTaskExternalId}: {TravelDescription} (CODE={TravelCode}).");
+            return true;
+        }
+
+        if (string.Equals(mainTaskExternalId, WaitingMainTaskExternalId, StringComparison.Ordinal))
+        {
+            classification = (
+                PerformanceActivityType.WaitingTime,
+                $"Geverifieerde Plenion HFDTAAK {WaitingMainTaskExternalId}: {WaitingDescription} (CODE={WaitingCode}).");
+            return true;
+        }
+
+        classification = default;
+        return false;
+    }
 }

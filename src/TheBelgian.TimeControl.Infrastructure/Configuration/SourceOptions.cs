@@ -25,3 +25,15 @@ public sealed class PowerfleetOptions
         !string.IsNullOrWhiteSpace(ReportId) &&
         !string.IsNullOrWhiteSpace(StateId);
 }
+
+public sealed class VehicleAssignmentReviewOptions
+{
+    public const string SectionName = "VehicleAssignments";
+    public string DefaultReviewer { get; init; } = string.Empty;
+}
+
+public sealed class AdminReviewWorkflowOptions
+{
+    public const string SectionName = "AdminReview";
+    public string DefaultReviewer { get; init; } = string.Empty;
+}

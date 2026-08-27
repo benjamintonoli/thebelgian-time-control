@@ -1,0 +1,360 @@
+@page "/Admin/TimeControl"
+@model TheBelgian.TimeControl.Web.Pages.Admin.TimeControl.IndexModel
+@using TheBelgian.TimeControl.Core.Models
+@using TheBelgian.TimeControl.Core.Services
+@using System.Globalization
+@{
+    var monthDate = new DateOnly(Model.Monthly.Period.Year, Model.Monthly.Period.Month, 1);
+    var monthTitle = CultureInfo.GetCultureInfo("nl-BE").TextInfo.ToTitleCase(
+        monthDate.ToString("MMMM yyyy", CultureInfo.GetCultureInfo("nl-BE")));
+    ViewData["Title"] = $"Urencontrole — {monthTitle}";
+    var selected = Model.Cockpit.Selected;
+    var startCorrection = selected is null ? null : DailyReviewDisplay.ReliableGpsCorrectionTime(selected.First);
+    var endCorrection = selected is null ? null : DailyReviewDisplay.ReliableGpsCorrectionTime(selected.Last);
+    string Tab(DailyReviewQueueView value) => Model.View == value ? "nav-link active" : "nav-link";
+}
+
+<div class="cockpit-heading">
+    <div>
+        <div class="text-uppercase small text-muted fw-semibold">Urencontrole</div>
+        <h1 class="mb-1">@monthTitle</h1>
+        <p class="text-muted mb-0">Controleer alleen de uitzonderingen waarvoor menselijke beoordeling nuttig is.</p>
+    </div>
+    <div class="cockpit-safety">Geen automatische correcties of personeelsconclusies</div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(Model.Message))
+{
+    <div class="alert alert-success">@Model.Message</div>
+}
+
+<section class="card mb-3"><div class="card-body">
+    <div class="d-flex flex-wrap justify-content-between gap-3 align-items-start">
+        <div>
+            <div><strong>Status:</strong> @(Model.Monthly.Period.Status switch { MonthlyReviewStatus.WaitingForData => "Wachten op gegevens", MonthlyReviewStatus.ReadyForReview => "Klaar voor controle", MonthlyReviewStatus.InReview => "Controle bezig", _ => "Afgesloten" })</div>
+            <div class="small text-muted">Gegevens voorbereid: @(Model.Monthly.Period.PreparedAt?.ToLocalTime().ToString("dd/MM/yyyy HH:mm") ?? "—") · Laatste update: @(Model.Monthly.Period.LastRefreshedAt?.ToLocalTime().ToString("dd/MM/yyyy HH:mm") ?? "—")</div>
+            <div class="small text-muted">Laatste voertuigsynchronisatie: @(Model.Monthly.Period.LastVehicleSyncAt?.ToLocalTime().ToString("dd/MM/yyyy HH:mm") ?? "—")</div>
+        </div>
+        <div class="d-flex gap-2">
+            <a class="btn btn-sm btn-outline-secondary" asp-route-month="@Model.Monthly.PreviousMonth.Key">← Vorige maand</a>
+            <a class="btn btn-sm btn-outline-secondary" asp-route-month="@Model.Monthly.NextMonth.Key">Volgende maand →</a>
+            <a class="btn btn-sm btn-dark" asp-page-handler="Report" asp-route-month="@Model.Month">@(Model.Monthly.Period.Status == MonthlyReviewStatus.Finalized ? "Definitief rapport" : "Voorlopig rapport")</a>
+        </div>
+    </div>
+    <div class="row g-2 mt-2 small">
+        <div class="col">Te controleren: <strong>@Model.Cockpit.Counts.Open</strong></div>
+        <div class="col">Beoordeeld/opvolging: <strong>@(Model.Cockpit.Counts.Completed + Model.Cockpit.Counts.ToReview)</strong></div>
+        <div class="col">Data niet controleerbaar: <strong>@Model.Monthly.Summary.DataQualityCases</strong></div>
+        <div class="col">Niet van toepassing: <strong>@Model.Monthly.Summary.NoTrackAndTrace</strong></div>
+    </div>
+    @if (Model.Monthly.Period.Status != MonthlyReviewStatus.Finalized && Model.Monthly.Period.Id != 0)
+    {
+        <div class="d-flex flex-wrap gap-2 mt-3">
+            <form method="post" asp-page-handler="Refresh"><input type="hidden" name="Month" value="@Model.Month" /><button class="btn btn-sm btn-outline-primary">Vernieuw gegevens</button></form>
+            <form method="post" asp-page-handler="Finalize"><input type="hidden" name="Month" value="@Model.Month" /><label class="small me-1"><input type="checkbox" name="ConfirmOpenCases" value="true" /> bewust afsluiten met open cases</label><button class="btn btn-sm btn-danger">Maand afsluiten</button></form>
+        </div>
+    }
+</div></section>
+@if (!string.IsNullOrWhiteSpace(Model.Error))
+{
+    <div class="alert alert-danger">@Model.Error</div>
+}
+
+<ul class="nav nav-tabs cockpit-tabs mb-3">
+    <li class="nav-item"><a class="@Tab(DailyReviewQueueView.Open)" asp-route-view="Open" asp-route-month="@Model.Month">Te controleren <span>@Model.Cockpit.Counts.Open</span></a></li>
+    <li class="nav-item"><a class="@Tab(DailyReviewQueueView.ToReview)" asp-route-view="ToReview" asp-route-month="@Model.Month">Opvolging <span>@Model.Cockpit.Counts.ToReview</span></a></li>
+    <li class="nav-item"><a class="@Tab(DailyReviewQueueView.Completed)" asp-route-view="Completed" asp-route-month="@Model.Month">Afgehandeld <span>@Model.Cockpit.Counts.Completed</span></a></li>
+    <li class="nav-item"><a class="@Tab(DailyReviewQueueView.DataQuality)" asp-route-view="DataQuality" asp-route-month="@Model.Month">Data niet controleerbaar <span>@Model.Cockpit.Counts.DataQuality</span></a></li>
+    <li class="nav-item"><a class="@Tab(DailyReviewQueueView.NotApplicable)" asp-route-view="NotApplicable" asp-route-month="@Model.Month">Niet van toepassing <span>@Model.Cockpit.Counts.NotApplicable</span></a></li>
+    <li class="nav-item"><a class="@Tab(DailyReviewQueueView.All)" asp-route-view="All" asp-route-month="@Model.Month">Alle <span>@Model.Cockpit.Counts.Total</span></a></li>
+</ul>
+
+<form method="get" class="cockpit-filters mb-3">
+    <input type="hidden" asp-for="View" />
+    <input type="hidden" asp-for="Month" />
+    <div><label asp-for="Technician">Technieker</label><input class="form-control form-control-sm" asp-for="Technician" placeholder="Naam" /></div>
+    <div><label asp-for="Date">Datum</label><input class="form-control form-control-sm" asp-for="Date" type="date" /></div>
+    <div><label asp-for="Boundary">Moment</label><select class="form-select form-select-sm" asp-for="Boundary"><option value="All">Start en einde</option><option value="Start">Start</option><option value="End">Einde</option></select></div>
+    <div><label asp-for="Evidence">Bewijs</label><select class="form-select form-select-sm" asp-for="Evidence"><option value="">Alle</option><option value="Complete">Volledig</option><option value="Partial">Gedeeltelijk</option><option value="Insufficient">Onvoldoende</option></select></div>
+    <div><label asp-for="Sort">Sortering</label><select class="form-select form-select-sm" asp-for="Sort"><option value="LargestDifference">Grootste verschil</option><option value="DateAscending">Datum oplopend</option><option value="DateDescending">Datum aflopend</option><option value="Technician">Technieker</option></select></div>
+    <div class="form-check align-self-end mb-1"><input class="form-check-input" asp-for="EscalatedOnly" /><label class="form-check-label" asp-for="EscalatedOnly">Alleen geëscaleerd</label></div>
+    <button class="btn btn-sm btn-dark align-self-end" type="submit">Toepassen</button>
+</form>
+
+<div class="timecontrol-cockpit">
+    <aside class="review-queue" aria-label="Review queue">
+        <div class="queue-title"><strong>Review queue</strong><span>@Model.Cockpit.Cases.Count cases</span></div>
+        <div class="queue-report-form">
+            <div class="queue-items">
+                @foreach (var item in Model.Cockpit.Cases)
+                {
+                    var active = selected?.CaseId == item.CaseId ? "active" : null;
+                    <article class="queue-case @active">
+                        <a asp-route-view="@Model.View" asp-route-technician="@Model.Technician" asp-route-date="@Model.Date?.ToString("yyyy-MM-dd")"
+                           asp-route-boundary="@Model.Boundary" asp-route-evidence="@Model.Evidence" asp-route-sort="@Model.Sort"
+                           asp-route-selectedCaseId="@item.CaseId" asp-route-month="@Model.Month" class="queue-case-link"
+                           aria-current="@(active is null ? null : "true")">
+                            <div class="queue-case-top"><strong>@item.Technician</strong><span>@item.Date.ToString("dd/MM")</span></div>
+                            <div class="queue-customer">@item.Customer</div>
+                            <div class="queue-facts">
+                                <span>Start @DailyReviewDisplay.CompactDifference(item.First.SignedDifferenceMinutes)</span>
+                                <span>Einde @DailyReviewDisplay.CompactDifference(item.Last.SignedDifferenceMinutes)</span>
+                            </div>
+                            <div class="queue-case-bottom"><span>@DailyReviewDisplay.Evidence(item.EvidenceLevel)</span><strong>@item.TotalPositiveMinutes.ToString("0") min</strong></div>
+                        </a>
+                    </article>
+                }
+            </div>
+        </div>
+    </aside>
+
+    <main class="case-detail">
+        @if (selected is null)
+        {
+            <div class="empty-detail"><h2>Geen case geselecteerd</h2><p>Pas de filters aan of kies een case uit de queue.</p></div>
+        }
+        else
+        {
+            <header class="case-header">
+                <div><div class="small text-muted">@selected.Date.ToString("dddd d MMMM yyyy", new System.Globalization.CultureInfo("nl-BE"))</div><h2>@selected.Technician</h2><div class="case-site">@selected.Customer · @selected.Address</div></div>
+                <div class="text-end"><span class="evidence-pill evidence-@selected.EvidenceLevel.ToString().ToLowerInvariant()">@DailyReviewDisplay.Evidence(selected.EvidenceLevel)</span><div class="mt-2 status-label">@DailyReviewDisplay.Status(selected.Decision.Status)</div></div>
+            </header>
+
+            <nav class="case-navigation" aria-label="Navigatie tussen reviewcases">
+                @if (Model.PreviousCaseId is { } previousCaseId)
+                {
+                    <a class="btn btn-sm btn-outline-secondary" asp-route-view="@Model.View" asp-route-technician="@Model.Technician" asp-route-date="@Model.Date?.ToString("yyyy-MM-dd")" asp-route-boundary="@Model.Boundary" asp-route-evidence="@Model.Evidence" asp-route-sort="@Model.Sort" asp-route-selectedCaseId="@previousCaseId" asp-route-month="@Model.Month">← Vorige case</a>
+                }
+                else
+                {
+                    <span class="btn btn-sm btn-outline-secondary disabled" aria-disabled="true">← Vorige case</span>
+                }
+                @if (Model.NextCaseId is { } nextCaseId)
+                {
+                    <a class="btn btn-sm btn-outline-secondary" asp-route-view="@Model.View" asp-route-technician="@Model.Technician" asp-route-date="@Model.Date?.ToString("yyyy-MM-dd")" asp-route-boundary="@Model.Boundary" asp-route-evidence="@Model.Evidence" asp-route-sort="@Model.Sort" asp-route-selectedCaseId="@nextCaseId" asp-route-month="@Model.Month">Volgende case →</a>
+                }
+                else
+                {
+                    <span class="btn btn-sm btn-outline-secondary disabled" aria-disabled="true">Volgende case →</span>
+                }
+            </nav>
+
+            <section class="boundary-grid">
+                <article class="boundary-card">
+                    <div class="boundary-kicker">Eerste klantprestatie</div><h3>Start van de werkdag</h3>
+                    <dl><dt>Geregistreerde start</dt><dd>@selected.First.PlenionTime.ToString("HH:mm")</dd><dt>GPS-aankomst op werklocatie</dt><dd>@DailyReviewDisplay.ApproximateTime(selected.First.GpsTime)</dd></dl>
+                    <p class="boundary-result">@DailyReviewDisplay.Difference(selected.First)</p>
+                    <div class="boundary-impact @DailyReviewDisplay.BoundaryImpactClass(selected.First)">@DailyReviewDisplay.BoundaryImpact(selected.First)</div>
+                </article>
+                <article class="boundary-card">
+                    <div class="boundary-kicker">Laatste klantprestatie</div><h3>Einde van de werkdag</h3>
+                    <dl><dt>GPS-vertrek van werklocatie</dt><dd>@DailyReviewDisplay.ApproximateTime(selected.Last.GpsTime)</dd><dt>Geregistreerd einde</dt><dd>@selected.Last.PlenionTime.ToString("HH:mm")</dd></dl>
+                    <p class="boundary-result">@DailyReviewDisplay.Difference(selected.Last)</p>
+                    <div class="boundary-impact @DailyReviewDisplay.BoundaryImpactClass(selected.Last)">@DailyReviewDisplay.BoundaryImpact(selected.Last)</div>
+                </article>
+            </section>
+
+            <section class="day-insight" aria-label="Daginzicht">
+                <div><span>Startverschil</span><strong>@DailyReviewDisplay.CompactDifference(selected.First.SignedDifferenceMinutes)</strong></div>
+                <div><span>Eindverschil</span><strong>@DailyReviewDisplay.CompactDifference(selected.Last.SignedDifferenceMinutes)</strong></div>
+                <div><span>Bevestigd positief</span><strong>@selected.ConfirmedPositiveMinutes.ToString("0") min</strong></div>
+                <p>@DailyReviewDisplay.DayInterpretation(selected)</p>
+            </section>
+
+            <section class="case-timeline" aria-label="Tijdlijn">
+                <h3>Tijdlijn</h3>
+                <div class="timeline-row"><time>@DailyReviewDisplay.ApproximateTime(selected.First.GpsTime)</time><span class="timeline-dot gps"></span><span>GPS-aankomst op eerste werklocatie</span></div>
+                <div class="timeline-row"><time>@selected.First.PlenionTime.ToString("HH:mm")</time><span class="timeline-dot plenion"></span><span>Geregistreerde start eerste klantprestatie</span></div>
+                <div class="timeline-work"><span>Klantwerk volgens de geregistreerde prestaties</span></div>
+                <div class="timeline-row"><time>@DailyReviewDisplay.ApproximateTime(selected.Last.GpsTime)</time><span class="timeline-dot gps"></span><span>GPS-vertrek van laatste werklocatie</span></div>
+                <div class="timeline-row"><time>@selected.Last.PlenionTime.ToString("HH:mm")</time><span class="timeline-dot plenion"></span><span>Geregistreerd einde laatste klantprestatie</span></div>
+            </section>
+
+            @if (selected.TripContext is { } tripContext && tripContext.DayTrips.Count > 0)
+            {
+                <section class="trip-context" aria-label="Ritcontext van deze dag">
+                    <div class="trip-context-heading"><div><div class="boundary-kicker">PowerFleet dagcontext</div><h3>Ritten rond de klantboundaries</h3></div><span>@tripContext.DayTrips.Count ritten</span></div>
+                    <div class="trip-context-grid">
+                        <article class="trip-card">
+                            <h4>Rit vóór eerste klantprestatie</h4>
+                            @if (tripContext.TripBeforeFirstCustomer is { } beforeTrip)
+                            {
+                                <div class="trip-time">@beforeTrip.Start.ToString("HH:mm")–@beforeTrip.End.ToString("HH:mm") · @beforeTrip.DurationMinutes min</div>
+                                <div class="trip-route"><span>@beforeTrip.StartAddress</span><span aria-hidden="true">→</span><strong>@beforeTrip.EndAddress</strong></div>
+                                <div class="trip-meta">@DailyReviewDisplay.TripDistance(beforeTrip)</div>
+                                @if (beforeTrip.IsFirstBoundaryArrivalTrip)
+                                {
+                                    <div class="trip-boundary-label">Deze rit eindigt bij de gebruikte GPS-aankomst.</div>
+                                }
+                            }
+                            else
+                            {
+                                <p class="text-muted mb-0">Geen voorafgaande rit beschikbaar in de bewaarde dagcontext.</p>
+                            }
+                        </article>
+                        <article class="trip-card">
+                            <h4>Rit na laatste klantprestatie</h4>
+                            @if (tripContext.TripAfterLastCustomer is { } afterTrip)
+                            {
+                                <div class="trip-time">@afterTrip.Start.ToString("HH:mm")–@afterTrip.End.ToString("HH:mm") · @afterTrip.DurationMinutes min</div>
+                                <div class="trip-route"><strong>@afterTrip.StartAddress</strong><span aria-hidden="true">→</span><span>@afterTrip.EndAddress</span></div>
+                                <div class="trip-meta">@DailyReviewDisplay.TripDistance(afterTrip)</div>
+                                @if (afterTrip.IsLastBoundaryDepartureTrip)
+                                {
+                                    <div class="trip-boundary-label">Deze rit start bij het gebruikte GPS-vertrek.</div>
+                                }
+                            }
+                            else
+                            {
+                                <p class="text-muted mb-0">Geen volgende rit beschikbaar in de bewaarde dagcontext.</p>
+                            }
+                        </article>
+                    </div>
+                    <details class="day-trips">
+                        <summary>Alle ritten van deze dag bekijken (@tripContext.DayTrips.Count)</summary>
+                        <div class="table-responsive mt-3"><table class="table table-sm align-middle"><thead><tr><th>Tijd</th><th>Van</th><th>Naar</th><th>Afstand</th><th>Duur</th></tr></thead><tbody>
+                        @foreach (var trip in tripContext.DayTrips)
+                        {
+                            <tr class="@(trip.IsFirstBoundaryArrivalTrip || trip.IsLastBoundaryDepartureTrip ? "trip-highlight" : null)"><td class="text-nowrap">@trip.Start.ToString("HH:mm")–@trip.End.ToString("HH:mm")</td><td>@trip.StartAddress</td><td>@trip.EndAddress</td><td class="text-nowrap">@DailyReviewDisplay.TripDistance(trip)</td><td class="text-nowrap">@trip.DurationMinutes min</td></tr>
+                        }
+                        </tbody></table></div>
+                    </details>
+                </section>
+            }
+            else
+            {
+                <div class="alert alert-light border mt-3">Geen ritcontext beschikbaar in de bewaarde evidence van deze dag.</div>
+            }
+
+            @if (selected.First.EvidenceType == "WorksiteSession" ||
+                 selected.Last.EvidenceType == "WorksiteSession")
+            {
+                <div class="alert alert-light border">
+                    GPS-aanwezigheid werd als één werfbezoek gereconstrueerd uit meerdere lokale voertuigbewegingen.
+                </div>
+            }
+
+            @if (Model.CorrectionProposal is { } proposal)
+            {
+                <section class="decision-panel correction-proposal">
+                    <h3>Correctievoorstel</h3>
+                    @if (proposal.ProposedStart is not null)
+                    {
+                        <p><strong>Start:</strong> @proposal.OriginalStart.ToString("HH:mm") → @proposal.ProposedStart.Value.ToString("HH:mm") <span class="text-muted">(prestatie @proposal.FirstPerformanceId)</span></p>
+                    }
+                    @if (proposal.ProposedEnd is not null)
+                    {
+                        <p><strong>Einde:</strong> @proposal.OriginalEnd.ToString("HH:mm") → @proposal.ProposedEnd.Value.ToString("HH:mm") <span class="text-muted">(prestatie @proposal.LastPerformanceId)</span></p>
+                    }
+                    @if (proposal.Status == CorrectionProposalStatuses.Executed)
+                    {
+                        <div class="alert alert-success mb-0">
+                            <strong>Correctie uitgevoerd in Plenion</strong><br />
+                            Uitgevoerd door: @proposal.ExecutedBy · @proposal.ExecutedAt?.ToLocalTime().ToString("dd/MM/yyyy HH:mm")
+                        </div>
+                    }
+                    else if (proposal.Status == CorrectionProposalStatuses.Conflict)
+                    {
+                        <div class="alert alert-warning mb-0">De geregistreerde uren zijn ondertussen gewijzigd. Vernieuw de gegevens en controleer deze case opnieuw.</div>
+                    }
+                    else if (proposal.Status == CorrectionProposalStatuses.Approved)
+                    {
+                        <form method="post" asp-page-handler="ExecuteCorrection" onsubmit="return confirm('Je staat op het punt de geregistreerde uren in Plenion te wijzigen.\n\nOude en nieuwe waarden staan hierboven.');">
+                            <input type="hidden" asp-for="CaseId" value="@selected.CaseId" />
+                            <input type="hidden" asp-for="Month" />
+                            <input type="hidden" asp-for="ProposalId" value="@proposal.Id" />
+                            <input type="hidden" asp-for="ConfirmCorrectionExecution" value="true" />
+                            <button class="btn btn-primary" disabled="@(!Model.CorrectionAvailability.CanExecute)">Correctie uitvoeren in Plenion</button>
+                            @if (!Model.CorrectionAvailability.CanExecute)
+                            {
+                                <span class="small text-muted ms-2">@Model.CorrectionAvailability.Message</span>
+                            }
+                        </form>
+                    }
+                    else
+                    {
+                        <div class="alert alert-light border mb-0">Status: @proposal.Status. @(proposal.ErrorMessage ?? string.Empty)</div>
+                    }
+                </section>
+            }
+
+            <section class="decision-panel">
+                <h3>Adminbeoordeling</h3>
+                @if (Model.Monthly.Period.Status == MonthlyReviewStatus.Finalized)
+                {
+                    <div class="alert alert-light border">Deze maand is afgesloten en alleen-lezen.</div>
+                }
+                else if (Model.CorrectionProposal?.Status == CorrectionProposalStatuses.Executed)
+                {
+                    <div class="alert alert-success mb-0">Deze case is afgehandeld met een uitgevoerde Plenion-correctie.</div>
+                }
+                else
+                {
+                <form method="post" asp-page-handler="Decision">
+                    <input type="hidden" asp-for="CaseId" value="@selected.CaseId" />
+                    <input type="hidden" asp-for="Month" />
+                    <div class="row g-3">
+                        <div class="col-md-4"><label class="form-label" asp-for="Reason">Reden</label><select class="form-select" asp-for="Reason" required><option value="">Selecteer…</option>@foreach(var reason in Enum.GetValues<ReviewFeedbackReason>()){<option value="@reason">@DailyReviewDisplay.Reason(reason)</option>}</select></div>
+                        <div class="col-md-4"><label class="form-label" asp-for="ProposedStartTime">Nieuwe start</label><input class="form-control" asp-for="ProposedStartTime" type="time" /></div>
+                        <div class="col-md-4"><label class="form-label" asp-for="ProposedEndTime">Nieuw einde</label><input class="form-control" asp-for="ProposedEndTime" type="time" /></div>
+                        <div class="col-12"><label class="form-label" asp-for="Notes">Notitie of vraag</label><textarea class="form-control" asp-for="Notes" rows="2"></textarea></div>
+                    </div>
+                    @if (startCorrection is not null || endCorrection is not null)
+                    {
+                        <div class="quick-corrections mt-3" aria-label="Snelle GPS-correcties">
+                            @if (startCorrection is { } startTime)
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-primary gps-correction" data-target="ProposedStartTime" data-time="@startTime.ToString("HH:mm")">Start aanpassen naar GPS @startTime.ToString("HH:mm")</button>
+                            }
+                            @if (endCorrection is { } endTime)
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-primary gps-correction" data-target="ProposedEndTime" data-time="@endTime.ToString("HH:mm")">Einde aanpassen naar GPS @endTime.ToString("HH:mm")</button>
+                            }
+                            @if (startCorrection is { } bothStart && endCorrection is { } bothEnd)
+                            {
+                                <button type="button" class="btn btn-sm btn-primary gps-correction-both" data-start="@bothStart.ToString("HH:mm")" data-end="@bothEnd.ToString("HH:mm")">Start + einde aanpassen naar GPS</button>
+                            }
+                        </div>
+                    }
+                    <div class="decision-actions mt-3">
+                        <button class="btn btn-outline-success" name="decision" value="ResolvedNoAction">Geen probleem</button>
+                        <button class="btn btn-outline-primary" name="decision" value="PendingCorrection">Administratieve fout</button>
+                        <button class="btn btn-outline-warning" name="decision" value="AwaitingExplanation">Uitleg nodig</button>
+                        <button class="btn btn-outline-danger" name="decision" value="EscalatedForManagementReview">Manueel escaleren</button>
+                    </div>
+                    <p class="small text-muted mt-2 mb-0">Snelle GPS-correcties vullen alleen het voorstel in. Uitvoeren vereist daarna een afzonderlijke bevestiging.</p>
+                </form>
+                }
+            </section>
+
+            <details class="review-details"><summary>Recente controles</summary><div class="table-responsive"><table class="table table-sm mt-3"><thead><tr><th>Datum</th><th>Klant</th><th>Startverschil</th><th>Eindverschil</th><th>Bewijs</th><th>Adminbeslissing</th></tr></thead><tbody>@foreach(var recent in Model.Cockpit.RecentCases){<tr><td><a asp-route-view="All" asp-route-month="@Model.Month" asp-route-selectedCaseId="@recent.CaseId">@recent.Date.ToString("dd/MM/yyyy")</a></td><td>@recent.Customer</td><td>@DailyReviewDisplay.CompactDifference(recent.First.SignedDifferenceMinutes)</td><td>@DailyReviewDisplay.CompactDifference(recent.Last.SignedDifferenceMinutes)</td><td>@DailyReviewDisplay.Evidence(recent.EvidenceLevel)</td><td>@DailyReviewDisplay.Status(recent.Decision.Status)</td></tr>}</tbody></table></div></details>
+
+            <details class="review-details"><summary>Technische details</summary><dl class="technical-grid mt-3"><dt>Case ID</dt><dd class="font-monospace">@selected.CaseId</dd><dt>Algoritmeversie</dt><dd>@selected.AlgorithmVersion</dd><dt>Start — originele tijd</dt><dd>@selected.First.PlenionTime.ToString("O")</dd><dt>Start — GPS-tijd</dt><dd>@(selected.First.GpsTime?.ToString("O") ?? "null")</dd><dt>Start — evidence/reconstructie</dt><dd>@selected.First.EvidenceType — @selected.First.TechnicalReason</dd><dt>Start — interne status/score/afstand</dt><dd>@selected.First.MatcherStatus / @(selected.First.Score?.ToString("0.0") ?? "—") / @(selected.First.DistanceMeters?.ToString("0.0") ?? "—") m</dd><dt>Einde — originele tijd</dt><dd>@selected.Last.PlenionTime.ToString("O")</dd><dt>Einde — GPS-tijd</dt><dd>@(selected.Last.GpsTime?.ToString("O") ?? "null")</dd><dt>Einde — evidence/reconstructie</dt><dd>@selected.Last.EvidenceType — @selected.Last.TechnicalReason</dd><dt>Einde — interne status/score/afstand</dt><dd>@selected.Last.MatcherStatus / @(selected.Last.Score?.ToString("0.0") ?? "—") / @(selected.Last.DistanceMeters?.ToString("0.0") ?? "—") m</dd></dl></details>
+
+            <details class="review-details"><summary>Beslissingshistoriek (@Model.AuditTrail.Count)</summary>@if(Model.AuditTrail.Count==0){<p class="text-muted mt-3">Nog geen adminbeslissingen.</p>}else{<div class="table-responsive"><table class="table table-sm mt-3"><thead><tr><th>Tijdstip</th><th>Reviewer</th><th>Beslissing</th><th>Reden</th><th>Notitie</th></tr></thead><tbody>@foreach(var action in Model.AuditTrail){<tr><td>@action.ReviewedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</td><td>@action.ReviewedBy</td><td>@action.Decision</td><td>@(action.DecisionReason ?? "—")</td><td>@(action.Notes ?? "—")</td></tr>}</tbody></table></div>}</details>
+        }
+    </main>
+</div>
+
+@section Scripts {
+    <script>
+        (() => {
+            const applyTime = (target, value) => {
+                const input = document.getElementById(target);
+                if (input) input.value = value;
+                const reason = document.getElementById('Reason');
+                if (reason && !reason.value) reason.value = 'AdministrativeEntryError';
+            };
+
+            document.querySelectorAll('.gps-correction').forEach(button => {
+                button.addEventListener('click', () => applyTime(button.dataset.target, button.dataset.time));
+            });
+            document.querySelectorAll('.gps-correction-both').forEach(button => {
+                button.addEventListener('click', () => {
+                    applyTime('ProposedStartTime', button.dataset.start);
+                    applyTime('ProposedEndTime', button.dataset.end);
+                });
+            });
+        })();
+    </script>
+}

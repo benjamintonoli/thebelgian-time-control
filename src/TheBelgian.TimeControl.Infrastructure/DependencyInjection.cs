@@ -13,6 +13,7 @@ using TheBelgian.TimeControl.Infrastructure.Pilot;
 using TheBelgian.TimeControl.Infrastructure.Plenion;
 using TheBelgian.TimeControl.Infrastructure.Powerfleet;
 using TheBelgian.TimeControl.Infrastructure.Synchronization;
+using TheBelgian.TimeControl.Infrastructure.VehicleAssignments;
 
 namespace TheBelgian.TimeControl.Infrastructure;
 
@@ -45,6 +46,21 @@ public static class DependencyInjection
                 options => string.IsNullOrWhiteSpace(options.BaseUrl) ||
                            Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out _),
                 "Powerfleet:BaseUrl moet leeg of een absolute URL zijn.");
+        services.Configure<VehicleAssignmentReviewOptions>(
+            configuration.GetSection(VehicleAssignmentReviewOptions.SectionName));
+        services.AddOptions<AdminReviewWorkflowOptions>()
+            .Bind(configuration.GetSection(AdminReviewWorkflowOptions.SectionName))
+            .Validate(options => !string.IsNullOrWhiteSpace(options.DefaultReviewer),
+                "AdminReview:DefaultReviewer ontbreekt.")
+            .ValidateOnStart();
+        services.AddOptions<TimeControlCorrectionWriteOptions>()
+            .Bind(configuration.GetSection(TimeControlCorrectionWriteOptions.SectionName))
+            .Validate(options => options.TimeoutSeconds > 0,
+                "TimeControlCorrectionWrites:TimeoutSeconds moet positief zijn.")
+            .Validate(options => !options.Enabled || options.UseMock ||
+                                 Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out _),
+                "TimeControlCorrectionWrites:BaseUrl moet een absolute URL zijn wanneer writes actief zijn.")
+            .ValidateOnStart();
         services.AddOptions<GeocodingOptions>()
             .Bind(configuration.GetSection(GeocodingOptions.SectionName));
         services.AddOptions<LocationMatchingOptions>()
@@ -149,6 +165,22 @@ public static class DependencyInjection
         services.AddScoped<LocationMatchingBenchmarkService>();
         services.AddScoped<CalibrationSingleReviewerEvaluationService>();
         services.AddScoped<LocationMatchingRecoveryAuditService>();
+        services.AddScoped<HoursAuditService>();
+        services.AddScoped<DailyHoursAuditService>();
+        services.AddScoped<TechnicianVehicleAssignmentService>();
+        services.AddScoped<TechnicianVehicleAssignmentBackfillService>();
+        services.AddHttpClient<PowerfleetVehicleReader>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(60);
+        });
+        services.AddScoped<TechnicianVehicleAssignmentSyncService>();
+        services.AddScoped<VehicleAssignmentSyncHistoryService>();
+        services.AddScoped<HistoricalVehicleAssignmentCandidateService>();
+        services.AddSingleton<HistoricalVehicleCandidateCache>();
+        services.AddScoped<HistoricalVehicleAssignmentWorkflowService>();
+        services.AddScoped<TechnicianTrackingEligibilityService>();
+        services.AddScoped<DailyBoundaryContextIndexProvider>();
+        services.AddScoped<KnownWorkLocationAuditService>();
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<IReviewExplanationService, DeterministicReviewExplanationService>();
         services.AddScoped<OfflineReviewCaseProvider>();
@@ -164,6 +196,22 @@ public static class DependencyInjection
         services.AddScoped<AdminReviewDecisionRepository>();
         services.AddScoped<AdminReviewSessionMetricRepository>();
         services.AddScoped<IAdminReviewService, AdminReviewService>();
+        services.AddSingleton<DailyAuditReviewCaseProvider>();
+        services.AddScoped<DailyReviewRepository>();
+        services.AddScoped<IDailyReviewService, DailyReviewService>();
+        services.AddHttpClient<HttpPlenionCorrectionClient>((provider, client) =>
+        {
+            var options = provider.GetRequiredService<IOptions<TimeControlCorrectionWriteOptions>>().Value;
+            if (Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out var baseAddress))
+                client.BaseAddress = baseAddress;
+            client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
+        });
+        services.AddScoped<MockPlenionCorrectionClient>();
+        services.AddScoped<IPlenionCorrectionClient>(provider =>
+            provider.GetRequiredService<IOptions<TimeControlCorrectionWriteOptions>>().Value.UseMock
+                ? provider.GetRequiredService<MockPlenionCorrectionClient>()
+                : provider.GetRequiredService<HttpPlenionCorrectionClient>());
+        services.AddScoped<IMonthlyReviewService, MonthlyReviewService>();
         return services;
     }
 
@@ -233,7 +281,227 @@ public static class DependencyInjection
             );
             CREATE INDEX IF NOT EXISTS "IX_AdminReviewSessionMetrics_PerformanceId_OpenedAt"
                 ON "AdminReviewSessionMetrics" ("PerformanceId", "OpenedAt");
+            CREATE TABLE IF NOT EXISTS "DailyReviewActionAudits" (
+                "Id" INTEGER NOT NULL CONSTRAINT "PK_DailyReviewActionAudits" PRIMARY KEY AUTOINCREMENT,
+                "CaseId" TEXT NOT NULL,
+                "Technician" TEXT NOT NULL,
+                "Date" TEXT NOT NULL,
+                "Decision" TEXT NOT NULL,
+                "DecisionReason" TEXT NULL,
+                "Notes" TEXT NULL,
+                "ReviewedBy" TEXT NOT NULL,
+                "ReviewedAt" TEXT NOT NULL,
+                "EvidenceSnapshotJson" TEXT NOT NULL,
+                "AlgorithmVersion" TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS "IX_DailyReviewActionAudits_CaseId_ReviewedAt"
+                ON "DailyReviewActionAudits" ("CaseId", "ReviewedAt");
+            CREATE TABLE IF NOT EXISTS "DailyCorrectionProposals" (
+                "Id" INTEGER NOT NULL CONSTRAINT "PK_DailyCorrectionProposals" PRIMARY KEY AUTOINCREMENT,
+                "CaseId" TEXT NOT NULL,
+                "OriginalStart" TEXT NOT NULL,
+                "OriginalEnd" TEXT NOT NULL,
+                "ProposedStart" TEXT NULL,
+                "ProposedEnd" TEXT NULL,
+                "Reason" TEXT NOT NULL,
+                "Notes" TEXT NULL,
+                "ProposedBy" TEXT NOT NULL,
+                "CreatedAt" TEXT NOT NULL,
+                "Status" TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS "IX_DailyCorrectionProposals_CaseId_CreatedAt"
+                ON "DailyCorrectionProposals" ("CaseId", "CreatedAt");
+            CREATE TABLE IF NOT EXISTS "DailyGeneratedFactualReports" (
+                "Id" INTEGER NOT NULL CONSTRAINT "PK_DailyGeneratedFactualReports" PRIMARY KEY AUTOINCREMENT,
+                "Technician" TEXT NOT NULL,
+                "CaseIdsJson" TEXT NOT NULL,
+                "Content" TEXT NOT NULL,
+                "GeneratedBy" TEXT NOT NULL,
+                "GeneratedAt" TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS "IX_DailyGeneratedFactualReports_Technician_GeneratedAt"
+                ON "DailyGeneratedFactualReports" ("Technician", "GeneratedAt");
+            CREATE TABLE IF NOT EXISTS "PhysicalVehicles" (
+                "Id" INTEGER NOT NULL CONSTRAINT "PK_PhysicalVehicles" PRIMARY KEY AUTOINCREMENT,
+                "ObjectId" TEXT NOT NULL,
+                "RegistrationPlate" TEXT NULL,
+                "Name" TEXT NOT NULL,
+                "Make" TEXT NULL,
+                "Model" TEXT NULL,
+                "FirstObservedAt" TEXT NOT NULL,
+                "LastObservedAt" TEXT NOT NULL,
+                "IsActive" INTEGER NOT NULL,
+                "Source" TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_PhysicalVehicles_ObjectId"
+                ON "PhysicalVehicles" ("ObjectId");
+            CREATE TABLE IF NOT EXISTS "TechnicianVehicleAssignments" (
+                "Id" INTEGER NOT NULL CONSTRAINT "PK_TechnicianVehicleAssignments" PRIMARY KEY AUTOINCREMENT,
+                "TechnicianExternalId" TEXT NOT NULL,
+                "TechnicianCode" TEXT NOT NULL,
+                "ObjectId" TEXT NOT NULL,
+                "RegistrationPlateSnapshot" TEXT NULL,
+                "ValidFrom" TEXT NOT NULL,
+                "ValidTo" TEXT NULL,
+                "Source" TEXT NOT NULL,
+                "Confidence" TEXT NOT NULL,
+                "ObservedAt" TEXT NOT NULL,
+                "PreviousObservedAt" TEXT NULL,
+                "EvidenceReference" TEXT NULL,
+                "CreatedAt" TEXT NOT NULL,
+                "ReviewedBy" TEXT NULL,
+                "ReviewedAt" TEXT NULL
+            );
+            CREATE INDEX IF NOT EXISTS "IX_TechnicianVehicleAssignments_TechnicianExternalId_ValidFrom"
+                ON "TechnicianVehicleAssignments" ("TechnicianExternalId", "ValidFrom");
+            CREATE INDEX IF NOT EXISTS "IX_TechnicianVehicleAssignments_ObjectId_ValidFrom"
+                ON "TechnicianVehicleAssignments" ("ObjectId", "ValidFrom");
+            CREATE TABLE IF NOT EXISTS "TechnicianVehicleAssignmentAudits" (
+                "Id" INTEGER NOT NULL CONSTRAINT "PK_TechnicianVehicleAssignmentAudits" PRIMARY KEY AUTOINCREMENT,
+                "AssignmentId" INTEGER NULL,
+                "Action" TEXT NOT NULL,
+                "Actor" TEXT NOT NULL,
+                "Source" TEXT NOT NULL,
+                "ChangedAt" TEXT NOT NULL,
+                "OldAssignmentJson" TEXT NULL,
+                "NewAssignmentJson" TEXT NULL,
+                "EvidenceReference" TEXT NULL
+            );
+            CREATE INDEX IF NOT EXISTS "IX_TechnicianVehicleAssignmentAudits_AssignmentId_ChangedAt"
+                ON "TechnicianVehicleAssignmentAudits" ("AssignmentId", "ChangedAt");
+            CREATE TABLE IF NOT EXISTS "TechnicianTrackingEligibilities" (
+                "Id" INTEGER NOT NULL CONSTRAINT "PK_TechnicianTrackingEligibilities" PRIMARY KEY AUTOINCREMENT,
+                "TechnicianExternalId" TEXT NOT NULL,
+                "TechnicianCode" TEXT NOT NULL,
+                "TrackingStatus" INTEGER NOT NULL,
+                "Reason" TEXT NOT NULL,
+                "Source" TEXT NOT NULL,
+                "ValidFrom" TEXT NOT NULL,
+                "ValidTo" TEXT NULL,
+                "CreatedAt" TEXT NOT NULL,
+                "CreatedBy" TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS "IX_TechnicianTrackingEligibilities_TechnicianExternalId_ValidFrom"
+                ON "TechnicianTrackingEligibilities" ("TechnicianExternalId", "ValidFrom");
+            CREATE TABLE IF NOT EXISTS "VehicleAssignmentSyncRuns" (
+                "Id" INTEGER NOT NULL CONSTRAINT "PK_VehicleAssignmentSyncRuns" PRIMARY KEY AUTOINCREMENT,
+                "StartedAt" TEXT NOT NULL,
+                "FinishedAt" TEXT NULL,
+                "Status" TEXT NOT NULL,
+                "DurationSeconds" REAL NULL,
+                "VehiclesRead" INTEGER NOT NULL,
+                "PhysicalVehiclesObserved" INTEGER NOT NULL,
+                "ExactMapped" INTEGER NOT NULL,
+                "AssignmentsOpened" INTEGER NOT NULL,
+                "AssignmentsObserved" INTEGER NOT NULL,
+                "AssignmentsClosed" INTEGER NOT NULL,
+                "Ambiguous" INTEGER NOT NULL,
+                "Unmapped" INTEGER NOT NULL,
+                "ResourcesWithoutPersonalVehicle" INTEGER NOT NULL,
+                "SkippedNoTrackAndTrace" INTEGER NOT NULL,
+                "ErrorSummary" TEXT NULL
+            );
+            CREATE INDEX IF NOT EXISTS "IX_VehicleAssignmentSyncRuns_Status_FinishedAt"
+                ON "VehicleAssignmentSyncRuns" ("Status", "FinishedAt");
+            CREATE TABLE IF NOT EXISTS "MonthlyReviewPeriods" (
+                "Id" INTEGER NOT NULL CONSTRAINT "PK_MonthlyReviewPeriods" PRIMARY KEY AUTOINCREMENT,
+                "Year" INTEGER NOT NULL,
+                "Month" INTEGER NOT NULL,
+                "Status" INTEGER NOT NULL,
+                "CreatedAt" TEXT NOT NULL,
+                "PreparedAt" TEXT NULL,
+                "LastRefreshedAt" TEXT NULL,
+                "FinalizedAt" TEXT NULL,
+                "FinalizedBy" TEXT NULL,
+                "AlgorithmVersion" TEXT NOT NULL,
+                "SourceCutoffAt" TEXT NULL,
+                "LastVehicleSyncAt" TEXT NULL,
+                "SummaryJson" TEXT NOT NULL,
+                "FinalSnapshotJson" TEXT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_MonthlyReviewPeriods_Year_Month"
+                ON "MonthlyReviewPeriods" ("Year", "Month");
+            CREATE TABLE IF NOT EXISTS "MonthlyReviewCaseSnapshots" (
+                "Id" INTEGER NOT NULL CONSTRAINT "PK_MonthlyReviewCaseSnapshots" PRIMARY KEY AUTOINCREMENT,
+                "MonthlyReviewPeriodId" INTEGER NOT NULL,
+                "CaseId" TEXT NOT NULL,
+                "Technician" TEXT NOT NULL,
+                "Date" TEXT NOT NULL,
+                "EvidenceHash" TEXT NOT NULL,
+                "EvidenceSnapshotJson" TEXT NOT NULL,
+                "CaseJson" TEXT NOT NULL,
+                "PreviousEvidenceSnapshotJson" TEXT NULL,
+                "NeedsReReview" INTEGER NOT NULL,
+                "IsActive" INTEGER NOT NULL,
+                "UpdatedAt" TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_MonthlyReviewCaseSnapshots_Period_Case"
+                ON "MonthlyReviewCaseSnapshots" ("MonthlyReviewPeriodId", "CaseId");
             """,
             cancellationToken);
+        await EnsureColumnAsync(
+            context,
+            "TechnicianVehicleAssignments",
+            "ReviewedBy",
+            "TEXT NULL",
+            cancellationToken);
+        foreach (var column in new (string Name, string Definition)[]
+                 {
+                     ("FirstPerformanceId", "INTEGER NOT NULL DEFAULT 0"),
+                     ("LastPerformanceId", "INTEGER NOT NULL DEFAULT 0"),
+                     ("FirstActivityType", "TEXT NOT NULL DEFAULT ''"),
+                     ("LastActivityType", "TEXT NOT NULL DEFAULT ''"),
+                     ("FirstMainTaskExternalId", "INTEGER NULL"),
+                     ("LastMainTaskExternalId", "INTEGER NULL"),
+                     ("FirstRecordOriginalStart", "TEXT NULL"),
+                     ("FirstRecordOriginalEnd", "TEXT NULL"),
+                     ("LastRecordOriginalStart", "TEXT NULL"),
+                     ("LastRecordOriginalEnd", "TEXT NULL"),
+                     ("ExecutedStart", "TEXT NULL"),
+                     ("ExecutedEnd", "TEXT NULL"),
+                     ("ExecutedBy", "TEXT NULL"),
+                     ("ExecutedAt", "TEXT NULL"),
+                     ("PlenionWriteReference", "TEXT NULL"),
+                     ("PlenionWriteResponse", "TEXT NULL"),
+                     ("ErrorMessage", "TEXT NULL"),
+                 })
+        {
+            await EnsureColumnAsync(context, "DailyCorrectionProposals", column.Name,
+                column.Definition, cancellationToken);
+        }
+        await EnsureColumnAsync(
+            context,
+            "TechnicianVehicleAssignments",
+            "ReviewedAt",
+            "TEXT NULL",
+            cancellationToken);
+    }
+
+    private static async Task EnsureColumnAsync(
+        TimeControlDbContext context,
+        string table,
+        string column,
+        string definition,
+        CancellationToken cancellationToken)
+    {
+        var connection = context.Database.GetDbConnection();
+        var closeAfter = connection.State != System.Data.ConnectionState.Open;
+        if (closeAfter) await connection.OpenAsync(cancellationToken);
+        try
+        {
+            await using var check = connection.CreateCommand();
+            check.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = '{column}'";
+            var exists = Convert.ToInt32(
+                await check.ExecuteScalarAsync(cancellationToken),
+                System.Globalization.CultureInfo.InvariantCulture) > 0;
+            if (exists) return;
+            await using var alter = connection.CreateCommand();
+            alter.CommandText = $"ALTER TABLE \"{table}\" ADD COLUMN \"{column}\" {definition}";
+            await alter.ExecuteNonQueryAsync(cancellationToken);
+        }
+        finally
+        {
+            if (closeAfter) await connection.CloseAsync();
+        }
     }
 }
