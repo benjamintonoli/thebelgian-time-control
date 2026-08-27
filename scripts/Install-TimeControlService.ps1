@@ -116,6 +116,9 @@ $keysPath = Assert-ChildPath $settings.DataProtection.KeysPath (Join-Path $root 
 if ([string]::IsNullOrWhiteSpace($settings.PowerFleet.ApiKey)) {
     throw 'PowerFleet ApiKey ontbreekt in de beveiligde productieconfig.'
 }
+if ([string]::IsNullOrWhiteSpace($settings.Geocoding.ApiKey)) {
+    throw 'Geocoding ApiKey ontbreekt in de beveiligde productieconfig.'
+}
 
 New-Item -ItemType Directory -Force -Path $logs, (Join-Path $root 'backups') | Out-Null
 New-Item -ItemType Directory -Force -Path $keysPath | Out-Null

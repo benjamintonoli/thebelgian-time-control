@@ -37,8 +37,9 @@ Benodigde rechten:
 Maak buiten Git:
 `C:\Apps\TheBelgian.TimeControl\config\appsettings.Production.json`.
 Vertrek van `config\appsettings.Production.template.json` en vul uitsluitend
-op de server de PowerFleet API-key in. Een PWS API-key is pas nodig als PWS die
-authenticatie gebruikt; de correctieflags blijven altijd false in deze fase.
+op de server de PowerFleet- en Geoapify API-key in. Een PWS API-key is pas nodig
+als PWS die authenticatie gebruikt; de correctieflags blijven altijd false in
+deze fase.
 
 De installer beperkt de ACL van het configbestand tot SYSTEM, Administrators
 en read voor het serviceaccount. Daarna maakt hij in de actieve release een
