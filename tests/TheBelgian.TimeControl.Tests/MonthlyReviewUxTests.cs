@@ -165,6 +165,92 @@ public sealed class MonthlyReviewUxTests
         Assert.DoesNotContain("asp-for=\"Reviewer\"", page, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void ApprovedProposal_ShowsExecuteButtonAndAvailabilityMessage()
+    {
+        var page = ReadPage();
+
+        Assert.Contains("Correctievoorstel", page, StringComparison.Ordinal);
+        Assert.Contains("Correctie uitvoeren in Plenion", page, StringComparison.Ordinal);
+        Assert.Contains("disabled=\"@(!Model.CorrectionAvailability.CanExecute)\"", page, StringComparison.Ordinal);
+        Assert.Contains("@Model.CorrectionAvailability.Message", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NoProposal_HasNoExecuteAction()
+    {
+        var page = ReadPage();
+        var proposalGuard = page.IndexOf("@if (Model.CorrectionProposal is { } proposal)",
+            StringComparison.Ordinal);
+        var executeAction = page.IndexOf("asp-page-handler=\"ExecuteCorrection\"",
+            StringComparison.Ordinal);
+
+        Assert.True(proposalGuard >= 0);
+        Assert.True(executeAction > proposalGuard);
+        Assert.Equal(1, page.Split("asp-page-handler=\"ExecuteCorrection\"").Length - 1);
+    }
+
+    [Fact]
+    public void QuickGps_OnlyFillsProposalAndNeverExecutesCorrection()
+    {
+        var page = ReadPage();
+
+        Assert.Contains("gps-correction", page, StringComparison.Ordinal);
+        Assert.Contains("Snelle GPS-correcties vullen alleen het voorstel in", page, StringComparison.Ordinal);
+        Assert.Contains("type=\"button\" class=\"btn btn-sm btn-outline-primary gps-correction\"", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("asp-page-handler=\"ExecuteCorrection\" class=\"gps-correction\"", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CorrectionExecution_RequiresExplicitConfirmation()
+    {
+        var page = ReadPage();
+        var script = File.ReadAllText(Path.Combine(FindRepoRoot(),
+            "src", "TheBelgian.TimeControl.Web", "wwwroot", "js", "site.js"));
+
+        Assert.Contains("data-confirm=", page, StringComparison.Ordinal);
+        Assert.Contains("correction-execute-form", page, StringComparison.Ordinal);
+        Assert.Contains("window.confirm(message)", script, StringComparison.Ordinal);
+        Assert.Contains("asp-for=\"ConfirmCorrectionExecution\"", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ExecutedProposal_ShowsOldAndNewValuesActorAndTimestamp()
+    {
+        var page = ReadPage();
+
+        Assert.Contains("ongewijzigd", page, StringComparison.Ordinal);
+        Assert.Contains("✓ Correctie uitgevoerd in Plenion", page, StringComparison.Ordinal);
+        Assert.Contains("Start aangepast:", page, StringComparison.Ordinal);
+        Assert.Contains("Einde aangepast:", page, StringComparison.Ordinal);
+        Assert.Contains("Uitgevoerd door:", page, StringComparison.Ordinal);
+        Assert.Contains("Uitgevoerd op:", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ConflictProposal_ShowsNeedsReReview()
+    {
+        var page = ReadPage();
+
+        Assert.Contains("NeedsReReview / Conflict", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CorrectionAvailability_DisabledMessage_IsExplicit()
+    {
+        var availability = new CorrectionExecutionAvailability(
+            false, false, "Plenion-correcties zijn momenteel uitgeschakeld.");
+        Assert.False(availability.CanExecute);
+        Assert.Contains("uitgeschakeld", availability.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void CorrectionAvailability_EnabledAndReachable_CanExecute()
+    {
+        var availability = new CorrectionExecutionAvailability(true, true, "ok");
+        Assert.True(availability.CanExecute);
+    }
+
     private static DailyReviewBoundaryEvidence Boundary(
         string side, bool reliable, DateTimeOffset? gps, string matcherStatus) => new(
         side, 1, "Klant", "Adres", At(8, 0, 0), gps, 1, reliable,
@@ -197,4 +283,7 @@ public sealed class MonthlyReviewUxTests
 
         throw new DirectoryNotFoundException("Repository root niet gevonden.");
     }
+
+    private static string ReadPage() => File.ReadAllText(Path.Combine(FindRepoRoot(),
+        "src", "TheBelgian.TimeControl.Web", "Pages", "Admin", "TimeControl", "Index.cshtml"));
 }

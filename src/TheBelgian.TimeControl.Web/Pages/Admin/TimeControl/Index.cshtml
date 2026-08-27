@@ -236,38 +236,88 @@
 
             @if (Model.CorrectionProposal is { } proposal)
             {
-                <section class="decision-panel correction-proposal">
+                <section class="decision-panel correction-proposal" data-testid="correction-proposal">
                     <h3>Correctievoorstel</h3>
-                    @if (proposal.ProposedStart is not null)
-                    {
-                        <p><strong>Start:</strong> @proposal.OriginalStart.ToString("HH:mm") → @proposal.ProposedStart.Value.ToString("HH:mm") <span class="text-muted">(prestatie @proposal.FirstPerformanceId)</span></p>
-                    }
-                    @if (proposal.ProposedEnd is not null)
-                    {
-                        <p><strong>Einde:</strong> @proposal.OriginalEnd.ToString("HH:mm") → @proposal.ProposedEnd.Value.ToString("HH:mm") <span class="text-muted">(prestatie @proposal.LastPerformanceId)</span></p>
-                    }
+                    <p class="mb-1">
+                        <strong>Start</strong><br />
+                        @if (proposal.ProposedStart is not null)
+                        {
+                            <span>@proposal.OriginalStart.ToString("HH:mm") → @proposal.ProposedStart.Value.ToString("HH:mm")</span>
+                            <span class="text-muted"> (prestatie @proposal.FirstPerformanceId)</span>
+                        }
+                        else
+                        {
+                            <span>ongewijzigd</span>
+                        }
+                    </p>
+                    <p class="mb-3">
+                        <strong>Einde</strong><br />
+                        @if (proposal.ProposedEnd is not null)
+                        {
+                            <span>@proposal.OriginalEnd.ToString("HH:mm") → @proposal.ProposedEnd.Value.ToString("HH:mm")</span>
+                            <span class="text-muted"> (prestatie @proposal.LastPerformanceId)</span>
+                        }
+                        else
+                        {
+                            <span>ongewijzigd</span>
+                        }
+                    </p>
                     @if (proposal.Status == CorrectionProposalStatuses.Executed)
                     {
-                        <div class="alert alert-success mb-0">
-                            <strong>Correctie uitgevoerd in Plenion</strong><br />
-                            Uitgevoerd door: @proposal.ExecutedBy · @proposal.ExecutedAt?.ToLocalTime().ToString("dd/MM/yyyy HH:mm")
+                        <div class="alert alert-success mb-0" data-testid="correction-executed">
+                            <strong>✓ Correctie uitgevoerd in Plenion</strong><br />
+                            @if (proposal.ProposedStart is not null)
+                            {
+                                <div>Start aangepast: @proposal.OriginalStart.ToString("HH:mm") → @(proposal.ExecutedStart?.ToString("HH:mm") ?? proposal.ProposedStart.Value.ToString("HH:mm"))</div>
+                            }
+                            @if (proposal.ProposedEnd is not null)
+                            {
+                                <div>Einde aangepast: @proposal.OriginalEnd.ToString("HH:mm") → @(proposal.ExecutedEnd?.ToString("HH:mm") ?? proposal.ProposedEnd.Value.ToString("HH:mm"))</div>
+                            }
+                            <div class="mt-2">Uitgevoerd door: @proposal.ExecutedBy</div>
+                            <div>Uitgevoerd op: @(proposal.ExecutedAt?.ToLocalTime().ToString("dd/MM/yyyy HH:mm") ?? "—")</div>
                         </div>
                     }
                     else if (proposal.Status == CorrectionProposalStatuses.Conflict)
                     {
-                        <div class="alert alert-warning mb-0">De geregistreerde uren zijn ondertussen gewijzigd. Vernieuw de gegevens en controleer deze case opnieuw.</div>
+                        <div class="alert alert-warning mb-0" data-testid="correction-conflict">
+                            De registratie werd ondertussen gewijzigd in Plenion.
+                            Vernieuw de gegevens en controleer deze case opnieuw.
+                            <div class="small text-muted mt-1">Status: NeedsReReview / Conflict</div>
+                        </div>
                     }
                     else if (proposal.Status == CorrectionProposalStatuses.Approved)
                     {
-                        <form method="post" asp-page-handler="ExecuteCorrection" onsubmit="return confirm('Je staat op het punt de geregistreerde uren in Plenion te wijzigen.\n\nOude en nieuwe waarden staan hierboven.');">
+                        var confirmText =
+                            "Je staat op het punt de geregistreerde uren in Plenion te wijzigen.\n\n" +
+                            $"Technieker: {selected!.Technician}\n" +
+                            $"Datum: {selected.Date:dd/MM/yyyy}\n" +
+                            $"Klant: {selected.First.Customer}\n\n" +
+                            $"Oude start: {proposal.OriginalStart:HH:mm}\n" +
+                            $"Nieuwe start: {(proposal.ProposedStart is null ? "ongewijzigd" : proposal.ProposedStart.Value.ToString("HH:mm"))}\n" +
+                            $"Oude einde: {proposal.OriginalEnd:HH:mm}\n" +
+                            $"Nieuwe einde: {(proposal.ProposedEnd is null ? "ongewijzigd" : proposal.ProposedEnd.Value.ToString("HH:mm"))}\n\n" +
+                            "Klik OK om Correctie uitvoeren te bevestigen, of Annuleren om te stoppen.";
+                        <form method="post"
+                              asp-page-handler="ExecuteCorrection"
+                              class="correction-execute-form"
+                              data-testid="correction-execute-form"
+                              data-confirm="@confirmText">
                             <input type="hidden" asp-for="CaseId" value="@selected.CaseId" />
                             <input type="hidden" asp-for="Month" />
                             <input type="hidden" asp-for="ProposalId" value="@proposal.Id" />
                             <input type="hidden" asp-for="ConfirmCorrectionExecution" value="true" />
-                            <button class="btn btn-primary" disabled="@(!Model.CorrectionAvailability.CanExecute)">Correctie uitvoeren in Plenion</button>
+                            <button type="submit"
+                                    class="btn btn-primary"
+                                    data-testid="correction-execute-button"
+                                    disabled="@(!Model.CorrectionAvailability.CanExecute)">
+                                Correctie uitvoeren in Plenion
+                            </button>
                             @if (!Model.CorrectionAvailability.CanExecute)
                             {
-                                <span class="small text-muted ms-2">@Model.CorrectionAvailability.Message</span>
+                                <div class="small text-muted mt-2" data-testid="correction-writes-disabled">
+                                    @Model.CorrectionAvailability.Message
+                                </div>
                             }
                         </form>
                     }

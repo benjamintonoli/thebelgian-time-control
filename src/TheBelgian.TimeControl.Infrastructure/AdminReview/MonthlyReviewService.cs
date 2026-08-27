@@ -338,10 +338,12 @@ internal sealed class MonthlyReviewService(
         var options = correctionOptions.Value;
         if (!options.Enabled)
             return new CorrectionExecutionAvailability(false, false,
-                "Correcties uitvoeren is uitgeschakeld in deze omgeving.");
+                "Plenion-correcties zijn momenteel uitgeschakeld.");
         var reachable = await plenionCorrectionClient.IsAvailableAsync(cancellationToken);
         return new CorrectionExecutionAvailability(true, reachable,
-            reachable ? "PlenionWriteService is bereikbaar." : "PlenionWriteService is niet bereikbaar.");
+            reachable
+                ? "PlenionWriteService is bereikbaar."
+                : "PlenionWriteService is niet bereikbaar. Correcties kunnen niet worden uitgevoerd.");
     }
 
     public async Task<CorrectionExecutionResult> ExecuteCorrectionAsync(

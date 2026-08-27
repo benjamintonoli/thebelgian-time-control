@@ -1,4 +1,17 @@
-﻿// Please see documentation at https://learn.microsoft.com/aspnet/core/client-side/bundling-and-minification
-// for details on configuring this project to bundle and minify static web assets.
+﻿// Confirm forms that carry data-confirm before submit (correction execution gate).
+document.addEventListener("submit", function (event) {
+    var form = event.target;
+    if (!(form instanceof HTMLFormElement)) {
+        return;
+    }
 
-// Write your JavaScript code.
+    var message = form.getAttribute("data-confirm");
+    if (!message) {
+        return;
+    }
+
+    if (!window.confirm(message)) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+});

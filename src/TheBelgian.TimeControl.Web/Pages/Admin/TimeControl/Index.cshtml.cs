@@ -111,9 +111,37 @@ public sealed class IndexModel(
                 throw new InvalidOperationException("Bevestig de correctie voordat je ze uitvoert.");
             var result = await monthlyReviewService.ExecuteCorrectionAsync(
                 ResolveMonth(), ProposalId, ResolveReviewer(), cancellationToken);
-            Message = result.Status == CorrectionProposalStatuses.Executed
-                ? "Correctie uitgevoerd in Plenion."
-                : result.Message;
+            if (result.Status == CorrectionProposalStatuses.Executed)
+            {
+                var parts = new List<string> { "✓ Correctie uitgevoerd in Plenion." };
+                if (result.Proposal.ProposedStart is not null)
+                {
+                    parts.Add(
+                        $"Start aangepast: {result.Proposal.OriginalStart:HH:mm} → {(result.Proposal.ExecutedStart ?? result.Proposal.ProposedStart):HH:mm}");
+                }
+
+                if (result.Proposal.ProposedEnd is not null)
+                {
+                    parts.Add(
+                        $"Einde aangepast: {result.Proposal.OriginalEnd:HH:mm} → {(result.Proposal.ExecutedEnd ?? result.Proposal.ProposedEnd):HH:mm}");
+                }
+
+                parts.Add($"Uitgevoerd door: {result.Proposal.ExecutedBy}");
+                if (result.Proposal.ExecutedAt is not null)
+                    parts.Add($"Uitgevoerd op: {result.Proposal.ExecutedAt.Value.ToLocalTime():dd/MM/yyyy HH:mm}");
+                Message = string.Join(" ", parts);
+                View = DailyReviewQueueView.Completed;
+            }
+            else if (result.Status == CorrectionProposalStatuses.Conflict)
+            {
+                Error =
+                    "De registratie werd ondertussen gewijzigd in Plenion. Vernieuw de gegevens en controleer deze case opnieuw.";
+                View = DailyReviewQueueView.ToReview;
+            }
+            else
+            {
+                Message = result.Message;
+            }
         }
         catch (Exception exception)
         {
