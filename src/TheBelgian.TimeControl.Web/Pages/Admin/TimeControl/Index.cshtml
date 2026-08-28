@@ -14,6 +14,8 @@
     var executedProposal = Model.CorrectionProposal is { Status: CorrectionProposalStatuses.Executed } executed
         ? executed
         : null;
+    string? StickyPlenionTime(DailyReviewBoundaryEvidence boundary, DateTimeOffset? corrected) =>
+        corrected?.ToString("HH:mm") ?? boundary.PlenionTime.ToString("HH:mm");
     string Tab(DailyReviewQueueView value) => Model.View == value ? "nav-link active" : "nav-link";
 }
 
@@ -85,14 +87,14 @@
 </form>
 
 <div class="timecontrol-cockpit">
-    <aside class="review-queue" aria-label="Review queue">
+    <aside class="review-queue review-queue-sticky" aria-label="Review queue">
         <div class="queue-title"><strong>Review queue</strong><span>@Model.Cockpit.Cases.Count cases</span></div>
         <div class="queue-report-form">
             <div class="queue-items">
                 @foreach (var item in Model.Cockpit.Cases)
                 {
                     var active = selected?.CaseId == item.CaseId ? "active" : null;
-                    <article class="queue-case @active">
+                    <article class="queue-case @active" id="queue-case-@item.CaseId">
                         <a asp-route-view="@Model.View" asp-route-technician="@Model.Technician" asp-route-date="@Model.Date?.ToString("yyyy-MM-dd")"
                            asp-route-boundary="@Model.Boundary" asp-route-evidence="@Model.Evidence" asp-route-sort="@Model.Sort"
                            asp-route-selectedCaseId="@item.CaseId" asp-route-month="@Model.Month" class="queue-case-link"
@@ -118,12 +120,63 @@
         }
         else
         {
+            var startDisplayTime = StickyPlenionTime(
+                selected.First,
+                executedProposal?.ProposedStart is not null
+                    ? executedProposal.ExecutedStart ?? executedProposal.ProposedStart
+                    : null);
+            var endDisplayTime = StickyPlenionTime(
+                selected.Last,
+                executedProposal?.ProposedEnd is not null
+                    ? executedProposal.ExecutedEnd ?? executedProposal.ProposedEnd
+                    : null);
+
+            <div class="case-detail-sticky-context" data-testid="case-sticky-context">
+                <div class="sticky-context-identity">
+                    <strong>@selected.Technician</strong>
+                    <span>@selected.Date.ToString("dd/MM/yyyy")</span>
+                    <span>@selected.Customer</span>
+                </div>
+                <div class="sticky-context-boundaries">
+                    <div class="sticky-boundary">
+                        <span class="sticky-label">START</span>
+                        <span>@startDisplayTime</span>
+                        <span>→ GPS @DailyReviewDisplay.ApproximateTime(selected.First.GpsTime)</span>
+                        <span>@DailyReviewDisplay.CompactDifference(selected.First.SignedDifferenceMinutes)</span>
+                    </div>
+                    <div class="sticky-boundary">
+                        <span class="sticky-label">EINDE</span>
+                        <span>@endDisplayTime</span>
+                        <span>→ GPS @DailyReviewDisplay.ApproximateTime(selected.Last.GpsTime)</span>
+                        <span>@DailyReviewDisplay.CompactDifference(selected.Last.SignedDifferenceMinutes)</span>
+                    </div>
+                </div>
+                <nav class="sticky-context-nav" aria-label="Snelle casenavigatie">
+                    @if (Model.PreviousCaseId is { } stickyPreviousCaseId)
+                    {
+                        <a class="btn btn-sm btn-outline-secondary" asp-route-view="@Model.View" asp-route-technician="@Model.Technician" asp-route-date="@Model.Date?.ToString("yyyy-MM-dd")" asp-route-boundary="@Model.Boundary" asp-route-evidence="@Model.Evidence" asp-route-sort="@Model.Sort" asp-route-selectedCaseId="@stickyPreviousCaseId" asp-route-month="@Model.Month">← Vorige case</a>
+                    }
+                    else
+                    {
+                        <span class="btn btn-sm btn-outline-secondary disabled" aria-disabled="true">← Vorige case</span>
+                    }
+                    @if (Model.NextCaseId is { } stickyNextCaseId)
+                    {
+                        <a class="btn btn-sm btn-outline-secondary" asp-route-view="@Model.View" asp-route-technician="@Model.Technician" asp-route-date="@Model.Date?.ToString("yyyy-MM-dd")" asp-route-boundary="@Model.Boundary" asp-route-evidence="@Model.Evidence" asp-route-sort="@Model.Sort" asp-route-selectedCaseId="@stickyNextCaseId" asp-route-month="@Model.Month">Volgende case →</a>
+                    }
+                    else
+                    {
+                        <span class="btn btn-sm btn-outline-secondary disabled" aria-disabled="true">Volgende case →</span>
+                    }
+                </nav>
+            </div>
+
             <header class="case-header">
                 <div><div class="small text-muted">@selected.Date.ToString("dddd d MMMM yyyy", new System.Globalization.CultureInfo("nl-BE"))</div><h2>@selected.Technician</h2><div class="case-site">@selected.Customer · @selected.Address</div></div>
                 <div class="text-end"><span class="evidence-pill evidence-@selected.EvidenceLevel.ToString().ToLowerInvariant()">@DailyReviewDisplay.Evidence(selected.EvidenceLevel)</span><div class="mt-2 status-label">@DailyReviewDisplay.Status(selected.Decision.Status)</div></div>
             </header>
 
-            <nav class="case-navigation" aria-label="Navigatie tussen reviewcases">
+            <nav class="case-navigation case-navigation-inline" aria-label="Navigatie tussen reviewcases">
                 @if (Model.PreviousCaseId is { } previousCaseId)
                 {
                     <a class="btn btn-sm btn-outline-secondary" asp-route-view="@Model.View" asp-route-technician="@Model.Technician" asp-route-date="@Model.Date?.ToString("yyyy-MM-dd")" asp-route-boundary="@Model.Boundary" asp-route-evidence="@Model.Evidence" asp-route-sort="@Model.Sort" asp-route-selectedCaseId="@previousCaseId" asp-route-month="@Model.Month">← Vorige case</a>
@@ -182,7 +235,7 @@
             <section class="day-insight" aria-label="Daginzicht">
                 <div><span>Startverschil</span><strong>@DailyReviewDisplay.CompactDifference(selected.First.SignedDifferenceMinutes)</strong></div>
                 <div><span>Eindverschil</span><strong>@DailyReviewDisplay.CompactDifference(selected.Last.SignedDifferenceMinutes)</strong></div>
-                <div><span>Bevestigd positief</span><strong>@selected.ConfirmedPositiveMinutes.ToString("0") min</strong></div>
+                <div><span>Betrouwbaar positief verschil</span><strong>@selected.ConfirmedPositiveMinutes.ToString("0") min</strong></div>
                 <p>@DailyReviewDisplay.DayInterpretation(selected)</p>
             </section>
 
@@ -356,6 +409,11 @@
                                  data-date="@selected.Date.ToString("dd/MM/yyyy")"
                                  data-customer="@(selected.First.Customer ?? selected.Customer)">
                             <h4 class="h5">Correctie in Plenion</h4>
+                            <div class="correction-time-context" data-testid="correction-time-context">
+                                <span></span><span class="context-header">Huidig</span><span class="context-header">GPS</span>
+                                <span>Start</span><span>@startDisplayTime</span><span>@DailyReviewDisplay.ApproximateTime(selected.First.GpsTime)</span>
+                                <span>Einde</span><span>@endDisplayTime</span><span>@DailyReviewDisplay.ApproximateTime(selected.Last.GpsTime)</span>
+                            </div>
                             @if (!correctionActionable)
                             {
                                 <button type="button"
@@ -420,6 +478,13 @@
                                         }
                                     </div>
                                 }
+                                <div class="correction-preview"
+                                     data-testid="correction-preview"
+                                     hidden>
+                                    <div class="correction-preview-title">Te wijzigen</div>
+                                    <div class="correction-preview-line" data-preview-start>Start: ongewijzigd</div>
+                                    <div class="correction-preview-line" data-preview-end>Einde: ongewijzigd</div>
+                                </div>
                                 <div class="mt-3">
                                     <button type="submit"
                                             class="btn btn-primary"
@@ -471,6 +536,9 @@
             const form = document.getElementById('admin-review-form');
             const executeButton = document.getElementById('correction-execute-button');
             const hint = document.querySelector('[data-testid="correction-execute-hint"]');
+            const preview = document.querySelector('[data-testid="correction-preview"]');
+            const previewStart = preview?.querySelector('[data-preview-start]');
+            const previewEnd = preview?.querySelector('[data-preview-end]');
             const confirmField = form?.querySelector('[name="ConfirmCorrectionExecution"]');
             const reason = document.getElementById('Reason');
             const startInput = document.getElementById('ProposedStartTime');
@@ -525,6 +593,14 @@
                 const endLine = endChanged
                     ? `${originalEnd} → ${endValue}`
                     : 'ongewijzigd';
+
+                if (preview && previewStart && previewEnd) {
+                    const showPreview = startChanged || endChanged;
+                    preview.hidden = !showPreview;
+                    previewStart.textContent = `Start: ${startLine}`;
+                    previewEnd.textContent = `Einde: ${endLine}`;
+                }
+
                 const reasonLabel = reason?.selectedOptions?.[0]?.textContent?.trim() || reason?.value || '';
                 executeButton.setAttribute('data-confirm',
                     `Correctie uitvoeren in Plenion?\n\n` +
@@ -553,6 +629,8 @@
             });
 
             refreshExecuteState();
+
+            document.querySelector('.queue-case.active')?.scrollIntoView({ block: 'nearest' });
         })();
     </script>
 }

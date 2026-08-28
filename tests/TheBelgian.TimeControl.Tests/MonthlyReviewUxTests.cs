@@ -186,7 +186,8 @@ public sealed class MonthlyReviewUxTests
         Assert.Contains("Rit vóór eerste klantprestatie", page, StringComparison.Ordinal);
         Assert.Contains("Rit na laatste klantprestatie", page, StringComparison.Ordinal);
         Assert.Contains("Alle ritten van deze dag bekijken", page, StringComparison.Ordinal);
-        Assert.Contains("Bevestigd positief", page, StringComparison.Ordinal);
+        Assert.Contains("Betrouwbaar positief verschil", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Bevestigd positief", page, StringComparison.Ordinal);
         Assert.Contains("Start aanpassen naar GPS", page, StringComparison.Ordinal);
         Assert.DoesNotContain("asp-for=\"Reviewer\"", page, StringComparison.Ordinal);
     }
@@ -294,6 +295,55 @@ public sealed class MonthlyReviewUxTests
     {
         var availability = new CorrectionExecutionAvailability(true, true, "ok");
         Assert.True(availability.CanExecute);
+    }
+
+    [Fact]
+    public void CockpitMarkup_ContainsStickyQueueAndCaseContext()
+    {
+        var page = ReadPage();
+        var css = File.ReadAllText(Path.Combine(FindRepoRoot(),
+            "src", "TheBelgian.TimeControl.Web", "wwwroot", "css", "site.css"));
+        var layout = File.ReadAllText(Path.Combine(FindRepoRoot(),
+            "src", "TheBelgian.TimeControl.Web", "Pages", "Shared", "_Layout.cshtml"));
+
+        Assert.Contains("review-queue-sticky", page, StringComparison.Ordinal);
+        Assert.Contains("data-testid=\"case-sticky-context\"", page, StringComparison.Ordinal);
+        Assert.Contains("sticky-context-boundaries", page, StringComparison.Ordinal);
+        Assert.Contains("sticky-context-nav", page, StringComparison.Ordinal);
+        Assert.Contains("data-testid=\"correction-time-context\"", page, StringComparison.Ordinal);
+        Assert.Contains("data-testid=\"correction-preview\"", page, StringComparison.Ordinal);
+        Assert.Contains("asp-route-selectedCaseId=\"@stickyPreviousCaseId\"", page, StringComparison.Ordinal);
+        Assert.Contains("Actueel in Plenion", page, StringComparison.Ordinal);
+        Assert.Contains(".review-queue {", css, StringComparison.Ordinal);
+        Assert.Contains("position: sticky", css, StringComparison.Ordinal);
+        Assert.Contains(".case-detail-sticky-context", css, StringComparison.Ordinal);
+        Assert.Contains("The Belgian · TimeControl", layout, StringComparison.Ordinal);
+        Assert.DoesNotContain("fase 1", layout, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("· read-only", layout, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Homepage_AndFooter_UseProductionWording()
+    {
+        var root = FindRepoRoot();
+        var home = File.ReadAllText(Path.Combine(root, "src", "TheBelgian.TimeControl.Web", "Pages", "Index.cshtml"));
+        var layout = File.ReadAllText(Path.Combine(root, "src", "TheBelgian.TimeControl.Web", "Pages", "Shared", "_Layout.cshtml"));
+
+        Assert.Contains("Controle en opvolging van geregistreerde werkuren", home, StringComparison.Ordinal);
+        Assert.DoesNotContain("proof-of-concept", home, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("The Belgian · TimeControl", layout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ConfirmedPositiveMinutes_IsSumOfReliablePositiveBoundaries()
+    {
+        var reviewCase = ReviewCase("confirmed-positive") with
+        {
+            First = Boundary("Start", true, At(8, 0, 0), "Confirmed") with { SignedDifferenceMinutes = 10 },
+            Last = Boundary("End", false, At(16, 0, 0), "Unresolved") with { SignedDifferenceMinutes = 25 },
+        };
+
+        Assert.Equal(10, reviewCase.ConfirmedPositiveMinutes);
     }
 
     private static DailyReviewBoundaryEvidence Boundary(
