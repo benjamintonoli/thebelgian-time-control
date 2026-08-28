@@ -234,6 +234,14 @@ public sealed record CorrectionExecutionResult(
     string Message,
     DailyCorrectionProposal Proposal);
 
+public sealed record ExecuteDirectCorrectionRequest(
+    string CaseId,
+    ReviewFeedbackReason Reason,
+    string Reviewer,
+    string? Notes,
+    DateTimeOffset? ProposedStart,
+    DateTimeOffset? ProposedEnd);
+
 public sealed class DailyGeneratedFactualReport
 {
     public long Id { get; set; }

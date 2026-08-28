@@ -172,6 +172,19 @@ public static class DailyReviewDisplay
         return new TimeOnly(rounded.Hour, rounded.Minute);
     }
 
+    public static bool CanCorrectBoundary(DailyReviewBoundaryEvidence boundary) =>
+        boundary.IsReliable && boundary.PerformanceId > 0;
+
+    public static bool IsDirectCorrectionActionable(DailyReviewCase reviewCase) =>
+        CanCorrectBoundary(reviewCase.First) || CanCorrectBoundary(reviewCase.Last);
+
+    public static bool IsMeaningfulTimeChange(DateTimeOffset original, TimeOnly? proposed) =>
+        proposed is not null &&
+        (proposed.Value.Hour != original.Hour || proposed.Value.Minute != original.Minute);
+
+    public static string RegisteredTime(DateTimeOffset value) =>
+        value.ToString("HH:mm", CultureInfo.InvariantCulture);
+
     public static string ResolveReviewer(string? authenticatedUser, string defaultReviewer)
     {
         var reviewer = string.IsNullOrWhiteSpace(authenticatedUser)

@@ -234,97 +234,48 @@
                 </div>
             }
 
-            @if (Model.CorrectionProposal is { } proposal)
+            @if (Model.CorrectionProposal is { Status: CorrectionProposalStatuses.Executed } proposal)
             {
-                <section class="decision-panel correction-proposal" data-testid="correction-proposal">
-                    <h3>Correctievoorstel</h3>
-                    <p class="mb-1">
-                        <strong>Start</strong><br />
-                        @if (proposal.ProposedStart is not null)
-                        {
-                            <span>@proposal.OriginalStart.ToString("HH:mm") → @proposal.ProposedStart.Value.ToString("HH:mm")</span>
-                            <span class="text-muted"> (prestatie @proposal.FirstPerformanceId)</span>
-                        }
-                        else
-                        {
-                            <span>ongewijzigd</span>
-                        }
-                    </p>
-                    <p class="mb-3">
-                        <strong>Einde</strong><br />
-                        @if (proposal.ProposedEnd is not null)
-                        {
-                            <span>@proposal.OriginalEnd.ToString("HH:mm") → @proposal.ProposedEnd.Value.ToString("HH:mm")</span>
-                            <span class="text-muted"> (prestatie @proposal.LastPerformanceId)</span>
-                        }
-                        else
-                        {
-                            <span>ongewijzigd</span>
-                        }
-                    </p>
-                    @if (proposal.Status == CorrectionProposalStatuses.Executed)
-                    {
-                        <div class="alert alert-success mb-0" data-testid="correction-executed">
-                            <strong>✓ Correctie uitgevoerd in Plenion</strong><br />
+                <section class="decision-panel correction-proposal" data-testid="correction-executed">
+                    <h3>Correctie in Plenion</h3>
+                    <div class="alert alert-success mb-0">
+                        <strong>✓ Correctie uitgevoerd in Plenion</strong>
+                        <div class="mt-2">
+                            <strong>Start</strong><br />
                             @if (proposal.ProposedStart is not null)
                             {
-                                <div>Start aangepast: @proposal.OriginalStart.ToString("HH:mm") → @(proposal.ExecutedStart?.ToString("HH:mm") ?? proposal.ProposedStart.Value.ToString("HH:mm"))</div>
+                                <span>@proposal.OriginalStart.ToString("HH:mm") → @(proposal.ExecutedStart?.ToString("HH:mm") ?? proposal.ProposedStart.Value.ToString("HH:mm"))</span>
                             }
+                            else
+                            {
+                                <span>ongewijzigd</span>
+                            }
+                        </div>
+                        <div class="mt-2">
+                            <strong>Einde</strong><br />
                             @if (proposal.ProposedEnd is not null)
                             {
-                                <div>Einde aangepast: @proposal.OriginalEnd.ToString("HH:mm") → @(proposal.ExecutedEnd?.ToString("HH:mm") ?? proposal.ProposedEnd.Value.ToString("HH:mm"))</div>
+                                <span>@proposal.OriginalEnd.ToString("HH:mm") → @(proposal.ExecutedEnd?.ToString("HH:mm") ?? proposal.ProposedEnd.Value.ToString("HH:mm"))</span>
                             }
-                            <div class="mt-2">Uitgevoerd door: @proposal.ExecutedBy</div>
-                            <div>Uitgevoerd op: @(proposal.ExecutedAt?.ToLocalTime().ToString("dd/MM/yyyy HH:mm") ?? "—")</div>
-                        </div>
-                    }
-                    else if (proposal.Status == CorrectionProposalStatuses.Conflict)
-                    {
-                        <div class="alert alert-warning mb-0" data-testid="correction-conflict">
-                            De registratie werd ondertussen gewijzigd in Plenion.
-                            Vernieuw de gegevens en controleer deze case opnieuw.
-                            <div class="small text-muted mt-1">Status: NeedsReReview / Conflict</div>
-                        </div>
-                    }
-                    else if (proposal.Status == CorrectionProposalStatuses.Approved)
-                    {
-                        var confirmText =
-                            "Je staat op het punt de geregistreerde uren in Plenion te wijzigen.\n\n" +
-                            $"Technieker: {selected!.Technician}\n" +
-                            $"Datum: {selected.Date:dd/MM/yyyy}\n" +
-                            $"Klant: {selected.First.Customer}\n\n" +
-                            $"Oude start: {proposal.OriginalStart:HH:mm}\n" +
-                            $"Nieuwe start: {(proposal.ProposedStart is null ? "ongewijzigd" : proposal.ProposedStart.Value.ToString("HH:mm"))}\n" +
-                            $"Oude einde: {proposal.OriginalEnd:HH:mm}\n" +
-                            $"Nieuwe einde: {(proposal.ProposedEnd is null ? "ongewijzigd" : proposal.ProposedEnd.Value.ToString("HH:mm"))}\n\n" +
-                            "Klik OK om Correctie uitvoeren te bevestigen, of Annuleren om te stoppen.";
-                        <form method="post"
-                              asp-page-handler="ExecuteCorrection"
-                              class="correction-execute-form"
-                              data-testid="correction-execute-form"
-                              data-confirm="@confirmText">
-                            <input type="hidden" asp-for="CaseId" value="@selected.CaseId" />
-                            <input type="hidden" asp-for="Month" />
-                            <input type="hidden" asp-for="ProposalId" value="@proposal.Id" />
-                            <input type="hidden" asp-for="ConfirmCorrectionExecution" value="true" />
-                            <button type="submit"
-                                    class="btn btn-primary"
-                                    data-testid="correction-execute-button"
-                                    disabled="@(!Model.CorrectionAvailability.CanExecute)">
-                                Correctie uitvoeren in Plenion
-                            </button>
-                            @if (!Model.CorrectionAvailability.CanExecute)
+                            else
                             {
-                                <div class="small text-muted mt-2" data-testid="correction-writes-disabled">
-                                    @Model.CorrectionAvailability.Message
-                                </div>
+                                <span>ongewijzigd</span>
                             }
-                        </form>
-                    }
-                    else
-                    {
-                        <div class="alert alert-light border mb-0">Status: @proposal.Status. @(proposal.ErrorMessage ?? string.Empty)</div>
-                    }
+                        </div>
+                        <div class="mt-2">Uitgevoerd door: @proposal.ExecutedBy</div>
+                        <div>Uitgevoerd op: @(proposal.ExecutedAt?.ToLocalTime().ToString("dd/MM/yyyy HH:mm") ?? "—")</div>
+                    </div>
+                </section>
+            }
+            else if (Model.CorrectionProposal is { Status: CorrectionProposalStatuses.Conflict })
+            {
+                <section class="decision-panel correction-proposal" data-testid="correction-conflict">
+                    <h3>Correctie in Plenion</h3>
+                    <div class="alert alert-warning mb-0">
+                        De registratie werd ondertussen gewijzigd in Plenion.
+                        Vernieuw de gegevens en controleer deze case opnieuw.
+                        <div class="small text-muted mt-1">Status: NeedsReReview / Conflict</div>
+                    </div>
                 </section>
             }
 
@@ -340,40 +291,141 @@
                 }
                 else
                 {
-                <form method="post" asp-page-handler="Decision">
-                    <input type="hidden" asp-for="CaseId" value="@selected.CaseId" />
-                    <input type="hidden" asp-for="Month" />
-                    <div class="row g-3">
-                        <div class="col-md-4"><label class="form-label" asp-for="Reason">Reden</label><select class="form-select" asp-for="Reason" required><option value="">Selecteer…</option>@foreach(var reason in Enum.GetValues<ReviewFeedbackReason>()){<option value="@reason">@DailyReviewDisplay.Reason(reason)</option>}</select></div>
-                        <div class="col-md-4"><label class="form-label" asp-for="ProposedStartTime">Nieuwe start</label><input class="form-control" asp-for="ProposedStartTime" type="time" /></div>
-                        <div class="col-md-4"><label class="form-label" asp-for="ProposedEndTime">Nieuw einde</label><input class="form-control" asp-for="ProposedEndTime" type="time" /></div>
-                        <div class="col-12"><label class="form-label" asp-for="Notes">Notitie of vraag</label><textarea class="form-control" asp-for="Notes" rows="2"></textarea></div>
-                    </div>
-                    @if (startCorrection is not null || endCorrection is not null)
-                    {
-                        <div class="quick-corrections mt-3" aria-label="Snelle GPS-correcties">
-                            @if (startCorrection is { } startTime)
-                            {
-                                <button type="button" class="btn btn-sm btn-outline-primary gps-correction" data-target="ProposedStartTime" data-time="@startTime.ToString("HH:mm")">Start aanpassen naar GPS @startTime.ToString("HH:mm")</button>
-                            }
-                            @if (endCorrection is { } endTime)
-                            {
-                                <button type="button" class="btn btn-sm btn-outline-primary gps-correction" data-target="ProposedEndTime" data-time="@endTime.ToString("HH:mm")">Einde aanpassen naar GPS @endTime.ToString("HH:mm")</button>
-                            }
-                            @if (startCorrection is { } bothStart && endCorrection is { } bothEnd)
-                            {
-                                <button type="button" class="btn btn-sm btn-primary gps-correction-both" data-start="@bothStart.ToString("HH:mm")" data-end="@bothEnd.ToString("HH:mm")">Start + einde aanpassen naar GPS</button>
-                            }
+                    var startCorrectable = DailyReviewDisplay.CanCorrectBoundary(selected.First);
+                    var endCorrectable = DailyReviewDisplay.CanCorrectBoundary(selected.Last);
+                    var correctionActionable = DailyReviewDisplay.IsDirectCorrectionActionable(selected);
+                    <form method="post"
+                          asp-page-handler="Decision"
+                          id="admin-review-form"
+                          class="correction-execute-form"
+                          data-testid="admin-review-form">
+                        <input type="hidden" asp-for="CaseId" value="@selected.CaseId" />
+                        <input type="hidden" asp-for="Month" />
+                        <input type="hidden" asp-for="ConfirmCorrectionExecution" value="false" />
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <label class="form-label" asp-for="Reason">Reden</label>
+                                <select class="form-select" asp-for="Reason" required>
+                                    <option value="">Selecteer…</option>
+                                    @foreach (var reason in Enum.GetValues<ReviewFeedbackReason>())
+                                    {
+                                        <option value="@reason">@DailyReviewDisplay.Reason(reason)</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label" asp-for="Notes">Notitie of vraag</label>
+                                <textarea class="form-control" asp-for="Notes" rows="2"></textarea>
+                            </div>
                         </div>
-                    }
-                    <div class="decision-actions mt-3">
-                        <button class="btn btn-outline-success" name="decision" value="ResolvedNoAction">Geen probleem</button>
-                        <button class="btn btn-outline-primary" name="decision" value="PendingCorrection">Administratieve fout</button>
-                        <button class="btn btn-outline-warning" name="decision" value="AwaitingExplanation">Uitleg nodig</button>
-                        <button class="btn btn-outline-danger" name="decision" value="EscalatedForManagementReview">Manueel escaleren</button>
-                    </div>
-                    <p class="small text-muted mt-2 mb-0">Snelle GPS-correcties vullen alleen het voorstel in. Uitvoeren vereist daarna een afzonderlijke bevestiging.</p>
-                </form>
+
+                        <section class="correction-in-plenion mt-4"
+                                 data-testid="correction-in-plenion"
+                                 data-original-start="@DailyReviewDisplay.RegisteredTime(selected.First.PlenionTime)"
+                                 data-original-end="@DailyReviewDisplay.RegisteredTime(selected.Last.PlenionTime)"
+                                 data-start-correctable="@(startCorrectable ? "true" : "false")"
+                                 data-end-correctable="@(endCorrectable ? "true" : "false")"
+                                 data-writes-enabled="@(Model.CorrectionAvailability.CanExecute ? "true" : "false")"
+                                 data-technician="@selected.Technician"
+                                 data-date="@selected.Date.ToString("dd/MM/yyyy")"
+                                 data-customer="@(selected.First.Customer ?? selected.Customer)">
+                            <h4 class="h5">Correctie in Plenion</h4>
+                            @if (!correctionActionable)
+                            {
+                                <button type="button"
+                                        class="btn btn-primary"
+                                        data-testid="correction-execute-button"
+                                        disabled>
+                                    Correctie uitvoeren in Plenion
+                                </button>
+                                <div class="small text-muted mt-2" data-testid="correction-not-actionable">
+                                    Geen betrouwbare GPS-correctie beschikbaar.
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="row g-3">
+                                    <div class="col-md-4">
+                                        <label class="form-label" asp-for="ProposedStartTime">Nieuwe start</label>
+                                        <input class="form-control"
+                                               asp-for="ProposedStartTime"
+                                               type="time"
+                                               disabled="@(!startCorrectable)"
+                                               data-testid="proposed-start-time" />
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label" asp-for="ProposedEndTime">Nieuwe einde</label>
+                                        <input class="form-control"
+                                               asp-for="ProposedEndTime"
+                                               type="time"
+                                               disabled="@(!endCorrectable)"
+                                               data-testid="proposed-end-time" />
+                                    </div>
+                                </div>
+                                @if (startCorrection is not null || endCorrection is not null)
+                                {
+                                    <div class="quick-corrections mt-3" aria-label="Snelle GPS-correcties">
+                                        @if (startCorrection is { } startTime)
+                                        {
+                                            <button type="button"
+                                                    class="btn btn-sm btn-outline-primary gps-correction"
+                                                    data-target="ProposedStartTime"
+                                                    data-time="@startTime.ToString("HH:mm")">
+                                                Start aanpassen naar GPS @startTime.ToString("HH:mm")
+                                            </button>
+                                        }
+                                        @if (endCorrection is { } endTime)
+                                        {
+                                            <button type="button"
+                                                    class="btn btn-sm btn-outline-primary gps-correction"
+                                                    data-target="ProposedEndTime"
+                                                    data-time="@endTime.ToString("HH:mm")">
+                                                Einde aanpassen naar GPS @endTime.ToString("HH:mm")
+                                            </button>
+                                        }
+                                        @if (startCorrection is { } bothStart && endCorrection is { } bothEnd)
+                                        {
+                                            <button type="button"
+                                                    class="btn btn-sm btn-primary gps-correction-both"
+                                                    data-start="@bothStart.ToString("HH:mm")"
+                                                    data-end="@bothEnd.ToString("HH:mm")">
+                                                Start + einde aanpassen naar GPS
+                                            </button>
+                                        }
+                                    </div>
+                                }
+                                <div class="mt-3">
+                                    <button type="submit"
+                                            class="btn btn-primary"
+                                            asp-page-handler="ExecuteCorrection"
+                                            data-testid="correction-execute-button"
+                                            id="correction-execute-button"
+                                            disabled>
+                                        Correctie uitvoeren in Plenion
+                                    </button>
+                                    <div class="small text-muted mt-2" data-testid="correction-execute-hint">
+                                        Kies eerst een nieuwe start- en/of eindtijd.
+                                    </div>
+                                    @if (!Model.CorrectionAvailability.CanExecute)
+                                    {
+                                        <div class="small text-muted mt-2" data-testid="correction-writes-disabled">
+                                            @Model.CorrectionAvailability.Message
+                                        </div>
+                                    }
+                                </div>
+                                <p class="small text-muted mt-2 mb-0">
+                                    Snelle GPS-correcties vullen alleen Nieuwe start/einde in. Uitvoeren vereist een afzonderlijke bevestiging en schrijft pas daarna naar Plenion.
+                                </p>
+                            }
+                        </section>
+
+                        <div class="decision-actions mt-4">
+                            <button class="btn btn-outline-success" name="decision" value="ResolvedNoAction">Geen probleem</button>
+                            <button class="btn btn-outline-primary" name="decision" value="PendingCorrection">Administratieve fout</button>
+                            <button class="btn btn-outline-warning" name="decision" value="AwaitingExplanation">Uitleg nodig</button>
+                            <button class="btn btn-outline-danger" name="decision" value="EscalatedForManagementReview">Manueel escaleren</button>
+                        </div>
+                    </form>
                 }
             </section>
 
@@ -389,11 +441,20 @@
 @section Scripts {
     <script>
         (() => {
+            const section = document.querySelector('[data-testid="correction-in-plenion"]');
+            const form = document.getElementById('admin-review-form');
+            const executeButton = document.getElementById('correction-execute-button');
+            const hint = document.querySelector('[data-testid="correction-execute-hint"]');
+            const confirmField = form?.querySelector('[name="ConfirmCorrectionExecution"]');
+            const reason = document.getElementById('Reason');
+            const startInput = document.getElementById('ProposedStartTime');
+            const endInput = document.getElementById('ProposedEndTime');
+
             const applyTime = (target, value) => {
                 const input = document.getElementById(target);
-                if (input) input.value = value;
-                const reason = document.getElementById('Reason');
+                if (input && !input.disabled) input.value = value;
                 if (reason && !reason.value) reason.value = 'AdministrativeEntryError';
+                refreshExecuteState();
             };
 
             document.querySelectorAll('.gps-correction').forEach(button => {
@@ -405,6 +466,67 @@
                     applyTime('ProposedEndTime', button.dataset.end);
                 });
             });
+
+            const refreshExecuteState = () => {
+                if (!section || !executeButton || !hint) return;
+                const writesEnabled = section.dataset.writesEnabled === 'true';
+                const startOk = section.dataset.startCorrectable === 'true';
+                const endOk = section.dataset.endCorrectable === 'true';
+                const originalStart = section.dataset.originalStart;
+                const originalEnd = section.dataset.originalEnd;
+                const startValue = startInput && !startInput.disabled ? startInput.value : '';
+                const endValue = endInput && !endInput.disabled ? endInput.value : '';
+                const startChanged = startOk && !!startValue && startValue !== originalStart;
+                const endChanged = endOk && !!endValue && endValue !== originalEnd;
+                const hasChange = startChanged || endChanged;
+                const hasReason = !!(reason && reason.value);
+                const canEnable = writesEnabled && hasChange && hasReason;
+                executeButton.disabled = !canEnable;
+
+                if (!hasChange) {
+                    hint.textContent = 'Kies eerst een nieuwe start- en/of eindtijd.';
+                } else if (!hasReason) {
+                    hint.textContent = 'Selecteer eerst een reden.';
+                } else if (!writesEnabled) {
+                    hint.textContent = 'Plenion-correcties zijn momenteel uitgeschakeld.';
+                } else {
+                    hint.textContent = 'Klaar om te bevestigen en uit te voeren in Plenion.';
+                }
+
+                const startLine = startChanged
+                    ? `${originalStart} → ${startValue}`
+                    : 'ongewijzigd';
+                const endLine = endChanged
+                    ? `${originalEnd} → ${endValue}`
+                    : 'ongewijzigd';
+                const reasonLabel = reason?.selectedOptions?.[0]?.textContent?.trim() || reason?.value || '';
+                executeButton.setAttribute('data-confirm',
+                    `Correctie uitvoeren in Plenion?\n\n` +
+                    `${section.dataset.technician}\n` +
+                    `${section.dataset.date}\n` +
+                    `${section.dataset.customer}\n\n` +
+                    `Start:\n${startLine}\n\n` +
+                    `Einde:\n${endLine}\n\n` +
+                    `Reden:\n${reasonLabel}\n\n` +
+                    `OK = Correctie uitvoeren, Annuleren = stoppen.`);
+            };
+
+            [reason, startInput, endInput].forEach(el => {
+                el?.addEventListener('input', refreshExecuteState);
+                el?.addEventListener('change', refreshExecuteState);
+            });
+
+            executeButton?.addEventListener('click', () => {
+                if (confirmField) confirmField.value = 'true';
+            });
+
+            form?.querySelectorAll('.decision-actions button[type="submit"], .decision-actions button[name="decision"]').forEach(button => {
+                button.addEventListener('click', () => {
+                    if (confirmField) confirmField.value = 'false';
+                });
+            });
+
+            refreshExecuteState();
         })();
     </script>
 }

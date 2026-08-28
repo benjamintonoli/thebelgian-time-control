@@ -109,21 +109,46 @@ public sealed class IndexModel(
         {
             if (!ConfirmCorrectionExecution)
                 throw new InvalidOperationException("Bevestig de correctie voordat je ze uitvoert.");
-            var result = await monthlyReviewService.ExecuteCorrectionAsync(
-                ResolveMonth(), ProposalId, ResolveReviewer(), cancellationToken);
+            if (Reason is null)
+                throw new InvalidOperationException("Selecteer een reden.");
+
+            var month = ResolveMonth();
+            var cockpit = await monthlyReviewService.GetCockpitAsync(
+                month, new DailyReviewFilter(DailyReviewQueueView.All), CaseId, cancellationToken);
+            var current = cockpit.Review.Selected
+                ?? throw new InvalidOperationException("Reviewcase niet gevonden.");
+
+            var result = await monthlyReviewService.ExecuteDirectCorrectionAsync(
+                month,
+                new ExecuteDirectCorrectionRequest(
+                    CaseId,
+                    Reason.Value,
+                    ResolveReviewer(),
+                    Notes,
+                    Combine(current.Date, ProposedStartTime, current.First.PlenionTime.Offset),
+                    Combine(current.Date, ProposedEndTime, current.Last.PlenionTime.Offset)),
+                cancellationToken);
             if (result.Status == CorrectionProposalStatuses.Executed)
             {
                 var parts = new List<string> { "✓ Correctie uitgevoerd in Plenion." };
                 if (result.Proposal.ProposedStart is not null)
                 {
                     parts.Add(
-                        $"Start aangepast: {result.Proposal.OriginalStart:HH:mm} → {(result.Proposal.ExecutedStart ?? result.Proposal.ProposedStart):HH:mm}");
+                        $"Start: {result.Proposal.OriginalStart:HH:mm} → {(result.Proposal.ExecutedStart ?? result.Proposal.ProposedStart):HH:mm}");
+                }
+                else
+                {
+                    parts.Add("Start: ongewijzigd");
                 }
 
                 if (result.Proposal.ProposedEnd is not null)
                 {
                     parts.Add(
-                        $"Einde aangepast: {result.Proposal.OriginalEnd:HH:mm} → {(result.Proposal.ExecutedEnd ?? result.Proposal.ProposedEnd):HH:mm}");
+                        $"Einde: {result.Proposal.OriginalEnd:HH:mm} → {(result.Proposal.ExecutedEnd ?? result.Proposal.ProposedEnd):HH:mm}");
+                }
+                else
+                {
+                    parts.Add("Einde: ongewijzigd");
                 }
 
                 parts.Add($"Uitgevoerd door: {result.Proposal.ExecutedBy}");
@@ -145,7 +170,7 @@ public sealed class IndexModel(
         }
         catch (Exception exception)
         {
-            logger.LogWarning(exception, "Correction execution failed for proposal {ProposalId}", ProposalId);
+            logger.LogWarning(exception, "Direct correction execution failed for case {CaseId}", CaseId);
             Error = exception.Message;
         }
         await LoadAsync(cancellationToken);

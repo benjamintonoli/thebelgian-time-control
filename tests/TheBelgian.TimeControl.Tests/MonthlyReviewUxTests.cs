@@ -26,6 +26,7 @@ public sealed class MonthlyReviewUxTests
         var boundary = Boundary("Start", false, At(7, 5, 31), matcherStatus);
 
         Assert.Null(DailyReviewDisplay.ReliableGpsCorrectionTime(boundary));
+        Assert.False(DailyReviewDisplay.CanCorrectBoundary(boundary));
     }
 
     [Fact]
@@ -36,6 +37,8 @@ public sealed class MonthlyReviewUxTests
 
         Assert.NotNull(DailyReviewDisplay.ReliableGpsCorrectionTime(start));
         Assert.Null(DailyReviewDisplay.ReliableGpsCorrectionTime(end));
+        Assert.True(DailyReviewDisplay.CanCorrectBoundary(start));
+        Assert.False(DailyReviewDisplay.CanCorrectBoundary(end));
     }
 
     [Fact]
@@ -46,6 +49,29 @@ public sealed class MonthlyReviewUxTests
 
         Assert.Null(DailyReviewDisplay.ReliableGpsCorrectionTime(start));
         Assert.NotNull(DailyReviewDisplay.ReliableGpsCorrectionTime(end));
+    }
+
+    [Fact]
+    public void ActionableCase_IsDetectedFromReliableBoundary()
+    {
+        var actionable = ReviewCase("ok");
+        var blocked = ReviewCase("blocked") with
+        {
+            First = Boundary("Start", false, null, "Unresolved"),
+            Last = Boundary("End", false, null, "Unresolved"),
+            EvidenceLevel = DailyReviewEvidenceLevel.Insufficient,
+        };
+
+        Assert.True(DailyReviewDisplay.IsDirectCorrectionActionable(actionable));
+        Assert.False(DailyReviewDisplay.IsDirectCorrectionActionable(blocked));
+    }
+
+    [Fact]
+    public void MeaningfulTimeChange_RequiresDifferentClock()
+    {
+        Assert.True(DailyReviewDisplay.IsMeaningfulTimeChange(At(8, 17, 0), new TimeOnly(8, 18)));
+        Assert.False(DailyReviewDisplay.IsMeaningfulTimeChange(At(8, 17, 0), new TimeOnly(8, 17)));
+        Assert.False(DailyReviewDisplay.IsMeaningfulTimeChange(At(8, 17, 0), null));
     }
 
     [Fact]
@@ -166,39 +192,39 @@ public sealed class MonthlyReviewUxTests
     }
 
     [Fact]
-    public void ApprovedProposal_ShowsExecuteButtonAndAvailabilityMessage()
+    public void ActionableDeviation_ShowsExecuteButtonWithoutPriorProposal()
     {
         var page = ReadPage();
 
-        Assert.Contains("Correctievoorstel", page, StringComparison.Ordinal);
-        Assert.Contains("Correctie uitvoeren in Plenion", page, StringComparison.Ordinal);
-        Assert.Contains("disabled=\"@(!Model.CorrectionAvailability.CanExecute)\"", page, StringComparison.Ordinal);
-        Assert.Contains("@Model.CorrectionAvailability.Message", page, StringComparison.Ordinal);
+        Assert.Contains("data-testid=\"correction-in-plenion\"", page, StringComparison.Ordinal);
+        Assert.Contains("Correctie in Plenion", page, StringComparison.Ordinal);
+        Assert.Contains("asp-page-handler=\"ExecuteCorrection\"", page, StringComparison.Ordinal);
+        Assert.Contains("Kies eerst een nieuwe start- en/of eindtijd.", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Correctievoorstel", page, StringComparison.Ordinal);
+        Assert.Contains("value=\"PendingCorrection\">Administratieve fout", page, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void NoProposal_HasNoExecuteAction()
+    public void ExecuteButton_StartsDisabled_AndDependsOnClientRefresh()
     {
         var page = ReadPage();
-        var proposalGuard = page.IndexOf("@if (Model.CorrectionProposal is { } proposal)",
-            StringComparison.Ordinal);
-        var executeAction = page.IndexOf("asp-page-handler=\"ExecuteCorrection\"",
-            StringComparison.Ordinal);
 
-        Assert.True(proposalGuard >= 0);
-        Assert.True(executeAction > proposalGuard);
-        Assert.Equal(1, page.Split("asp-page-handler=\"ExecuteCorrection\"").Length - 1);
+        Assert.Contains("id=\"correction-execute-button\"", page, StringComparison.Ordinal);
+        Assert.Contains("refreshExecuteState", page, StringComparison.Ordinal);
+        Assert.Contains("data-writes-enabled=", page, StringComparison.Ordinal);
+        Assert.Contains("data-original-start=", page, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void QuickGps_OnlyFillsProposalAndNeverExecutesCorrection()
+    public void QuickGps_OnlyFillsTimesAndNeverExecutesCorrection()
     {
         var page = ReadPage();
 
         Assert.Contains("gps-correction", page, StringComparison.Ordinal);
-        Assert.Contains("Snelle GPS-correcties vullen alleen het voorstel in", page, StringComparison.Ordinal);
-        Assert.Contains("type=\"button\" class=\"btn btn-sm btn-outline-primary gps-correction\"", page, StringComparison.Ordinal);
+        Assert.Contains("type=\"button\"", page, StringComparison.Ordinal);
+        Assert.Contains("class=\"btn btn-sm btn-outline-primary gps-correction\"", page, StringComparison.Ordinal);
         Assert.DoesNotContain("asp-page-handler=\"ExecuteCorrection\" class=\"gps-correction\"", page, StringComparison.Ordinal);
+        Assert.Contains("Snelle GPS-correcties vullen alleen Nieuwe start/einde in", page, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -208,10 +234,11 @@ public sealed class MonthlyReviewUxTests
         var script = File.ReadAllText(Path.Combine(FindRepoRoot(),
             "src", "TheBelgian.TimeControl.Web", "wwwroot", "js", "site.js"));
 
-        Assert.Contains("data-confirm=", page, StringComparison.Ordinal);
+        Assert.Contains("data-confirm", page, StringComparison.Ordinal);
         Assert.Contains("correction-execute-form", page, StringComparison.Ordinal);
         Assert.Contains("window.confirm(message)", script, StringComparison.Ordinal);
         Assert.Contains("asp-for=\"ConfirmCorrectionExecution\"", page, StringComparison.Ordinal);
+        Assert.Contains("Correctie uitvoeren in Plenion?", page, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -221,10 +248,9 @@ public sealed class MonthlyReviewUxTests
 
         Assert.Contains("ongewijzigd", page, StringComparison.Ordinal);
         Assert.Contains("✓ Correctie uitgevoerd in Plenion", page, StringComparison.Ordinal);
-        Assert.Contains("Start aangepast:", page, StringComparison.Ordinal);
-        Assert.Contains("Einde aangepast:", page, StringComparison.Ordinal);
         Assert.Contains("Uitgevoerd door:", page, StringComparison.Ordinal);
         Assert.Contains("Uitgevoerd op:", page, StringComparison.Ordinal);
+        Assert.Contains("data-testid=\"correction-executed\"", page, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -233,6 +259,25 @@ public sealed class MonthlyReviewUxTests
         var page = ReadPage();
 
         Assert.Contains("NeedsReReview / Conflict", page, StringComparison.Ordinal);
+        Assert.Contains("data-testid=\"correction-conflict\"", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UnresolvedCase_ShowsDisabledLiveCorrectionMessage()
+    {
+        var page = ReadPage();
+
+        Assert.Contains("Geen betrouwbare GPS-correctie beschikbaar.", page, StringComparison.Ordinal);
+        Assert.Contains("data-testid=\"correction-not-actionable\"", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PartialBoundary_DisablesUnreliableSideInput()
+    {
+        var page = ReadPage();
+
+        Assert.Contains("disabled=\"@(!startCorrectable)\"", page, StringComparison.Ordinal);
+        Assert.Contains("disabled=\"@(!endCorrectable)\"", page, StringComparison.Ordinal);
     }
 
     [Fact]

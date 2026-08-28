@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using TheBelgian.TimeControl.Core.Interfaces;
 using TheBelgian.TimeControl.Core.Models;
+using TheBelgian.TimeControl.Core.Services;
 using TheBelgian.TimeControl.Infrastructure.Configuration;
 using TheBelgian.TimeControl.Infrastructure.Persistence;
 using TheBelgian.TimeControl.Infrastructure.Pilot;
@@ -275,39 +276,8 @@ internal sealed class MonthlyReviewService(
         context.DailyReviewActionAudits.Add(action);
         if (request.Status == DailyReviewWorkflowStatus.PendingCorrection)
         {
-            if (request.ProposedStart is not null && !reviewCase.First.IsReliable)
-                throw new InvalidOperationException("De startboundary is niet betrouwbaar genoeg voor een GPS-correctie.");
-            if (request.ProposedEnd is not null && !reviewCase.Last.IsReliable)
-                throw new InvalidOperationException("De eindboundary is niet betrouwbaar genoeg voor een GPS-correctie.");
-            var firstRecord = FindPerformance(snapshot.EvidenceSnapshotJson, reviewCase.First.PerformanceId);
-            var lastRecord = reviewCase.Last.PerformanceId == reviewCase.First.PerformanceId
-                ? firstRecord
-                : FindPerformance(snapshot.EvidenceSnapshotJson, reviewCase.Last.PerformanceId);
-            EnsureLocationBound(firstRecord, reviewCase.First.PerformanceId, request.ProposedStart is not null);
-            EnsureLocationBound(lastRecord, reviewCase.Last.PerformanceId, request.ProposedEnd is not null);
-            context.DailyCorrectionProposals.Add(new DailyCorrectionProposal
-            {
-                CaseId = reviewCase.CaseId,
-                OriginalStart = reviewCase.First.PlenionTime,
-                OriginalEnd = reviewCase.Last.PlenionTime,
-                ProposedStart = request.ProposedStart,
-                ProposedEnd = request.ProposedEnd,
-                Reason = request.Reason!.Value.ToString(),
-                Notes = Normalize(request.Notes),
-                ProposedBy = request.Reviewer.Trim(),
-                CreatedAt = now,
-                Status = CorrectionProposalStatuses.Approved,
-                FirstPerformanceId = reviewCase.First.PerformanceId,
-                LastPerformanceId = reviewCase.Last.PerformanceId,
-                FirstActivityType = firstRecord.ActivityType,
-                LastActivityType = lastRecord.ActivityType,
-                FirstMainTaskExternalId = firstRecord.MainTaskExternalId,
-                LastMainTaskExternalId = lastRecord.MainTaskExternalId,
-                FirstRecordOriginalStart = firstRecord.Start,
-                FirstRecordOriginalEnd = firstRecord.End,
-                LastRecordOriginalStart = lastRecord.Start,
-                LastRecordOriginalEnd = lastRecord.End,
-            });
+            context.DailyCorrectionProposals.Add(CreateApprovedProposal(
+                reviewCase, snapshot.EvidenceSnapshotJson, request, now));
         }
 
         snapshot.NeedsReReview = false;
@@ -421,7 +391,7 @@ internal sealed class MonthlyReviewService(
                 Technician = executedSnapshot.Technician,
                 Date = executedSnapshot.Date,
                 Decision = DailyReviewWorkflowStatus.CorrectionExecuted.ToString(),
-                DecisionReason = ReviewFeedbackReason.AdministrativeEntryError.ToString(),
+                DecisionReason = proposal.Reason,
                 Notes = "Correctie uitgevoerd via PlenionWriteService.",
                 ReviewedBy = executedBy.Trim(),
                 ReviewedAt = proposal.ExecutedAt.Value,
@@ -441,7 +411,7 @@ internal sealed class MonthlyReviewService(
                 Technician = snapshot.Technician,
                 Date = snapshot.Date,
                 Decision = DailyReviewWorkflowStatus.NeedsReReview.ToString(),
-                DecisionReason = ReviewFeedbackReason.AdministrativeEntryError.ToString(),
+                DecisionReason = proposal.Reason,
                 Notes = response.Message,
                 ReviewedBy = executedBy.Trim(),
                 ReviewedAt = timeProvider.GetUtcNow(),
@@ -458,6 +428,162 @@ internal sealed class MonthlyReviewService(
 
         await context.SaveChangesAsync(cancellationToken);
         return new CorrectionExecutionResult(proposal.Status, response.Message, proposal);
+    }
+
+    public async Task<CorrectionExecutionResult> ExecuteDirectCorrectionAsync(
+        ReviewMonth month,
+        ExecuteDirectCorrectionRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Reviewer))
+            throw new InvalidOperationException("Uitvoerder is verplicht.");
+        if (request.ProposedStart is null && request.ProposedEnd is null)
+            throw new InvalidOperationException("Kies eerst een nieuwe start- en/of eindtijd.");
+
+        var availability = await GetCorrectionExecutionAvailabilityAsync(cancellationToken);
+        if (!availability.CanExecute)
+            throw new InvalidOperationException(availability.Message);
+
+        var now = timeProvider.GetUtcNow();
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        var period = await context.MonthlyReviewPeriods.SingleAsync(item =>
+            item.Year == month.Year && item.Month == month.Month, cancellationToken);
+        if (period.Status == MonthlyReviewStatus.Finalized)
+            throw new InvalidOperationException("Deze maand is afgesloten en alleen-lezen.");
+
+        var snapshot = await context.MonthlyReviewCaseSnapshots.SingleAsync(item =>
+            item.MonthlyReviewPeriodId == period.Id && item.CaseId == request.CaseId && item.IsActive,
+            cancellationToken);
+        var reviewCase = JsonSerializer.Deserialize<DailyReviewCase>(snapshot.CaseJson, JsonOptions)
+            ?? throw new InvalidDataException("Reviewcase-snapshot is ongeldig.");
+
+        if (!DailyReviewDisplay.IsDirectCorrectionActionable(reviewCase))
+            throw new InvalidOperationException("Geen betrouwbare GPS-correctie beschikbaar.");
+
+        var proposedStart = NormalizeProposedTime(
+            request.ProposedStart, reviewCase.First, "start");
+        var proposedEnd = NormalizeProposedTime(
+            request.ProposedEnd, reviewCase.Last, "einde");
+        if (proposedStart is null && proposedEnd is null)
+            throw new InvalidOperationException("Kies eerst een nieuwe start- en/of eindtijd.");
+
+        var latest = await context.DailyCorrectionProposals
+            .Where(item => item.CaseId == request.CaseId)
+            .OrderByDescending(item => item.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (latest?.Status == CorrectionProposalStatuses.Executing)
+            throw new InvalidOperationException("De correctie wordt al uitgevoerd of is ondertussen gewijzigd.");
+        if (latest?.Status == CorrectionProposalStatuses.Executed &&
+            SameTargets(latest, proposedStart, proposedEnd))
+        {
+            await transaction.CommitAsync(cancellationToken);
+            return new CorrectionExecutionResult(
+                latest.Status, "Correctie was al uitgevoerd.", latest);
+        }
+
+        var saveRequest = new SaveDailyReviewDecision(
+            request.CaseId,
+            DailyReviewWorkflowStatus.PendingCorrection,
+            request.Reason,
+            request.Reviewer,
+            request.Notes,
+            proposedStart,
+            proposedEnd);
+        var proposal = CreateApprovedProposal(
+            reviewCase, snapshot.EvidenceSnapshotJson, saveRequest, now);
+        context.DailyCorrectionProposals.Add(proposal);
+        context.DailyReviewActionAudits.Add(new DailyReviewActionAudit
+        {
+            CaseId = reviewCase.CaseId,
+            Technician = reviewCase.Technician,
+            Date = reviewCase.Date,
+            Decision = DailyReviewWorkflowStatus.PendingCorrection.ToString(),
+            DecisionReason = request.Reason.ToString(),
+            Notes = Normalize(request.Notes),
+            ReviewedBy = request.Reviewer.Trim(),
+            ReviewedAt = now,
+            EvidenceSnapshotJson = snapshot.EvidenceSnapshotJson,
+            AlgorithmVersion = period.AlgorithmVersion,
+        });
+        snapshot.NeedsReReview = false;
+        period.Status = MonthlyReviewStatus.InReview;
+        await context.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        return await ExecuteCorrectionAsync(
+            month, proposal.Id, request.Reviewer, cancellationToken);
+    }
+
+    private static DateTimeOffset? NormalizeProposedTime(
+        DateTimeOffset? proposed,
+        DailyReviewBoundaryEvidence boundary,
+        string sideLabel)
+    {
+        if (proposed is null)
+            return null;
+        if (!DailyReviewDisplay.CanCorrectBoundary(boundary))
+            throw new InvalidOperationException(
+                $"De {sideLabel}boundary is niet betrouwbaar genoeg voor een GPS-correctie.");
+        if (!DailyReviewDisplay.IsMeaningfulTimeChange(
+                boundary.PlenionTime, TimeOnly.FromDateTime(proposed.Value.DateTime)))
+            return null;
+        return proposed;
+    }
+
+    private static bool SameTargets(
+        DailyCorrectionProposal proposal,
+        DateTimeOffset? proposedStart,
+        DateTimeOffset? proposedEnd) =>
+        SameClock(proposal.ProposedStart, proposedStart) &&
+        SameClock(proposal.ProposedEnd, proposedEnd);
+
+    private static bool SameClock(DateTimeOffset? left, DateTimeOffset? right)
+    {
+        if (left is null && right is null) return true;
+        if (left is null || right is null) return false;
+        return left.Value.Hour == right.Value.Hour && left.Value.Minute == right.Value.Minute;
+    }
+
+    private DailyCorrectionProposal CreateApprovedProposal(
+        DailyReviewCase reviewCase,
+        string evidenceSnapshotJson,
+        SaveDailyReviewDecision request,
+        DateTimeOffset now)
+    {
+        if (request.ProposedStart is not null && !reviewCase.First.IsReliable)
+            throw new InvalidOperationException("De startboundary is niet betrouwbaar genoeg voor een GPS-correctie.");
+        if (request.ProposedEnd is not null && !reviewCase.Last.IsReliable)
+            throw new InvalidOperationException("De eindboundary is niet betrouwbaar genoeg voor een GPS-correctie.");
+        var firstRecord = FindPerformance(evidenceSnapshotJson, reviewCase.First.PerformanceId);
+        var lastRecord = reviewCase.Last.PerformanceId == reviewCase.First.PerformanceId
+            ? firstRecord
+            : FindPerformance(evidenceSnapshotJson, reviewCase.Last.PerformanceId);
+        EnsureLocationBound(firstRecord, reviewCase.First.PerformanceId, request.ProposedStart is not null);
+        EnsureLocationBound(lastRecord, reviewCase.Last.PerformanceId, request.ProposedEnd is not null);
+        return new DailyCorrectionProposal
+        {
+            CaseId = reviewCase.CaseId,
+            OriginalStart = reviewCase.First.PlenionTime,
+            OriginalEnd = reviewCase.Last.PlenionTime,
+            ProposedStart = request.ProposedStart,
+            ProposedEnd = request.ProposedEnd,
+            Reason = request.Reason!.Value.ToString(),
+            Notes = Normalize(request.Notes),
+            ProposedBy = request.Reviewer.Trim(),
+            CreatedAt = now,
+            Status = CorrectionProposalStatuses.Approved,
+            FirstPerformanceId = reviewCase.First.PerformanceId,
+            LastPerformanceId = reviewCase.Last.PerformanceId,
+            FirstActivityType = firstRecord.ActivityType,
+            LastActivityType = lastRecord.ActivityType,
+            FirstMainTaskExternalId = firstRecord.MainTaskExternalId,
+            LastMainTaskExternalId = lastRecord.MainTaskExternalId,
+            FirstRecordOriginalStart = firstRecord.Start,
+            FirstRecordOriginalEnd = firstRecord.End,
+            LastRecordOriginalStart = lastRecord.Start,
+            LastRecordOriginalEnd = lastRecord.End,
+        };
     }
 
     public async Task<MonthlyReviewPeriod> FinalizeAsync(

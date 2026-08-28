@@ -41,6 +41,11 @@ public interface IMonthlyReviewService
         string executedBy,
         CancellationToken cancellationToken);
 
+    Task<CorrectionExecutionResult> ExecuteDirectCorrectionAsync(
+        ReviewMonth month,
+        ExecuteDirectCorrectionRequest request,
+        CancellationToken cancellationToken);
+
     Task<MonthlyReviewPeriod> FinalizeAsync(
         ReviewMonth month,
         string finalizedBy,
