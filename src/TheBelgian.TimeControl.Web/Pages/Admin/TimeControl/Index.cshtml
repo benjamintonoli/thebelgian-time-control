@@ -11,6 +11,9 @@
     var selected = Model.Cockpit.Selected;
     var startCorrection = selected is null ? null : DailyReviewDisplay.ReliableGpsCorrectionTime(selected.First);
     var endCorrection = selected is null ? null : DailyReviewDisplay.ReliableGpsCorrectionTime(selected.Last);
+    var executedProposal = Model.CorrectionProposal is { Status: CorrectionProposalStatuses.Executed } executed
+        ? executed
+        : null;
     string Tab(DailyReviewQueueView value) => Model.View == value ? "nav-link active" : "nav-link";
 }
 
@@ -139,11 +142,6 @@
                 }
             </nav>
 
-            @{
-                var executedProposal = Model.CorrectionProposal is { Status: CorrectionProposalStatuses.Executed } executed
-                    ? executed
-                    : null;
-            }
             <section class="boundary-grid">
                 <article class="boundary-card">
                     <div class="boundary-kicker">Eerste klantprestatie</div><h3>Start van de werkdag</h3>
