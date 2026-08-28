@@ -78,6 +78,33 @@ public sealed class CorrectionExecutionTests
         Assert.Equal("2026-07:case-1:77", command.IdempotencyKey);
     }
 
+    [Fact]
+    public void HikmatStartOnly_BuildsExactOriginalConcurrencyValues()
+    {
+        var proposal = Proposal(280389, 280389, At(8, 18), null);
+        proposal.OriginalStart = At(8, 17);
+        proposal.OriginalEnd = At(15, 29);
+        proposal.FirstRecordOriginalStart = At(8, 17);
+        proposal.FirstRecordOriginalEnd = At(15, 29);
+        proposal.LastRecordOriginalStart = At(8, 17);
+        proposal.LastRecordOriginalEnd = At(15, 29);
+        proposal.FirstMainTaskExternalId = 30;
+        proposal.LastMainTaskExternalId = 30;
+
+        var command = MonthlyReviewService.BuildCorrectionCommand(
+            proposal, new ReviewMonth(2026, 7), "Benjamin Tonoli");
+        var item = Assert.Single(command.Corrections);
+
+        Assert.Equal(280389, item.PerformanceId);
+        Assert.Equal(new TimeSpan(8, 17, 0), item.OriginalStart);
+        Assert.Equal(new TimeSpan(15, 29, 0), item.OriginalEnd);
+        Assert.Equal(new TimeSpan(8, 18, 0), item.NewStart);
+        Assert.Null(item.NewEnd);
+        Assert.Equal(30, item.ExpectedMainTaskExternalId);
+        Assert.Equal("CustomerWork", item.ExpectedActivityType);
+        Assert.Equal("2026-07:case-1:77", command.IdempotencyKey);
+    }
+
     [Theory]
     [InlineData("Travel")]
     [InlineData("WaitingTime")]

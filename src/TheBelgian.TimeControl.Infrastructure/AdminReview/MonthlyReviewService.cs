@@ -382,9 +382,10 @@ internal sealed class MonthlyReviewService(
             proposal.Status = CorrectionProposalStatuses.Executed;
             proposal.ExecutedBy = executedBy.Trim();
             proposal.ExecutedAt = timeProvider.GetUtcNow();
-            var executedSnapshot = await context.MonthlyReviewCaseSnapshots.AsNoTracking()
+            var executedSnapshot = await context.MonthlyReviewCaseSnapshots
                 .SingleAsync(item => item.MonthlyReviewPeriodId == period.Id && item.CaseId == proposal.CaseId,
                     cancellationToken);
+            executedSnapshot.NeedsReReview = false;
             context.DailyReviewActionAudits.Add(new DailyReviewActionAudit
             {
                 CaseId = proposal.CaseId,
