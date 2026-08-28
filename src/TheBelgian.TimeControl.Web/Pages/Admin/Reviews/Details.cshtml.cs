@@ -1,12 +1,16 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.Extensions.Options;
 using TheBelgian.TimeControl.Core.Interfaces;
 using TheBelgian.TimeControl.Core.Models;
+using TheBelgian.TimeControl.Infrastructure.Configuration;
 
 namespace TheBelgian.TimeControl.Web.Pages.Admin.Reviews;
 
 public sealed class DetailsModel(
     IAdminReviewService reviewService,
+    ICurrentUserContext currentUser,
+    IOptions<AdminReviewWorkflowOptions> reviewOptions,
     ILogger<DetailsModel> logger) : PageModel
 {
     public enum ReviewActionKind
@@ -23,9 +27,6 @@ public sealed class DetailsModel(
 
     [BindProperty]
     public ReviewActionKind Action { get; set; } = ReviewActionKind.ConfirmProposal;
-
-    [BindProperty]
-    public string Reviewer { get; set; } = string.Empty;
 
     [BindProperty]
     public string? Comment { get; set; }
@@ -58,7 +59,6 @@ public sealed class DetailsModel(
 
         ChosenVisitCandidateId = Case.Admin.ChosenVisitCandidateId
             ?? Case.Matcher.ProposedVisit?.VisitCandidateId;
-        Reviewer = Case.Admin.Reviewer ?? string.Empty;
         Comment = Case.Admin.Comment;
         return Page();
     }
@@ -73,6 +73,7 @@ public sealed class DetailsModel(
                 return NotFound();
             }
 
+            var actor = currentUser.RequireActor(reviewOptions.Value.DefaultReviewer);
             var (decision, chosenId) = MapAction(Case);
             IReadOnlyList<string>? stopIds = null;
             if (!string.IsNullOrWhiteSpace(chosenId))
@@ -86,7 +87,8 @@ public sealed class DetailsModel(
             await reviewService.RecordDecisionAsync(
                 PerformanceId,
                 decision,
-                Reviewer,
+                actor.AuditIdentity,
+                actor.Subject,
                 Comment,
                 chosenId,
                 stopIds,

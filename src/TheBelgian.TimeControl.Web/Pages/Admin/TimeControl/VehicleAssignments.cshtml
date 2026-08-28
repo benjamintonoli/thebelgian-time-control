@@ -1,8 +1,11 @@
 @page "/Admin/TimeControl/VehicleAssignments"
 @model TheBelgian.TimeControl.Web.Pages.Admin.TimeControl.VehicleAssignmentsModel
 @using TheBelgian.TimeControl.Infrastructure.VehicleAssignments
+@inject TheBelgian.TimeControl.Core.Interfaces.ICurrentUserContext CurrentUserContext
+@inject Microsoft.Extensions.Options.IOptions<TheBelgian.TimeControl.Infrastructure.Configuration.AdminReviewWorkflowOptions> AdminReviewOptions
 @{
     ViewData["Title"] = "Voertuigtoewijzingen juli 2026";
+    var signedIn = CurrentUserContext.CurrentUser?.Email ?? AdminReviewOptions.Value.DefaultReviewer;
 }
 
 <div class="d-flex justify-content-between align-items-start mb-4">
@@ -10,7 +13,7 @@
         <div class="text-uppercase small text-muted fw-semibold">Eenmalige historische initialisatie</div>
         <h1>Voertuigtoewijzingen — juli 2026</h1>
         <p class="text-muted">Identity-evidence stelt kandidaten voor. Alleen een expliciete adminactie maakt masterdata.</p>
-        <p class="small text-muted mb-0">Reviewer: <strong>@Model.DefaultReviewer</strong></p>
+        <p class="small text-muted mb-0">Aangemeld als: <strong>@signedIn</strong></p>
         <p class="small text-muted mb-0">Laatste voertuigsynchronisatie: <strong>@(Model.LastSuccessfulVehicleAssignmentSyncAt?.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss") ?? "nog niet uitgevoerd")</strong></p>
     </div>
     <a class="btn btn-outline-secondary" asp-route-refresh="true">Bewijs opnieuw ophalen</a>

@@ -1,6 +1,10 @@
 ﻿@inject IWebHostEnvironment HostEnvironment
+@inject TheBelgian.TimeControl.Core.Interfaces.ICurrentUserContext CurrentUserContext
+@inject Microsoft.Extensions.Options.IOptions<TheBelgian.TimeControl.Infrastructure.Configuration.CloudflareAccessOptions> CloudflareAccessOptions
+@inject Microsoft.Extensions.Options.IOptions<TheBelgian.TimeControl.Infrastructure.Configuration.AdminReviewWorkflowOptions> AdminReviewOptions
 @{
     var isAdmin = Context.Request.Path.StartsWithSegments("/Admin");
+    var signedInUser = CurrentUserContext.CurrentUser;
 }
 <!DOCTYPE html>
 <html lang="nl">
@@ -55,6 +59,27 @@
                             </li>
                         }
                     </ul>
+                    @if (isAdmin)
+                    {
+                        <div class="small text-muted text-sm-end">
+                            @if (signedInUser is not null)
+                            {
+                                <div>Aangemeld als:</div>
+                                <div><strong>@signedInUser.Email</strong></div>
+                                @if (!string.IsNullOrWhiteSpace(signedInUser.DisplayName) &&
+                                     !string.Equals(signedInUser.DisplayName, signedInUser.Email, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    <div>@signedInUser.DisplayName</div>
+                                }
+                            }
+                            else if (!CloudflareAccessOptions.Value.Enabled)
+                            {
+                                <div>Aangemeld als:</div>
+                                <div><strong>@AdminReviewOptions.Value.DefaultReviewer</strong></div>
+                                <div class="text-muted">lokaal fallback</div>
+                            }
+                        </div>
+                    }
                 </div>
             </div>
         </nav>

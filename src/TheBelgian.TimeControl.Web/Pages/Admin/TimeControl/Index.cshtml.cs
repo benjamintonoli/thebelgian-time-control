@@ -10,6 +10,7 @@ namespace TheBelgian.TimeControl.Web.Pages.Admin.TimeControl;
 
 public sealed class IndexModel(
     IMonthlyReviewService monthlyReviewService,
+    ICurrentUserContext currentUser,
     TimeProvider timeProvider,
     IOptions<AdminReviewWorkflowOptions> reviewOptions,
     ILogger<IndexModel> logger) : PageModel
@@ -54,6 +55,7 @@ public sealed class IndexModel(
         var month = ResolveMonth();
         try
         {
+            var actor = RequireActor();
             var openBefore = await monthlyReviewService.GetCockpitAsync(
                 month, new DailyReviewFilter(DailyReviewQueueView.Open), CaseId, cancellationToken);
             var currentIndex = openBefore.Review.Cases
@@ -64,9 +66,10 @@ public sealed class IndexModel(
             var current = cockpit.Review.Selected
                 ?? throw new InvalidOperationException("Reviewcase niet gevonden.");
             await monthlyReviewService.SaveDecisionAsync(month, new SaveDailyReviewDecision(
-                CaseId, decision, Reason, ResolveReviewer(), Notes,
+                CaseId, decision, Reason, actor.AuditIdentity, Notes,
                 Combine(current.Date, ProposedStartTime, current.First.PlenionTime.Offset),
-                Combine(current.Date, ProposedEndTime, current.Last.PlenionTime.Offset)), cancellationToken);
+                Combine(current.Date, ProposedEndTime, current.Last.PlenionTime.Offset),
+                actor.Subject), cancellationToken);
             var resultMessage = decision == DailyReviewWorkflowStatus.PendingCorrection
                 ? "Correctievoorstel opgeslagen. Er is niets naar Plenion geschreven."
                 : "Beoordeling opgeslagen.";
@@ -112,6 +115,7 @@ public sealed class IndexModel(
             if (Reason is null)
                 throw new InvalidOperationException("Selecteer een reden.");
 
+            var actor = RequireActor();
             var month = ResolveMonth();
             var cockpit = await monthlyReviewService.GetCockpitAsync(
                 month, new DailyReviewFilter(DailyReviewQueueView.All), CaseId, cancellationToken);
@@ -123,10 +127,11 @@ public sealed class IndexModel(
                 new ExecuteDirectCorrectionRequest(
                     CaseId,
                     Reason.Value,
-                    ResolveReviewer(),
+                    actor.AuditIdentity,
                     Notes,
                     Combine(current.Date, ProposedStartTime, current.First.PlenionTime.Offset),
-                    Combine(current.Date, ProposedEndTime, current.Last.PlenionTime.Offset)),
+                    Combine(current.Date, ProposedEndTime, current.Last.PlenionTime.Offset),
+                    actor.Subject),
                 cancellationToken);
             if (result.Status == CorrectionProposalStatuses.Executed)
             {
@@ -181,8 +186,9 @@ public sealed class IndexModel(
     {
         try
         {
+            var actor = RequireActor();
             var result = await monthlyReviewService.PrepareAsync(
-                ResolveMonth(), ResolveReviewer(),
+                ResolveMonth(), actor.AuditIdentity,
                 null, true, cancellationToken);
             Message = $"Gegevens vernieuwd: {result.NewCases} nieuw, {result.ChangedCases} gewijzigd, " +
                       $"{result.UnchangedCases} ongewijzigd.";
@@ -201,8 +207,9 @@ public sealed class IndexModel(
     {
         try
         {
+            var actor = RequireActor();
             await monthlyReviewService.FinalizeAsync(
-                ResolveMonth(), ResolveReviewer(), ConfirmOpenCases, cancellationToken);
+                ResolveMonth(), actor.AuditIdentity, ConfirmOpenCases, cancellationToken);
             Message = "Maand afgesloten. Het definitieve rapport is beschikbaar.";
         }
         catch (Exception exception)
@@ -263,12 +270,11 @@ public sealed class IndexModel(
         return monthlyReviewService.GetDefaultMonth(timeProvider.GetLocalNow());
     }
 
+    private AuthenticatedActor RequireActor() =>
+        currentUser.RequireActor(reviewOptions.Value.DefaultReviewer);
+
     private static DateTimeOffset? Combine(DateOnly date, TimeOnly? time, TimeSpan offset) =>
         time is null ? null : new DateTimeOffset(date.ToDateTime(time.Value), offset);
-
-    private string ResolveReviewer() => DailyReviewDisplay.ResolveReviewer(
-        User?.Identity?.IsAuthenticated == true ? User.Identity.Name : null,
-        reviewOptions.Value.DefaultReviewer);
 
     private void ClearFilters()
     {

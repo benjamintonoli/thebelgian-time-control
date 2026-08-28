@@ -78,6 +78,30 @@ public sealed class PostWriteCorrectionStateTests
     }
 
     [Fact]
+    public async Task SuccessfulEndCorrection_StoresReviewerSubjectOnProposal()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        await fixture.PrepareAsync(EndCorrectionEvidenceJson());
+        var reviewCase = await fixture.OrdinaryCaseAsync();
+
+        var result = await fixture.Service.ExecuteDirectCorrectionAsync(
+            July,
+            new ExecuteDirectCorrectionRequest(
+                reviewCase.CaseId,
+                ReviewFeedbackReason.AdministrativeEntryError,
+                "benjamin.tonoli@thebelgian.be",
+                null,
+                null,
+                reviewCase.Last.PlenionTime.AddMinutes(-8),
+                "entra-subject-123"),
+            default);
+
+        Assert.Equal(CorrectionProposalStatuses.Executed, result.Status);
+        Assert.Equal("benjamin.tonoli@thebelgian.be", result.Proposal.ExecutedBy);
+        Assert.Equal("entra-subject-123", result.Proposal.ExecutedBySubject);
+    }
+
+    [Fact]
     public async Task ExecutedCorrection_AppearsInCompletedQueue_NotOpenQueue()
     {
         await using var fixture = await Fixture.CreateAsync();

@@ -156,6 +156,7 @@ public sealed class AdminReviewDecisionAudit
     public required string Decision { get; set; }
     public string? ReasonOrComment { get; set; }
     public required string Reviewer { get; set; }
+    public string? ReviewerSubject { get; set; }
     public DateTimeOffset DecidedAt { get; set; }
     public required string MatcherCommit { get; set; }
     public required string ConfigurationHash { get; set; }

@@ -6,6 +6,7 @@ using TheBelgian.TimeControl.Core.Configuration;
 using TheBelgian.TimeControl.Core.Interfaces;
 using TheBelgian.TimeControl.Core.Services;
 using TheBelgian.TimeControl.Infrastructure.AdminReview;
+using TheBelgian.TimeControl.Infrastructure.Authentication;
 using TheBelgian.TimeControl.Infrastructure.Configuration;
 using TheBelgian.TimeControl.Infrastructure.Geocoding;
 using TheBelgian.TimeControl.Infrastructure.Persistence;
@@ -53,6 +54,16 @@ public static class DependencyInjection
             .Validate(options => !string.IsNullOrWhiteSpace(options.DefaultReviewer),
                 "AdminReview:DefaultReviewer ontbreekt.")
             .ValidateOnStart();
+        services.AddOptions<CloudflareAccessOptions>()
+            .Bind(configuration.GetSection(CloudflareAccessOptions.SectionName))
+            .Validate(options => !options.Enabled ||
+                                 (!string.IsNullOrWhiteSpace(options.TeamDomain) &&
+                                  !string.IsNullOrWhiteSpace(options.Audience)),
+                "CloudflareAccess:TeamDomain en Audience zijn verplicht wanneer Enabled=true.")
+            .ValidateOnStart();
+        services.AddHttpClient(nameof(CloudflareAccessCertificateProvider));
+        services.AddSingleton<ICloudflareAccessCertificateProvider, CloudflareAccessCertificateProvider>();
+        services.AddSingleton<ICloudflareAccessJwtValidator, CloudflareAccessJwtValidator>();
         services.AddOptions<TimeControlCorrectionWriteOptions>()
             .Bind(configuration.GetSection(TimeControlCorrectionWriteOptions.SectionName))
             .Validate(options => options.TimeoutSeconds > 0,
@@ -475,6 +486,16 @@ public static class DependencyInjection
             "ReviewedAt",
             "TEXT NULL",
             cancellationToken);
+        foreach (var column in new (string Table, string Name, string Definition)[]
+                 {
+                     ("DailyReviewActionAudits", "ReviewedBySubject", "TEXT NULL"),
+                     ("DailyCorrectionProposals", "ProposedBySubject", "TEXT NULL"),
+                     ("DailyCorrectionProposals", "ExecutedBySubject", "TEXT NULL"),
+                     ("AdminReviewDecisionAudits", "ReviewerSubject", "TEXT NULL"),
+                 })
+        {
+            await EnsureColumnAsync(context, column.Table, column.Name, column.Definition, cancellationToken);
+        }
     }
 
     private static async Task EnsureColumnAsync(

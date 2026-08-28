@@ -17,8 +17,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="..\..\src\TheBelgian.TimeControl.Core\TheBelgian.TimeControl.Core.csproj" />
     <ProjectReference Include="..\..\src\TheBelgian.TimeControl.Infrastructure\TheBelgian.TimeControl.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\TheBelgian.TimeControl.Web\TheBelgian.TimeControl.Web.csproj" />
   </ItemGroup>
 
   <ItemGroup>

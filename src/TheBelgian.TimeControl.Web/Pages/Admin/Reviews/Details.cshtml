@@ -177,16 +177,13 @@ else
                         </select>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label" asp-for="Reviewer">Reviewer</label>
-                        <input class="form-control" asp-for="Reviewer" required />
-                    </div>
-                    <div class="mb-3">
                         <label class="form-label" asp-for="Comment">Opmerking / reden</label>
                         <textarea class="form-control" asp-for="Comment" rows="3"></textarea>
                     </div>
                     <button type="submit" class="btn btn-success">Beslissing opslaan</button>
                     <p class="small text-muted mt-2 mb-0">
-                        Reviewer verplicht. Afwijzing vereist reden. Andere kandidaat vereist opmerking.
+                        Beslissing wordt opgeslagen onder de aangemelde gebruiker.
+                        Afwijzing vereist reden. Andere kandidaat vereist opmerking.
                         Oorspronkelijke matcheruitkomst blijft bewaard. Geen Plenion-writeback.
                     </p>
                 </form>

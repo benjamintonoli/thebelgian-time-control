@@ -1,11 +1,15 @@
 using System.Text;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
 using TheBelgian.TimeControl.Core.Interfaces;
 using TheBelgian.TimeControl.Core.Models;
 using TheBelgian.TimeControl.Infrastructure;
 using TheBelgian.TimeControl.Infrastructure.Pilot;
 using TheBelgian.TimeControl.Infrastructure.VehicleAssignments;
+using TheBelgian.TimeControl.Web.Authentication;
 using TheBelgian.TimeControl.Web.Pages.Pilot;
+using TheBelgian.TimeControl.Web.Services;
 
 var isPrepareMonthlyReview = args.Contains(
     "--prepare-monthly-review", StringComparer.OrdinalIgnoreCase);
@@ -1192,7 +1196,26 @@ var dataProtectionDirectory = string.IsNullOrWhiteSpace(configuredDataProtection
     : Path.GetFullPath(configuredDataProtectionDirectory);
 Directory.CreateDirectory(dataProtectionDirectory);
 
-webBuilder.Services.AddRazorPages();
+webBuilder.Services.AddRazorPages(options =>
+{
+    options.Conventions.AuthorizeFolder(
+        "/Admin",
+        CloudflareAccessAuthenticationDefaults.AuthorizationPolicy);
+});
+webBuilder.Services.AddHttpContextAccessor();
+webBuilder.Services.AddScoped<ICurrentUserContext, HttpCurrentUserContext>();
+webBuilder.Services
+    .AddAuthentication(CloudflareAccessAuthenticationDefaults.AuthenticationScheme)
+    .AddScheme<AuthenticationSchemeOptions, CloudflareAccessAuthenticationHandler>(
+        CloudflareAccessAuthenticationDefaults.AuthenticationScheme,
+        _ => { });
+webBuilder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy(
+        CloudflareAccessAuthenticationDefaults.AuthorizationPolicy,
+        policy => policy.Requirements.Add(new CloudflareAccessAuthorizationRequirement()));
+});
+webBuilder.Services.AddSingleton<IAuthorizationHandler, CloudflareAccessAuthorizationHandler>();
 var dataProtection = webBuilder.Services.AddDataProtection()
     .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionDirectory))
     .SetApplicationName("TheBelgian.TimeControl");
@@ -1216,6 +1239,7 @@ app.UseStaticFiles();
 
 app.UseRouting();
 
+app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapGet("/health", () => Results.Ok(new

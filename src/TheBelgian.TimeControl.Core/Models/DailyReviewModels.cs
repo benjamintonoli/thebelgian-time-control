@@ -164,7 +164,8 @@ public sealed record SaveDailyReviewDecision(
     string Reviewer,
     string? Notes,
     DateTimeOffset? ProposedStart,
-    DateTimeOffset? ProposedEnd);
+    DateTimeOffset? ProposedEnd,
+    string? ReviewerSubject = null);
 
 public sealed class DailyReviewActionAudit
 {
@@ -176,6 +177,7 @@ public sealed class DailyReviewActionAudit
     public string? DecisionReason { get; set; }
     public string? Notes { get; set; }
     public required string ReviewedBy { get; set; }
+    public string? ReviewedBySubject { get; set; }
     public DateTimeOffset ReviewedAt { get; set; }
     public required string EvidenceSnapshotJson { get; set; }
     public required string AlgorithmVersion { get; set; }
@@ -192,6 +194,7 @@ public sealed class DailyCorrectionProposal
     public required string Reason { get; set; }
     public string? Notes { get; set; }
     public required string ProposedBy { get; set; }
+    public string? ProposedBySubject { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public required string Status { get; set; }
     public long FirstPerformanceId { get; set; }
@@ -207,6 +210,7 @@ public sealed class DailyCorrectionProposal
     public DateTimeOffset? ExecutedStart { get; set; }
     public DateTimeOffset? ExecutedEnd { get; set; }
     public string? ExecutedBy { get; set; }
+    public string? ExecutedBySubject { get; set; }
     public DateTimeOffset? ExecutedAt { get; set; }
     public string? PlenionWriteReference { get; set; }
     public string? PlenionWriteResponse { get; set; }
@@ -240,7 +244,8 @@ public sealed record ExecuteDirectCorrectionRequest(
     string Reviewer,
     string? Notes,
     DateTimeOffset? ProposedStart,
-    DateTimeOffset? ProposedEnd);
+    DateTimeOffset? ProposedEnd,
+    string? ReviewerSubject = null);
 
 public sealed class DailyGeneratedFactualReport
 {

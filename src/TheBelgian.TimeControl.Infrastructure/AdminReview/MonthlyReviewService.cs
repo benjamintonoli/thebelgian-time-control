@@ -247,6 +247,7 @@ internal sealed class MonthlyReviewService(
             DecisionReason = request.Reason?.ToString(),
             Notes = Normalize(request.Notes),
             ReviewedBy = request.Reviewer.Trim(),
+            ReviewedBySubject = request.ReviewerSubject,
             ReviewedAt = now,
             EvidenceSnapshotJson = snapshot.EvidenceSnapshotJson,
             AlgorithmVersion = period.AlgorithmVersion,
@@ -359,6 +360,7 @@ internal sealed class MonthlyReviewService(
             }
             proposal.Status = CorrectionProposalStatuses.Executed;
             proposal.ExecutedBy = executedBy.Trim();
+            proposal.ExecutedBySubject = proposal.ProposedBySubject;
             proposal.ExecutedAt = timeProvider.GetUtcNow();
             var executedSnapshot = await context.MonthlyReviewCaseSnapshots
                 .SingleAsync(item => item.MonthlyReviewPeriodId == period.Id && item.CaseId == proposal.CaseId,
@@ -377,6 +379,7 @@ internal sealed class MonthlyReviewService(
                 DecisionReason = proposal.Reason,
                 Notes = "Correctie uitgevoerd via PlenionWriteService.",
                 ReviewedBy = executedBy.Trim(),
+                ReviewedBySubject = proposal.ProposedBySubject,
                 ReviewedAt = proposal.ExecutedAt.Value,
                 EvidenceSnapshotJson = executedSnapshot.EvidenceSnapshotJson,
                 AlgorithmVersion = period.AlgorithmVersion,
@@ -397,6 +400,7 @@ internal sealed class MonthlyReviewService(
                 DecisionReason = proposal.Reason,
                 Notes = response.Message,
                 ReviewedBy = executedBy.Trim(),
+                ReviewedBySubject = proposal.ProposedBySubject,
                 ReviewedAt = timeProvider.GetUtcNow(),
                 EvidenceSnapshotJson = snapshot.EvidenceSnapshotJson,
                 AlgorithmVersion = period.AlgorithmVersion,
@@ -473,7 +477,8 @@ internal sealed class MonthlyReviewService(
             request.Reviewer,
             request.Notes,
             proposedStart,
-            proposedEnd);
+            proposedEnd,
+            request.ReviewerSubject);
         var proposal = CreateApprovedProposal(
             reviewCase, snapshot.EvidenceSnapshotJson, saveRequest, now);
         context.DailyCorrectionProposals.Add(proposal);
@@ -486,6 +491,7 @@ internal sealed class MonthlyReviewService(
             DecisionReason = request.Reason.ToString(),
             Notes = Normalize(request.Notes),
             ReviewedBy = request.Reviewer.Trim(),
+            ReviewedBySubject = request.ReviewerSubject,
             ReviewedAt = now,
             EvidenceSnapshotJson = snapshot.EvidenceSnapshotJson,
             AlgorithmVersion = period.AlgorithmVersion,
@@ -555,6 +561,7 @@ internal sealed class MonthlyReviewService(
             Reason = request.Reason!.Value.ToString(),
             Notes = Normalize(request.Notes),
             ProposedBy = request.Reviewer.Trim(),
+            ProposedBySubject = request.ReviewerSubject,
             CreatedAt = now,
             Status = CorrectionProposalStatuses.Approved,
             FirstPerformanceId = reviewCase.First.PerformanceId,

@@ -26,6 +26,7 @@ public interface IAdminReviewService
         long performanceId,
         AdminReviewStatus decision,
         string reviewer,
+        string? reviewerSubject,
         string? comment,
         string? chosenVisitCandidateId,
         IReadOnlyList<string>? chosenVisitSourceStopIds,

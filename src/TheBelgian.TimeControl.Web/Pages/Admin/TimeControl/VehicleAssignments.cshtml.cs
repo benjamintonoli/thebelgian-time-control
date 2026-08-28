@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.Extensions.Options;
+using TheBelgian.TimeControl.Core.Interfaces;
+using TheBelgian.TimeControl.Core.Models;
 using TheBelgian.TimeControl.Infrastructure.Configuration;
 using TheBelgian.TimeControl.Infrastructure.VehicleAssignments;
 
@@ -10,6 +12,7 @@ public sealed class VehicleAssignmentsModel(
     HistoricalVehicleCandidateCache candidateCache,
     HistoricalVehicleAssignmentWorkflowService workflowService,
     VehicleAssignmentSyncHistoryService syncHistoryService,
+    ICurrentUserContext currentUser,
     IOptions<VehicleAssignmentReviewOptions> reviewOptions,
     ILogger<VehicleAssignmentsModel> logger) : PageModel
 {
@@ -23,7 +26,6 @@ public sealed class VehicleAssignmentsModel(
     [BindProperty] public DateOnly? TransferDate { get; set; }
     [BindProperty] public string EvidenceNote { get; set; } = string.Empty;
 
-    public string DefaultReviewer => reviewOptions.Value.DefaultReviewer;
     public HistoricalVehicleCandidateResult? Result { get; private set; }
     public DateTimeOffset? LastSuccessfulVehicleAssignmentSyncAt { get; private set; }
     public string? Message { get; private set; }
@@ -37,7 +39,7 @@ public sealed class VehicleAssignmentsModel(
         await ExecuteAsync(async () =>
         {
             await workflowService.ConfirmCandidatesAsync(
-                [CandidateKey], DefaultReviewer, false, cancellationToken);
+                [CandidateKey], RequireActor().AuditIdentity, false, cancellationToken);
             Message = "Historische juli-assignment bevestigd en geaudit.";
         }, cancellationToken);
         return Page();
@@ -48,7 +50,7 @@ public sealed class VehicleAssignmentsModel(
         await ExecuteAsync(async () =>
         {
             var assignments = await workflowService.ConfirmCandidatesAsync(
-                SelectedCandidateKeys, DefaultReviewer, true, cancellationToken);
+                SelectedCandidateKeys, RequireActor().AuditIdentity, true, cancellationToken);
             Message = $"{assignments.Count} vooraf getoonde HighConfidenceCandidates bevestigd.";
         }, cancellationToken);
         return Page();
@@ -59,7 +61,7 @@ public sealed class VehicleAssignmentsModel(
         await ExecuteAsync(async () =>
         {
             await workflowService.ConfirmCustomAsync(
-                TechnicianCode, ObjectId, From, Through, DefaultReviewer,
+                TechnicianCode, ObjectId, From, Through, RequireActor().AuditIdentity,
                 $"Admin koos ander voertuig. {EvidenceNote}", cancellationToken);
             candidateCache.MarkConfirmed([CandidateKey]);
             Message = "Afwijkend voertuig expliciet bevestigd; niets stil overschreven.";
@@ -75,7 +77,7 @@ public sealed class VehicleAssignmentsModel(
                 throw new ArgumentException("Vorig ObjectId en transferdatum zijn verplicht.");
             await workflowService.RegisterTransferAsync(new HistoricalVehicleTransferRequest(
                 TechnicianCode, PreviousObjectId, ObjectId, TransferDate.Value,
-                From, Through, DefaultReviewer, EvidenceNote), cancellationToken);
+                From, Through, RequireActor().AuditIdentity, EvidenceNote), cancellationToken);
             candidateCache.MarkConfirmed([CandidateKey]);
             Message = "Twee exclusieve transferperioden bevestigd en samen geaudit.";
         }, cancellationToken);
@@ -87,11 +89,14 @@ public sealed class VehicleAssignmentsModel(
         await ExecuteAsync(async () =>
         {
             await workflowService.RecordInsufficientInformationAsync(
-                CandidateKey, TechnicianCode, DefaultReviewer, EvidenceNote, cancellationToken);
+                CandidateKey, TechnicianCode, RequireActor().AuditIdentity, EvidenceNote, cancellationToken);
             Message = "Onvoldoende informatie geregistreerd; er is geen assignment aangemaakt.";
         }, cancellationToken);
         return Page();
     }
+
+    private AuthenticatedActor RequireActor() =>
+        currentUser.RequireActor(reviewOptions.Value.DefaultReviewer);
 
     private async Task ExecuteAsync(Func<Task> action, CancellationToken cancellationToken)
     {
