@@ -24,9 +24,10 @@ $database = (Resolve-Path -LiteralPath $DatabasePath).Path
 $current = (Resolve-Path -LiteralPath $CurrentPath).Path
 $configPath = Join-Path $current 'appsettings.Production.json'
 $settings = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
-Assert-Equal $settings.TimeControlCorrectionWrites.Enabled $false 'TimeControl-writeflag is onveilig.'
-Assert-Equal $settings.TimeControlCorrectionWrites.UseMock $false 'UseMock is onveilig.'
+Assert-Equal $settings.TimeControlCorrectionWrites.Enabled $true 'TimeControl-writeflag moet enabled zijn.'
+Assert-Equal $settings.TimeControlCorrectionWrites.UseMock $false 'UseMock moet false zijn.'
 Assert-Equal $settings.TimeControlCorrectionWrites.BaseUrl $PwsUrl 'Interne PWS URL wijkt af.'
+Assert-Equal $settings.CloudflareAccess.Enabled $true 'CloudflareAccess moet enabled zijn.'
 if ($settings.ConnectionStrings.TimeControl -notlike "*$database*") {
     throw 'Productieconfig verwijst niet naar de verwachte database.'
 }
@@ -45,8 +46,8 @@ if (-not $cockpit.Content.Contains('Juli 2026', [StringComparison]::OrdinalIgnor
 $pwsHealth = Invoke-RestMethod -Uri "$PwsUrl/health" -TimeoutSec 10
 Assert-Equal $pwsHealth.status 'ok' 'PWS-health faalde.'
 $pwsFeatures = (Invoke-RestMethod -Uri "$PwsUrl/health/features" -TimeoutSec 10).features
-Assert-Equal $pwsFeatures.plenionEnableTimeControlPerformanceCorrectionEndpoint $false `
-    'PWS TimeControl-correctieendpoint staat actief.'
+Assert-Equal $pwsFeatures.plenionEnableTimeControlPerformanceCorrectionEndpoint $true `
+    'PWS TimeControl-correctieendpoint is niet actief.'
 
 [pscustomobject]@{
     Service = $service.Status
@@ -55,7 +56,8 @@ Assert-Equal $pwsFeatures.plenionEnableTimeControlPerformanceCorrectionEndpoint 
     CockpitHttp = $cockpit.StatusCode
     Database = $database
     PwsHealth = $pwsHealth.status
-    TimeControlCorrectionWrites = $false
-    PwsCorrectionEndpoint = $false
+    TimeControlCorrectionWrites = $true
+    PwsCorrectionEndpoint = $true
+    CloudflareAccess = $true
     Month = $Month
 }

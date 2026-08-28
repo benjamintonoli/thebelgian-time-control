@@ -98,12 +98,15 @@ if (-not (Test-Path -LiteralPath $appExe -PathType Leaf)) {
 }
 
 $settings = Get-Content -LiteralPath $config -Raw | ConvertFrom-Json
-if ($settings.TimeControlCorrectionWrites.Enabled -ne $false -or
+if ($settings.TimeControlCorrectionWrites.Enabled -ne $true -or
     $settings.TimeControlCorrectionWrites.UseMock -ne $false) {
-    throw 'Safety gate: TimeControl-correctiewrites en UseMock moeten false zijn.'
+    throw 'Safety gate: TimeControl-correctiewrites moeten enabled=true en UseMock=false zijn.'
 }
 if ($settings.TimeControlCorrectionWrites.BaseUrl -ne 'http://localhost:5090') {
     throw 'Safety gate: de interne PWS BaseUrl moet http://localhost:5090 zijn.'
+}
+if ($settings.CloudflareAccess.Enabled -ne $true) {
+    throw 'Safety gate: CloudflareAccess.Enabled moet true zijn in productie.'
 }
 if ($settings.ConnectionStrings.PlenionOdbc -notmatch 'DSN=PlenionWriteLive') {
     throw 'Safety gate: PlenionOdbc moet de LIVE DSN gebruiken.'
@@ -120,11 +123,14 @@ if ([string]::IsNullOrWhiteSpace($settings.Geocoding.ApiKey)) {
     throw 'Geocoding ApiKey ontbreekt in de beveiligde productieconfig.'
 }
 
-New-Item -ItemType Directory -Force -Path $logs, (Join-Path $root 'backups') | Out-Null
+$backups = Join-Path $root 'backups'
+New-Item -ItemType Directory -Force -Path $logs, $backups | Out-Null
 New-Item -ItemType Directory -Force -Path $keysPath | Out-Null
+Grant-DirectoryAccess $releasesRoot $ServiceAccount ([Security.AccessControl.FileSystemRights]'ReadAndExecute')
 Grant-DirectoryAccess $release $ServiceAccount ([Security.AccessControl.FileSystemRights]'ReadAndExecute')
 Grant-DirectoryAccess (Join-Path $root 'data') $ServiceAccount ([Security.AccessControl.FileSystemRights]::Modify)
 Grant-DirectoryAccess $logs $ServiceAccount ([Security.AccessControl.FileSystemRights]::Modify)
+Grant-DirectoryAccess $backups $ServiceAccount ([Security.AccessControl.FileSystemRights]::Modify)
 Protect-Config $config $ServiceAccount
 
 $releaseConfig = Join-Path $release 'appsettings.Production.json'
@@ -210,9 +216,6 @@ try {
         "ASPNETCORE_URLS=$Url",
         "ConnectionStrings__TimeControl=Data Source=$database",
         "DataProtection__KeysPath=$keysPath",
-        'TimeControlCorrectionWrites__Enabled=false',
-        'TimeControlCorrectionWrites__UseMock=false',
-        'TimeControlCorrectionWrites__BaseUrl=http://localhost:5090',
         "WindowsService__ServiceName=$ServiceName")
     New-ItemProperty -LiteralPath $serviceKey -Name Environment -PropertyType MultiString `
         -Value $environment -Force | Out-Null
@@ -246,5 +249,5 @@ try {
     Backup = $backup
     Url = $Url
     Started = (Get-Service -Name $ServiceName).Status -eq 'Running'
-    CorrectionWritesEnabled = $false
+    CorrectionWritesEnabled = $settings.TimeControlCorrectionWrites.Enabled
 }

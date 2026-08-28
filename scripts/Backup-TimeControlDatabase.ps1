@@ -42,16 +42,18 @@ try {
     if ($sourceHash -ne $backupHash) { throw 'Backupverificatie faalde: hashes verschillen.' }
     Move-Item -LiteralPath $temporary -Destination $target
 
-    $cutoff = (Get-Date).AddDays(-$RetentionDays)
-    Get-ChildItem -LiteralPath $backupRoot -File -Filter 'time-control-*.db' |
-        Where-Object LastWriteTime -LT $cutoff |
-        ForEach-Object {
-            $candidate = [IO.Path]::GetFullPath($_.FullName)
-            if ([IO.Path]::GetDirectoryName($candidate) -ne $backupRoot) {
-                throw "Retentiedoel valt buiten backupmap: $candidate"
+    if ($Reason -eq 'Daily') {
+        $cutoff = (Get-Date).AddDays(-$RetentionDays)
+        Get-ChildItem -LiteralPath $backupRoot -File -Filter 'time-control-daily-*.db' |
+            Where-Object LastWriteTime -LT $cutoff |
+            ForEach-Object {
+                $candidate = [IO.Path]::GetFullPath($_.FullName)
+                if ([IO.Path]::GetDirectoryName($candidate) -ne $backupRoot) {
+                    throw "Retentiedoel valt buiten backupmap: $candidate"
+                }
+                Remove-Item -LiteralPath $candidate -Force
             }
-            Remove-Item -LiteralPath $candidate -Force
-        }
+    }
 
     [pscustomobject]@{
         Database = $database

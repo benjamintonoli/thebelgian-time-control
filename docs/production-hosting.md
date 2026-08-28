@@ -38,8 +38,8 @@ Maak buiten Git:
 `C:\Apps\TheBelgian.TimeControl\config\appsettings.Production.json`.
 Vertrek van `config\appsettings.Production.template.json` en vul uitsluitend
 op de server de PowerFleet- en Geoapify API-key in. Een PWS API-key is pas nodig
-als PWS die authenticatie gebruikt; de correctieflags blijven altijd false in
-deze fase.
+als PWS die authenticatie gebruikt. In live productie blijven correctieflags
+`Enabled=true` en `UseMock=false`; Cloudflare Access moet `Enabled=true` zijn.
 
 De installer beperkt de ACL van het configbestand tot SYSTEM, Administrators
 en read voor het serviceaccount. Daarna maakt hij in de actieve release een
@@ -90,6 +90,9 @@ $database = 'C:\Apps\TheBelgian.TimeControl\data\time-control.db'
   -PublishPath $current -DatabasePath $database `
   -LogPath 'C:\Apps\TheBelgian.TimeControl\logs\monthly-prepare.log' `
   -ServiceAccount $account -Credential $credential
+
+& C:\Dev\thebelgian-time-control\scripts\Install-TimeControlDatabaseBackupTask.ps1 `
+  -ServiceAccount $account -Credential $credential
 ```
 
 De actors zijn respectievelijk `SYSTEM_VEHICLE_SYNC` en
@@ -130,8 +133,8 @@ Na installatie:
 ```
 
 Deze controle is read-only en valideert service, loopbacklistener, `/health`,
-cockpit, juli, LastVehicleSync, productie-DB, PWS-health en beide uitgeschakelde
-correctieflags.
+cockpit, juli, LastVehicleSync, productie-DB, PWS-health, actieve correctieflags
+en Cloudflare Access.
 
 ## Cloudflare-handoff
 
