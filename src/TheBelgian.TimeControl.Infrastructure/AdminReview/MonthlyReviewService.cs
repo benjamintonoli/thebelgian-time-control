@@ -199,30 +199,8 @@ internal sealed class MonthlyReviewService(
                 .ToArrayAsync(cancellationToken);
         var caseIds = snapshots.Select(item => item.CaseId).ToArray();
         var latest = await reviewRepository.LatestAsync(caseIds, cancellationToken);
-        var all = snapshots.Select(snapshot =>
-        {
-            var value = JsonSerializer.Deserialize<DailyReviewCase>(snapshot.CaseJson, JsonOptions)
-                ?? throw new InvalidDataException($"Snapshot {snapshot.CaseId} is ongeldig.");
-            value = value.TripContext is null
-                ? value with
-                {
-                    TripContext = DailyReviewTripContextMapper.Map(
-                        value.EvidenceSnapshotJson, value.First, value.Last),
-                }
-                : value;
-            if (snapshot.NeedsReReview ||
-                latest.TryGetValue(snapshot.CaseId, out var stale) &&
-                stale.EvidenceSnapshotJson != snapshot.EvidenceSnapshotJson)
-            {
-                return value with { Decision = new DailyReviewDecision(
-                    DailyReviewWorkflowStatus.NeedsReReview, null,
-                    "Gegevens gewijzigd — opnieuw controleren", null, null, null, null) };
-            }
-
-            return latest.TryGetValue(snapshot.CaseId, out var action)
-                ? value with { Decision = ToDecision(action) }
-                : value;
-        }).ToArray();
+        var executedProposals = await LoadLatestExecutedProposalsAsync(context, caseIds, cancellationToken);
+        var all = snapshots.Select(snapshot => MapSnapshotCase(snapshot, latest, executedProposals)).ToArray();
         var filtered = Filter(all, filter).ToArray();
         var selected = !string.IsNullOrWhiteSpace(selectedCaseId)
             ? all.FirstOrDefault(item => item.CaseId == selectedCaseId)
@@ -386,6 +364,10 @@ internal sealed class MonthlyReviewService(
                 .SingleAsync(item => item.MonthlyReviewPeriodId == period.Id && item.CaseId == proposal.CaseId,
                     cancellationToken);
             executedSnapshot.NeedsReReview = false;
+            var executedCase = JsonSerializer.Deserialize<DailyReviewCase>(executedSnapshot.CaseJson, JsonOptions)
+                ?? throw new InvalidDataException("Reviewcase-snapshot is ongeldig.");
+            executedCase = ApplyExecutedCorrectionToCase(executedCase, proposal);
+            executedSnapshot.CaseJson = JsonSerializer.Serialize(executedCase, JsonOptions);
             context.DailyReviewActionAudits.Add(new DailyReviewActionAudit
             {
                 CaseId = proposal.CaseId,
@@ -396,7 +378,7 @@ internal sealed class MonthlyReviewService(
                 Notes = "Correctie uitgevoerd via PlenionWriteService.",
                 ReviewedBy = executedBy.Trim(),
                 ReviewedAt = proposal.ExecutedAt.Value,
-                EvidenceSnapshotJson = proposal.PlenionWriteResponse,
+                EvidenceSnapshotJson = executedSnapshot.EvidenceSnapshotJson,
                 AlgorithmVersion = period.AlgorithmVersion,
             });
         }
@@ -462,13 +444,6 @@ internal sealed class MonthlyReviewService(
         if (!DailyReviewDisplay.IsDirectCorrectionActionable(reviewCase))
             throw new InvalidOperationException("Geen betrouwbare GPS-correctie beschikbaar.");
 
-        var proposedStart = NormalizeProposedTime(
-            request.ProposedStart, reviewCase.First, "start");
-        var proposedEnd = NormalizeProposedTime(
-            request.ProposedEnd, reviewCase.Last, "einde");
-        if (proposedStart is null && proposedEnd is null)
-            throw new InvalidOperationException("Kies eerst een nieuwe start- en/of eindtijd.");
-
         var latest = await context.DailyCorrectionProposals
             .Where(item => item.CaseId == request.CaseId)
             .OrderByDescending(item => item.Id)
@@ -476,12 +451,20 @@ internal sealed class MonthlyReviewService(
         if (latest?.Status == CorrectionProposalStatuses.Executing)
             throw new InvalidOperationException("De correctie wordt al uitgevoerd of is ondertussen gewijzigd.");
         if (latest?.Status == CorrectionProposalStatuses.Executed &&
-            SameTargets(latest, proposedStart, proposedEnd))
+            SameClock(latest.ProposedStart, request.ProposedStart) &&
+            SameClock(latest.ProposedEnd, request.ProposedEnd))
         {
             await transaction.CommitAsync(cancellationToken);
             return new CorrectionExecutionResult(
                 latest.Status, "Correctie was al uitgevoerd.", latest);
         }
+
+        var proposedStart = NormalizeProposedTime(
+            request.ProposedStart, reviewCase.First, "start");
+        var proposedEnd = NormalizeProposedTime(
+            request.ProposedEnd, reviewCase.Last, "einde");
+        if (proposedStart is null && proposedEnd is null)
+            throw new InvalidOperationException("Kies eerst een nieuwe start- en/of eindtijd.");
 
         var saveRequest = new SaveDailyReviewDecision(
             request.CaseId,
@@ -911,6 +894,84 @@ internal sealed class MonthlyReviewService(
             executedBy.Trim(),
             proposal.CaseId,
             $"{month.Key}:{proposal.CaseId}:{proposal.Id}");
+    }
+
+    private static DailyReviewCase MapSnapshotCase(
+        MonthlyReviewCaseSnapshot snapshot,
+        IReadOnlyDictionary<string, DailyReviewActionAudit> latestAudits,
+        IReadOnlyDictionary<string, DailyCorrectionProposal> executedProposals)
+    {
+        var value = JsonSerializer.Deserialize<DailyReviewCase>(snapshot.CaseJson, JsonOptions)
+            ?? throw new InvalidDataException($"Snapshot {snapshot.CaseId} is ongeldig.");
+        value = value.TripContext is null
+            ? value with
+            {
+                TripContext = DailyReviewTripContextMapper.Map(
+                    value.EvidenceSnapshotJson, value.First, value.Last),
+            }
+            : value;
+        if (latestAudits.TryGetValue(snapshot.CaseId, out var action) &&
+            action.Decision == DailyReviewWorkflowStatus.CorrectionExecuted.ToString())
+        {
+            if (executedProposals.TryGetValue(snapshot.CaseId, out var proposal))
+                value = ApplyExecutedCorrectionToCase(value, proposal);
+            return value with { Decision = ToDecision(action) };
+        }
+
+        if (snapshot.NeedsReReview ||
+            latestAudits.TryGetValue(snapshot.CaseId, out var stale) &&
+            stale.EvidenceSnapshotJson != snapshot.EvidenceSnapshotJson)
+        {
+            return value with { Decision = new DailyReviewDecision(
+                DailyReviewWorkflowStatus.NeedsReReview, null,
+                "Gegevens gewijzigd — opnieuw controleren", null, null, null, null) };
+        }
+
+        return latestAudits.TryGetValue(snapshot.CaseId, out action)
+            ? value with { Decision = ToDecision(action) }
+            : value;
+    }
+
+    private static async Task<IReadOnlyDictionary<string, DailyCorrectionProposal>> LoadLatestExecutedProposalsAsync(
+        TimeControlDbContext context,
+        string[] caseIds,
+        CancellationToken cancellationToken)
+    {
+        if (caseIds.Length == 0)
+            return new Dictionary<string, DailyCorrectionProposal>(StringComparer.Ordinal);
+
+        var rows = await context.DailyCorrectionProposals.AsNoTracking()
+            .Where(item => caseIds.Contains(item.CaseId) &&
+                           item.Status == CorrectionProposalStatuses.Executed)
+            .OrderByDescending(item => item.Id)
+            .ToListAsync(cancellationToken);
+        return rows.GroupBy(item => item.CaseId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+    }
+
+    internal static DailyReviewCase ApplyExecutedCorrectionToCase(
+        DailyReviewCase reviewCase,
+        DailyCorrectionProposal proposal)
+    {
+        var first = reviewCase.First;
+        var last = reviewCase.Last;
+        if (proposal.ProposedStart is not null)
+        {
+            first = first with
+            {
+                PlenionTime = proposal.ExecutedStart ?? proposal.ProposedStart.Value,
+            };
+        }
+
+        if (proposal.ProposedEnd is not null)
+        {
+            last = last with
+            {
+                PlenionTime = proposal.ExecutedEnd ?? proposal.ProposedEnd.Value,
+            };
+        }
+
+        return reviewCase with { First = first, Last = last };
     }
 
     private static void ApplyExecutedValues(

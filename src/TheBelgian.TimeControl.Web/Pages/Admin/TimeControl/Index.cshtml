@@ -139,16 +139,43 @@
                 }
             </nav>
 
+            @{
+                var executedProposal = Model.CorrectionProposal is { Status: CorrectionProposalStatuses.Executed } executed
+                    ? executed
+                    : null;
+            }
             <section class="boundary-grid">
                 <article class="boundary-card">
                     <div class="boundary-kicker">Eerste klantprestatie</div><h3>Start van de werkdag</h3>
-                    <dl><dt>Geregistreerde start</dt><dd>@selected.First.PlenionTime.ToString("HH:mm")</dd><dt>GPS-aankomst op werklocatie</dt><dd>@DailyReviewDisplay.ApproximateTime(selected.First.GpsTime)</dd></dl>
+                    <dl>
+                        @if (executedProposal?.ProposedStart is not null)
+                        {
+                            <dt>Oorspronkelijk geregistreerd</dt><dd>@executedProposal.OriginalStart.ToString("HH:mm")</dd>
+                            <dt>Actueel in Plenion</dt><dd>@((executedProposal.ExecutedStart ?? executedProposal.ProposedStart)?.ToString("HH:mm"))</dd>
+                        }
+                        else
+                        {
+                            <dt>Geregistreerde start</dt><dd>@selected.First.PlenionTime.ToString("HH:mm")</dd>
+                        }
+                        <dt>GPS-aankomst op werklocatie</dt><dd>@DailyReviewDisplay.ApproximateTime(selected.First.GpsTime)</dd>
+                    </dl>
                     <p class="boundary-result">@DailyReviewDisplay.Difference(selected.First)</p>
                     <div class="boundary-impact @DailyReviewDisplay.BoundaryImpactClass(selected.First)">@DailyReviewDisplay.BoundaryImpact(selected.First)</div>
                 </article>
                 <article class="boundary-card">
                     <div class="boundary-kicker">Laatste klantprestatie</div><h3>Einde van de werkdag</h3>
-                    <dl><dt>GPS-vertrek van werklocatie</dt><dd>@DailyReviewDisplay.ApproximateTime(selected.Last.GpsTime)</dd><dt>Geregistreerd einde</dt><dd>@selected.Last.PlenionTime.ToString("HH:mm")</dd></dl>
+                    <dl>
+                        <dt>GPS-vertrek van werklocatie</dt><dd>@DailyReviewDisplay.ApproximateTime(selected.Last.GpsTime)</dd>
+                        @if (executedProposal?.ProposedEnd is not null)
+                        {
+                            <dt>Oorspronkelijk geregistreerd</dt><dd>@executedProposal.OriginalEnd.ToString("HH:mm")</dd>
+                            <dt>Actueel in Plenion</dt><dd>@((executedProposal.ExecutedEnd ?? executedProposal.ProposedEnd)?.ToString("HH:mm"))</dd>
+                        }
+                        else
+                        {
+                            <dt>Geregistreerd einde</dt><dd>@selected.Last.PlenionTime.ToString("HH:mm")</dd>
+                        }
+                    </dl>
                     <p class="boundary-result">@DailyReviewDisplay.Difference(selected.Last)</p>
                     <div class="boundary-impact @DailyReviewDisplay.BoundaryImpactClass(selected.Last)">@DailyReviewDisplay.BoundaryImpact(selected.Last)</div>
                 </article>
