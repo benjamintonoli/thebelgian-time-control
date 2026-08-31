@@ -43,30 +43,85 @@ function Remove-DeploymentLink([string]$Path, [string]$Root) {
     Remove-Item -LiteralPath $safePath -Force
 }
 
-function Grant-DirectoryAccess(
-    [string]$Path,
-    [string]$Identity,
+function Resolve-AccountSid([string]$Identity) {
+    if ([string]::IsNullOrWhiteSpace($Identity)) {
+        throw 'Identity is verplicht voor ACL-resolutie.'
+    }
+    try {
+        return ([Security.Principal.NTAccount]$Identity).Translate(
+            [Security.Principal.SecurityIdentifier])
+    } catch {
+        throw "Identity kan niet naar SID worden vertaald: $Identity. $($_.Exception.Message)"
+    }
+}
+
+function Get-WellKnownSid([Security.Principal.WellKnownSidType]$WellKnown) {
+    return [Security.Principal.SecurityIdentifier]::new($WellKnown, $null)
+}
+
+function New-SidDirectoryAccessRule(
+    [Security.Principal.SecurityIdentifier]$Sid,
     [Security.AccessControl.FileSystemRights]$Rights) {
-    $acl = Get-Acl -LiteralPath $Path
-    $rule = [Security.AccessControl.FileSystemAccessRule]::new(
-        $Identity,
+    return [Security.AccessControl.FileSystemAccessRule]::new(
+        $Sid,
         $Rights,
         [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit',
         [Security.AccessControl.PropagationFlags]::None,
         [Security.AccessControl.AccessControlType]::Allow)
+}
+
+function New-SidFileAccessRule(
+    [Security.Principal.SecurityIdentifier]$Sid,
+    [Security.AccessControl.FileSystemRights]$Rights) {
+    return [Security.AccessControl.FileSystemAccessRule]::new(
+        $Sid,
+        $Rights,
+        [Security.AccessControl.AccessControlType]::Allow)
+}
+
+function Test-AclHasRule(
+    [Security.AccessControl.FileSystemSecurity]$Acl,
+    [Security.AccessControl.FileSystemAccessRule]$Rule) {
+    foreach ($existing in $Acl.GetAccessRules($true, $false, [Security.Principal.SecurityIdentifier])) {
+        if ($existing.IdentityReference.Value -eq $Rule.IdentityReference.Value -and
+            $existing.FileSystemRights -eq $Rule.FileSystemRights -and
+            $existing.AccessControlType -eq $Rule.AccessControlType -and
+            $existing.InheritanceFlags -eq $Rule.InheritanceFlags -and
+            $existing.PropagationFlags -eq $Rule.PropagationFlags -and
+            -not $existing.IsInherited) {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Grant-DirectoryAccess(
+    [string]$Path,
+    [string]$Identity,
+    [Security.AccessControl.FileSystemRights]$Rights) {
+    $sid = Resolve-AccountSid $Identity
+    $acl = Get-Acl -LiteralPath $Path
+    $rule = New-SidDirectoryAccessRule $sid $Rights
+    if (Test-AclHasRule $acl $rule) {
+        return
+    }
     $acl.SetAccessRule($rule)
     Set-Acl -LiteralPath $Path -AclObject $acl
 }
 
 function Protect-Config([string]$Path, [string]$Identity) {
+    # Language-independent principals: WellKnownSidType, never BUILTIN\... display names.
+    $serviceSid = Resolve-AccountSid $Identity
+    $systemSid = Get-WellKnownSid ([Security.Principal.WellKnownSidType]::LocalSystemSid)
+    $adminsSid = Get-WellKnownSid ([Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid)
+
     $acl = [Security.AccessControl.FileSecurity]::new()
     $acl.SetAccessRuleProtection($true, $false)
     foreach ($entry in @(
-        @('NT AUTHORITY\SYSTEM', [Security.AccessControl.FileSystemRights]::FullControl),
-        @('BUILTIN\Administrators', [Security.AccessControl.FileSystemRights]::FullControl),
-        @($Identity, [Security.AccessControl.FileSystemRights]::Read))) {
-        $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
-            $entry[0], $entry[1], [Security.AccessControl.AccessControlType]::Allow))
+        @($systemSid, [Security.AccessControl.FileSystemRights]::FullControl),
+        @($adminsSid, [Security.AccessControl.FileSystemRights]::FullControl),
+        @($serviceSid, [Security.AccessControl.FileSystemRights]::Read))) {
+        $acl.AddAccessRule((New-SidFileAccessRule $entry[0] $entry[1]))
     }
     Set-Acl -LiteralPath $Path -AclObject $acl
 }
@@ -134,21 +189,35 @@ Grant-DirectoryAccess $backups $ServiceAccount ([Security.AccessControl.FileSyst
 Protect-Config $config $ServiceAccount
 
 $releaseConfig = Join-Path $release 'appsettings.Production.json'
+$configHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $config).Hash
 if (Test-Path -LiteralPath $releaseConfig) {
     $existingHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $releaseConfig).Hash
-    $configHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $config).Hash
     if ($existingHash -ne $configHash) {
         throw "Release bevat een afwijkende appsettings.Production.json: $releaseConfig"
     }
-    Remove-Item -LiteralPath $releaseConfig -Force
+    # Idempotent: keep existing hardlink/file when content already matches.
+} else {
+    New-Item -ItemType HardLink -Path $releaseConfig -Target $config | Out-Null
 }
-New-Item -ItemType HardLink -Path $releaseConfig -Target $config | Out-Null
 
 $current = Join-Path $root 'current'
 $next = Join-Path $root 'current.next'
 $previous = Join-Path $root 'current.previous'
 Remove-DeploymentLink $next $root
-New-Item -ItemType Junction -Path $next -Target $release | Out-Null
+# Idempotent: if current already points at this release, skip junction swap prep.
+$currentAlreadyCorrect = $false
+if (Test-Path -LiteralPath $current) {
+    $currentItem = Get-Item -LiteralPath $current -Force
+    if ($currentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        $currentTarget = [IO.Path]::GetFullPath(($currentItem.Target | Select-Object -First 1))
+        if ($currentTarget.TrimEnd('\') -eq $release.TrimEnd('\')) {
+            $currentAlreadyCorrect = $true
+        }
+    }
+}
+if (-not $currentAlreadyCorrect) {
+    New-Item -ItemType Junction -Path $next -Target $release | Out-Null
+}
 
 $existingService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 $wasRunning = $null -ne $existingService -and
@@ -167,16 +236,18 @@ Copy-Item -LiteralPath $database -Destination $backup
 
 $pointerSwapped = $false
 try {
-    Remove-DeploymentLink $previous $root
-    if (Test-Path -LiteralPath $current) {
-        $currentItem = Get-Item -LiteralPath $current -Force
-        if (-not ($currentItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-            throw "Weigering: $current is geen junction."
+    if (-not $currentAlreadyCorrect) {
+        Remove-DeploymentLink $previous $root
+        if (Test-Path -LiteralPath $current) {
+            $currentItem = Get-Item -LiteralPath $current -Force
+            if (-not ($currentItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                throw "Weigering: $current is geen junction."
+            }
+            Move-Item -LiteralPath $current -Destination $previous
         }
-        Move-Item -LiteralPath $current -Destination $previous
+        Move-Item -LiteralPath $next -Destination $current
+        $pointerSwapped = $true
     }
-    Move-Item -LiteralPath $next -Destination $current
-    $pointerSwapped = $true
 
     $currentExe = Join-Path $current 'TheBelgian.TimeControl.Web.exe'
     $binaryPath = "`"$currentExe`" --database `"$database`" --urls `"$Url`""
@@ -198,7 +269,11 @@ try {
         }
     } else {
         $serviceInfo = Get-CimInstance Win32_Service -Filter "Name='$ServiceName'"
-        if ($serviceInfo.StartName -ne $ServiceAccount) {
+        $existingStart = [string]$serviceInfo.StartName
+        $normalizedExisting = $existingStart.TrimStart('.\').ToLowerInvariant()
+        $normalizedWanted = $ServiceAccount.TrimStart('.\').ToLowerInvariant()
+        if ($normalizedExisting -ne $normalizedWanted -and
+            $existingStart -ne $ServiceAccount) {
             throw "Bestaande service draait als $($serviceInfo.StartName), niet als $ServiceAccount."
         }
         Invoke-Sc @('config', $ServiceName, 'binPath=', $binaryPath, 'start=', 'delayed-auto')
