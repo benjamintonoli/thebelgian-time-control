@@ -10,7 +10,8 @@ param(
     [ValidateRange(1048576, 1073741824)] [long]$MaxLogBytes = 26214400,
     [ValidateRange(1, 100)] [int]$RetainedLogs = 12,
     [PSCredential]$Credential,
-    [switch]$ServiceAccountIsGmsa
+    [switch]$ServiceAccountIsGmsa,
+    [switch]$UpdateActionOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,8 +21,19 @@ $backupRoot = [IO.Path]::GetFullPath($BackupDirectory)
 $log = [IO.Path]::GetFullPath($LogPath)
 $logDirectory = [IO.Path]::GetDirectoryName($log)
 
-$shell = (Get-Command pwsh -ErrorAction SilentlyContinue).Source
-if (-not $shell) { $shell = (Get-Command powershell.exe -ErrorAction Stop).Source }
+$shell = $null
+foreach ($candidate in @(
+        (Get-Command pwsh -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source),
+        "$env:ProgramFiles\PowerShell\7\pwsh.exe",
+        "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe")) {
+    if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+        $shell = $candidate
+        break
+    }
+}
+if (-not $shell) {
+    throw 'Geen PowerShell executable gevonden voor de backup Scheduled Task.'
+}
 
 $command = @"
 `$ErrorActionPreference = 'Stop'
@@ -36,10 +48,15 @@ if ((Test-Path -LiteralPath `$logPath) -and (Get-Item -LiteralPath `$logPath).Le
         Sort-Object LastWriteTime -Descending | Select-Object -Skip $RetainedLogs |
         Remove-Item -Force
 }
-& '$($backupScript.Replace("'", "''"))' -DatabasePath '$($database.Replace("'", "''"))' `
-    -BackupDirectory '$($backupRoot.Replace("'", "''"))' -Reason Daily `
-    -RetentionDays $RetentionDays -StopService *>> `$logPath
-exit `$LASTEXITCODE
+try {
+    # One physical line required: multiline backticks inside this here-string do not become
+    # PowerShell line-continuation in the Task Scheduler EncodedCommand body.
+    & '$($backupScript.Replace("'", "''"))' -DatabasePath '$($database.Replace("'", "''"))' -BackupDirectory '$($backupRoot.Replace("'", "''"))' -Reason Daily -RetentionDays $RetentionDays -StopService *>> `$logPath
+    exit `$LASTEXITCODE
+} catch {
+    `$_ | Out-String | Add-Content -LiteralPath `$logPath
+    exit 1
+}
 "@
 $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
 $action = New-ScheduledTaskAction -Execute $shell `
@@ -50,6 +67,23 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew `
     -ExecutionTimeLimit (New-TimeSpan -Hours 1) -RestartCount 3 `
     -RestartInterval (New-TimeSpan -Minutes 10)
+
+if ($UpdateActionOnly) {
+    $null = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+    if ($PSCmdlet.ShouldProcess($TaskName, 'Scheduled Task action bijwerken (bestaande credentials)')) {
+        # Re-register via full installer path is required when Windows refuses
+        # Set-ScheduledTask without an explicit password for Password logon tasks.
+        throw @"
+UPDATE_ACTION_REQUIRES_CREDENTIAL
+
+Set-ScheduledTask zonder wachtwoord werd geweigerd voor deze Password-logon task.
+Voer in een verhoogde interactieve PowerShell uit:
+
+& C:\Dev\thebelgian-time-control\scripts\Install-TimeControlDatabaseBackupTask.ps1 -ServiceAccount 'THEBELGIAN\reporting'
+Start-ScheduledTask -TaskName 'TheBelgian TimeControl Database Backup'
+"@
+    }
+}
 
 if ($ServiceAccountIsGmsa) {
     $principal = New-ScheduledTaskPrincipal -UserId $ServiceAccount `
