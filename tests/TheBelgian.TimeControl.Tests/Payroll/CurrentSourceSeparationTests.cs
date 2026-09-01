@@ -1,4 +1,5 @@
 using System.Reflection;
+using TheBelgian.TimeControl.Infrastructure.Payroll.Legacy;
 using TheBelgian.TimeControl.Infrastructure.Payroll.Sources;
 using TheBelgian.TimeControl.Tests.Payroll.GoldenMaster;
 
@@ -17,6 +18,16 @@ public sealed class CurrentSourceSeparationTests
         Assert.DoesNotContain(typeof(HistoricalKmResolver).Assembly.GetName().Name, references);
         Assert.DoesNotContain(typeof(HistoricalLegacyParityAdapter).Assembly.GetName().Name, references);
         Assert.Equal("TheBelgian.TimeControl.Infrastructure", source);
+    }
+
+    [Fact]
+    public void LegacyMonthlyHoursPipeline_DoesNotReferenceHistoricalTestAssembly()
+    {
+        var references = typeof(LegacyMonthlyHoursPipeline).Assembly
+            .GetReferencedAssemblies()
+            .Select(assembly => assembly.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        Assert.DoesNotContain(typeof(HistoricalKmResolver).Assembly.GetName().Name, references);
     }
 
     [Fact]
