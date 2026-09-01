@@ -36,7 +36,31 @@ public static class PerformanceTimeNormalizer
         return new PerformanceTimeNormalizationResult(start, end, gross);
     }
 
+    /// <summary>
+    /// Normalizes ODBC CLR clock values (TimeSpan/DateTime) without stringifying first.
+    /// </summary>
+    public static PerformanceTimeNormalizationResult Normalize(
+        DateOnly date,
+        object? van,
+        object? tot) =>
+        Normalize(date, FormatClock(van), FormatClock(tot));
+
     public static decimal AtlMinutesExact(decimal atlHoursRaw) => atlHoursRaw * 60m;
+
+    public static string? FormatClock(object? value)
+    {
+        if (value is null or DBNull)
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            TimeSpan timeSpan => timeSpan.ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture),
+            DateTime dateTime => dateTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
+            _ => Convert.ToString(value, CultureInfo.InvariantCulture)?.Trim(),
+        };
+    }
 
     private static DateTimeOffset? ParseOptionalClock(DateOnly date, string? value)
     {

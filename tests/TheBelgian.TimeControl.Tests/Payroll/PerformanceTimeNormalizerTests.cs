@@ -86,6 +86,23 @@ public sealed class PerformanceTimeNormalizerTests
     }
 
     [Fact]
+    public void Normalize_ObjectClockValues_MatchesStringPath()
+    {
+        var fromObjects = PerformanceTimeNormalizer.Normalize(
+            new DateOnly(2026, 7, 1),
+            TimeSpan.FromHours(8),
+            TimeSpan.FromHours(16).Add(TimeSpan.FromMinutes(30)));
+        var fromStrings = PerformanceTimeNormalizer.Normalize(
+            new DateOnly(2026, 7, 1),
+            "08:00:00",
+            "16:30:00");
+
+        Assert.Equal(fromStrings.GrossClockDuration, fromObjects.GrossClockDuration);
+        Assert.Equal(fromStrings.Start, fromObjects.Start);
+        Assert.Equal(fromStrings.End, fromObjects.End);
+    }
+
+    [Fact]
     public void AtlMinutesExact_PreservesDecimalPrecisionWithoutRounding()
     {
         const decimal atlHours = 8.83m;
