@@ -6,6 +6,8 @@ namespace TheBelgian.TimeControl.Tests.Payroll.GoldenMaster;
 
 public static class HistoricalLegacyParityAdapter
 {
+    private const decimal ExportPrecisionEpsilonHours = 0.004m;
+
     public static LegacyOverlapPerformanceInput ToOverlapInput(
         PowerBiDetailRow row,
         long sortKey)
@@ -20,8 +22,63 @@ public static class HistoricalLegacyParityAdapter
             row.HfdTaakId,
             time.Start,
             time.End,
-            row.AtlHours ?? 0m,
-            ParsePauseHours(row.PauseRaw));
+            ReconstructHistoricalPayableAtlHours(row));
+    }
+
+    public static LegacyTravelPerformanceInput ToTravelInput(PowerBiDetailRow row)
+    {
+        return new LegacyTravelPerformanceInput(
+            ParsePerformanceId(row.PerformanceId),
+            row.HfdTaakId,
+            ParseVanTimeOfDay(row.VanRaw),
+            ReconstructHistoricalPayableAtlHours(row));
+    }
+
+    public static LegacyDailyPerformanceInput ToDailyInput(
+        PowerBiDetailRow row,
+        long sortKey,
+        decimal? km = null)
+    {
+        var date = row.Date ?? throw new InvalidDataException("DATUM ontbreekt.");
+        var time = PerformanceTimeNormalizer.Normalize(date, row.VanRaw, row.TotRaw);
+        return new LegacyDailyPerformanceInput(
+            ParsePerformanceId(row.PerformanceId),
+            sortKey,
+            row.HfdTaakId,
+            time.Start,
+            time.End,
+            ReconstructHistoricalPayableAtlHours(row),
+            ParsePauseHours(row.PauseRaw),
+            km,
+            date);
+    }
+
+    /// <summary>
+    /// Recovers higher-precision payable ATL when the CSV export rounded ATL to 2 decimals.
+    /// Pure legacy calculators receive this value; current Plenion uses raw ATL directly.
+    /// </summary>
+    public static decimal ReconstructHistoricalPayableAtlHours(PowerBiDetailRow row)
+    {
+        var exportedAtl = row.AtlHours ?? 0m;
+        var grossHours = ComputeGrossHours(row.VanRaw, row.TotRaw);
+        if (grossHours is null)
+        {
+            return exportedAtl;
+        }
+
+        var pauseHours = ParsePauseHours(row.PauseRaw);
+        if (pauseHours > 0m)
+        {
+            var pauseAdjustedGross = Math.Max(0m, grossHours.Value - pauseHours);
+            if (pauseAdjustedGross > exportedAtl && pauseAdjustedGross - exportedAtl <= ExportPrecisionEpsilonHours)
+            {
+                return pauseAdjustedGross;
+            }
+
+            return exportedAtl;
+        }
+
+        return grossHours > exportedAtl ? grossHours.Value : exportedAtl;
     }
 
     public static decimal ParsePauseHours(string? raw)
@@ -48,16 +105,6 @@ public static class HistoricalLegacyParityAdapter
         return TimeSpan.TryParse(raw, CultureInfo.InvariantCulture, out var timeSpan)
             ? (decimal)timeSpan.TotalHours
             : 0m;
-    }
-
-    public static LegacyTravelPerformanceInput ToTravelInput(PowerBiDetailRow row)
-    {
-        return new LegacyTravelPerformanceInput(
-            ParsePerformanceId(row.PerformanceId),
-            row.HfdTaakId,
-            ParseVanTimeOfDay(row.VanRaw),
-            row.AtlHours ?? 0m,
-            ComputeGrossHours(row.VanRaw, row.TotRaw));
     }
 
     public static decimal? ComputeGrossHours(string? vanRaw, string? totRaw)
@@ -120,7 +167,6 @@ public static class HistoricalLegacyParityAdapter
             return numeric;
         }
 
-        // Calendar-synthetic Power BI rows (e.g. KL145730_20260702_19) use deterministic hash keys.
         return StableSyntheticKey(trimmed);
     }
 

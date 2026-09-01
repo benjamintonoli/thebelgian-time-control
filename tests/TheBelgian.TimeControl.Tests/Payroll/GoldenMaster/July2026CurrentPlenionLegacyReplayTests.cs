@@ -100,8 +100,7 @@ public sealed class July2026CurrentPlenionLegacyReplayTests(ITestOutputHelper ou
                     row.HfdTaakId,
                     row.Start,
                     row.End,
-                    row.AtlHoursRaw,
-                    row.Pause.ExactMinutes.GetValueOrDefault() / 60m))
+                    row.AtlHoursRaw))
                 .ToList();
             total += LegacyOverlapCalculator.Calculate(inputs).Sum(result => result.OverlapHours);
         }
@@ -146,10 +145,7 @@ public sealed class July2026CurrentPlenionLegacyReplayTests(ITestOutputHelper ou
                     row.SourceEntryId,
                     row.HfdTaakId,
                     row.Start?.TimeOfDay,
-                    row.AtlHoursRaw,
-                    row.GrossClockDuration is null
-                        ? null
-                        : (decimal)row.GrossClockDuration.Value.TotalHours))
+                    row.AtlHoursRaw))
                 .ToList();
             var day = LegacyTravelDerivation.CalculateDay(dayGroup.First().ResourceId, dayGroup.Key, inputs);
             start += day.TravelStartDeductionHours;

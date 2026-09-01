@@ -4,6 +4,7 @@ namespace TheBelgian.TimeControl.Infrastructure.Payroll.Legacy;
 
 /// <summary>
 /// Reproduces Power BI legacy overlap (Dubbele uren) semantics for one resource/day.
+/// Uses exact ATL supplied on input; CSV precision recovery belongs at the adapter boundary.
 /// </summary>
 public static class LegacyOverlapCalculator
 {
@@ -47,8 +48,7 @@ public static class LegacyOverlapCalculator
                 row.End!.Value,
                 previousEndValue);
 
-            var grossHours = CalculateGrossHours(row);
-            var maximumPayable = CalculateMaximumPayableHours(row, grossHours);
+            var maximumPayable = Math.Max(0m, row.AtlHoursRaw);
             var overlapHours = previousEndValue is null
                 ? 0m
                 : Math.Min(rawOverlapHours, maximumPayable);
@@ -89,39 +89,5 @@ public static class LegacyOverlapCalculator
         }
 
         return (decimal)(overlapEnd - currentStart).TotalHours;
-    }
-
-    private static decimal? CalculateGrossHours(LegacyOverlapPerformanceInput row)
-    {
-        if (row.Start is null || row.End is null)
-        {
-            return null;
-        }
-
-        return (decimal)(row.End.Value - row.Start.Value).TotalHours;
-    }
-
-    private static decimal CalculateMaximumPayableHours(
-        LegacyOverlapPerformanceInput row,
-        decimal? grossHours)
-    {
-        var atlCap = Math.Max(0m, row.AtlHoursRaw);
-        if (grossHours is null)
-        {
-            return atlCap;
-        }
-
-        if (row.PauseHoursRaw > 0m)
-        {
-            var pauseAdjustedGross = Math.Max(0m, grossHours.Value - row.PauseHoursRaw);
-            if (pauseAdjustedGross > atlCap && pauseAdjustedGross - atlCap <= 0.004m)
-            {
-                return pauseAdjustedGross;
-            }
-
-            return atlCap;
-        }
-
-        return grossHours > atlCap ? grossHours.Value : atlCap;
     }
 }

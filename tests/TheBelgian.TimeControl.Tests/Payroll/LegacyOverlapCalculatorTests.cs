@@ -189,12 +189,12 @@ public sealed class LegacyOverlapCalculatorTests
     }
 
     [Fact]
-    public void AtlSmallerThanRawOverlap_WithNoPause_UsesGrossDurationCap()
+    public void AtlSmallerThanRawOverlap_WithNoPause_UsesSuppliedPayableAtl()
     {
         var rows = new[]
         {
             Input(1, 1, 9, T(7), T(17), 10m),
-            Input(2, 2, 9, T(9, 45), T(13, 20), 3.58m, pauseHours: 0m),
+            Input(2, 2, 9, T(9, 45), T(13, 20), 3.583333333333333333333333333m),
         };
 
         var second = LegacyOverlapCalculator.Calculate(rows).Single(result => result.PerformanceId == 2);
@@ -207,7 +207,7 @@ public sealed class LegacyOverlapCalculatorTests
         var rows = new[]
         {
             Input(1, 1, 9, T(8), T(12), 4m),
-            Input(2, 2, 9, T(9), T(13, 30), 1.25m, pauseHours: 0.5m),
+            Input(2, 2, 9, T(9), T(13, 30), 1.25m),
         };
 
         var second = LegacyOverlapCalculator.Calculate(rows).Single(result => result.PerformanceId == 2);
@@ -245,7 +245,6 @@ public sealed class LegacyOverlapCalculatorTests
         int hfdTaak,
         DateTimeOffset? start,
         DateTimeOffset? end,
-        decimal atl,
-        decimal pauseHours = 0m) =>
-        new(id, sortKey, hfdTaak, start, end, atl, pauseHours);
+        decimal atl) =>
+        new(id, sortKey, hfdTaak, start, end, atl);
 }

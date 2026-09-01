@@ -4,6 +4,7 @@ namespace TheBelgian.TimeControl.Infrastructure.Payroll.Legacy;
 
 /// <summary>
 /// Reproduces Power BI legacy min/max VAN travel semantics for one resource/day.
+/// Uses exact ATL supplied on input; CSV precision recovery belongs at the adapter boundary.
 /// </summary>
 public static class LegacyTravelDerivation
 {
@@ -52,9 +53,8 @@ public static class LegacyTravelDerivation
             var isMax = row.VanTimeOfDay == maxVan;
             var isTravel = row.HfdTaakId == TravelHfdTaakId;
 
-            var payableHours = PayableHoursForTravel(row);
-            var travelBegin = isTravel && isMin ? payableHours : 0m;
-            var travelEnd = isTravel && isMax ? payableHours : 0m;
+            var travelBegin = isTravel && isMin ? row.AtlHoursRaw : 0m;
+            var travelEnd = isTravel && isMax ? row.AtlHoursRaw : 0m;
             var extra15 = isTravel && (isMin || isMax) ? Extra15Hours : 0m;
 
             results.Add(new LegacyTravelRowResult(
@@ -71,14 +71,4 @@ public static class LegacyTravelDerivation
 
     private static LegacyTravelRowResult EmptyRow(long performanceId) =>
         new(performanceId, false, false, 0m, 0m, 0m);
-
-    private static decimal PayableHoursForTravel(LegacyTravelPerformanceInput row)
-    {
-        if (row.GrossHoursRaw is not null && row.GrossHoursRaw > row.AtlHoursRaw)
-        {
-            return row.GrossHoursRaw.Value;
-        }
-
-        return row.AtlHoursRaw;
-    }
 }

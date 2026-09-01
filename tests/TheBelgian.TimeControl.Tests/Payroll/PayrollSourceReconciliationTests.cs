@@ -25,6 +25,7 @@ public sealed class PayrollSourceReconciliationTests
             null,
             null,
             null,
+            null,
             null);
 
         var plenion = new PlenionSourceRow(
@@ -64,6 +65,7 @@ public sealed class PayrollSourceReconciliationTests
             8m,
             null,
             8m,
+            null,
             null,
             null,
             null,

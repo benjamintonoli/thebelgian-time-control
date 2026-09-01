@@ -38,7 +38,8 @@ public sealed record PowerBiDetailRow(
     decimal? Extra75Km,
     string? Postcode,
     decimal? CityTripUnits,
-    decimal? DuplicateHours);
+    decimal? DuplicateHours,
+    decimal? PauseCorrectionHours);
 
 /// <summary>
 /// Test/reconciliation helper for Power BI CSV exports. Not a production dependency.
@@ -92,7 +93,8 @@ public static class PowerBiGoldenMasterReader
             OptionalDecimal(row, index, "Extra 75km"),
             Optional(row, index, "postcode"),
             OptionalDecimal(row, index, "Extra €5/rit naar grootsteden", "Extra ?5/rit naar grootsteden"),
-            OptionalDecimal(row, index, "Dubbele uren"))).ToList();
+            OptionalDecimal(row, index, "Dubbele uren"),
+            OptionalDecimal(row, index, "Verschil pauze"))).ToList();
     }
 
     /// <summary>
