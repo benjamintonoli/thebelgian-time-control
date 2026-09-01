@@ -29,6 +29,7 @@
 
   <ItemGroup>
     <None Update="Samples\powerfleet-report.xml" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures\Payroll\*.csv" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

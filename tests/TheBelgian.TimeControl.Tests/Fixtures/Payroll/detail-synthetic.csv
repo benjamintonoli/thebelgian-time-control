@@ -1,0 +1,5 @@
+IDPROJ_PREST,Resource,IDHFDTAAK,ziekte controle,Hoofdtaak,DayOfWeek,IDRESOURCE,DATUM,VAN,TOT,ATL,ziekte controle,PAUZE,Verschil pauze,Totaal uren,Formatted Totaal Uren,Verpl begin dag,Verpl einde dag,15 min extra,Extra 75km,postcode,Extra €5/rit naar grootsteden,OMSCHR,Dubbele uren,Ziekte of verlof over uren
+900001,TECH001,"9,00",,Werkuren Onderhoudstechnicus,woensdag,1001,2026-07-01 00:00:00,1899-12-30 08:00:00,1899-12-30 16:30:00,"8,50",,1899-12-30 00:30:00,0,"8,50",8h 30min,,,0,0,9000,0,Synthetic work A,0,0
+900002,TECH001,"9,00",,Werkuren Onderhoudstechnicus,donderdag,1001,2026-07-02 00:00:00,1899-12-30 08:00:00,1899-12-30 16:00:00,"8,00",,1899-12-30 00:00:00,0,"8,00",8h 0min,,,0,0,9000,0,Synthetic work B,0,0
+900003,TECH002,"9,00",,Werkuren Onderhoudstechnicus,woensdag,1002,2026-07-01 00:00:00,1899-12-30 07:00:00,1899-12-30 16:00:00,"8,75",,,,"8,75",8h 45min,,,0,0,1000,0,Synthetic work C,0,0
+900004,TECH002,"5,00",,Verplaatsingen,woensdag,1002,2026-07-01 00:00:00,1899-12-30 06:30:00,1899-12-30 07:00:00,"0,50",,1899-12-30 00:15:00,0,"8,75",8h 45min,,,0,0,1000,0,Synthetic travel,0,0

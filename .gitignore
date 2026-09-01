@@ -17,6 +17,7 @@ data/
 **/secrets.json
 TestResults/
 coverage/
+reference/powerbi/**
 docs/broader-validation-report.md
 docs/broader-validation-report.json
 docs/coverage-gap-analysis.md
