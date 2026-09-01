@@ -1,4 +1,5 @@
 using System.Globalization;
+using TheBelgian.TimeControl.Core.Payroll;
 using TheBelgian.TimeControl.Core.Payroll.Models;
 using TheBelgian.TimeControl.Infrastructure.Payroll.Normalization;
 
@@ -41,6 +42,8 @@ public static class HistoricalLegacyParityAdapter
     {
         var date = row.Date ?? throw new InvalidDataException("DATUM ontbreekt.");
         var time = PerformanceTimeNormalizer.Normalize(date, row.VanRaw, row.TotRaw);
+        var sourceEntryKey = row.PerformanceId?.Trim().Trim('"')
+            ?? throw new InvalidDataException("IDPROJ_PREST ontbreekt.");
         return new LegacyDailyPerformanceInput(
             ParsePerformanceId(row.PerformanceId),
             sortKey,
@@ -50,7 +53,8 @@ public static class HistoricalLegacyParityAdapter
             ReconstructHistoricalPayableAtlHours(row),
             ParsePauseHours(row.PauseRaw),
             km,
-            date);
+            date,
+            sourceEntryKey);
     }
 
     /// <summary>
@@ -167,21 +171,9 @@ public static class HistoricalLegacyParityAdapter
             return numeric;
         }
 
-        return StableSyntheticKey(trimmed);
+        return LegacySourceIdentity.ToCalculatorId(trimmed);
     }
 
-    internal static long StableSyntheticKey(string value)
-    {
-        unchecked
-        {
-            ulong hash = 14695981039346656037UL;
-            foreach (var ch in value)
-            {
-                hash ^= ch;
-                hash *= 1099511628211UL;
-            }
-
-            return -(long)(hash & 0x7FFFFFFFFFFFFFFF);
-        }
-    }
+    internal static long StableSyntheticKey(string value) =>
+        LegacySourceIdentity.ToCalculatorId(value);
 }

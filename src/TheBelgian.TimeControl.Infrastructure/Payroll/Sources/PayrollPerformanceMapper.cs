@@ -1,3 +1,4 @@
+using TheBelgian.TimeControl.Core.Payroll;
 using TheBelgian.TimeControl.Core.Payroll.Models;
 using TheBelgian.TimeControl.Infrastructure.Payroll.Normalization;
 
@@ -18,6 +19,7 @@ public static class PayrollPerformanceMapper
 
         return new NormalizedPerformanceEntry(
             SourceEntryId: row.IdProjPrest,
+            SourceEntryKey: LegacySourceIdentity.ForPerformance(row.IdProjPrest),
             ResourceId: row.ResourceId,
             Date: row.Datum,
             Start: time.Start,

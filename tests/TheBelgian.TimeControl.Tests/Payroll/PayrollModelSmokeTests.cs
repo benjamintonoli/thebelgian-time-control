@@ -10,6 +10,7 @@ public sealed class PayrollModelSmokeTests
         const decimal atlHours = 8.83m;
         var entry = new NormalizedPerformanceEntry(
             SourceEntryId: 1,
+            SourceEntryKey: "1",
             ResourceId: "1001",
             Date: new DateOnly(2026, 7, 1),
             Start: null,

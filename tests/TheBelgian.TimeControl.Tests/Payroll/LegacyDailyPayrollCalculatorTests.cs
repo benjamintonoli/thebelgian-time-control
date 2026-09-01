@@ -1,3 +1,4 @@
+using System.Globalization;
 using TheBelgian.TimeControl.Core.Payroll.Models;
 using TheBelgian.TimeControl.Infrastructure.Payroll.Legacy;
 
@@ -145,5 +146,5 @@ public sealed class LegacyDailyPayrollCalculatorTests
     }
 
     private static LegacyDailyPerformanceInput Daily(long id, int hfd, decimal atl) =>
-        new(id, id, hfd, null, null, atl, 0m, null, Monday);
+        new(id, id, hfd, null, null, atl, 0m, null, Monday, id.ToString(CultureInfo.InvariantCulture));
 }

@@ -29,6 +29,7 @@ public sealed class PayrollPerformanceMapperTests
         var entry = PayrollPerformanceMapper.Map(row);
 
         Assert.Equal(1001, entry.SourceEntryId);
+        Assert.Equal("1001", entry.SourceEntryKey);
         Assert.Equal("495", entry.ResourceId);
         Assert.Equal(8.83m, entry.AtlHoursRaw);
         Assert.Equal(529.8m, entry.AtlMinutesExact);

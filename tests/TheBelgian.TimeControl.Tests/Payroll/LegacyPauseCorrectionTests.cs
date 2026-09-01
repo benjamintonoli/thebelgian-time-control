@@ -1,3 +1,4 @@
+using System.Globalization;
 using TheBelgian.TimeControl.Core.Payroll.Models;
 using TheBelgian.TimeControl.Infrastructure.Payroll.Legacy;
 
@@ -110,5 +111,5 @@ public sealed class LegacyPauseCorrectionTests
     }
 
     private static LegacyDailyPerformanceInput Daily(long id, int hfd, decimal atl, decimal pause) =>
-        new(id, id, hfd, null, null, atl, pause, null, Monday);
+        new(id, id, hfd, null, null, atl, pause, null, Monday, id.ToString(CultureInfo.InvariantCulture));
 }

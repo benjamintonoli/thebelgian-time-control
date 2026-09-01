@@ -9,4 +9,5 @@ public sealed record LegacyDailyPerformanceInput(
     decimal AtlHoursRaw,
     decimal PauseHoursRaw,
     decimal? Km,
-    DateOnly Date);
+    DateOnly Date,
+    string SourceEntryKey);

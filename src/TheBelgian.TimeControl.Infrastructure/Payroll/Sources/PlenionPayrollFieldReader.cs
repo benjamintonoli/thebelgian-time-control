@@ -96,6 +96,36 @@ internal static class PlenionPayrollFieldReader
         };
     }
 
+    public static DateOnly? ParseOptionalDateOnly(object? value)
+    {
+        if (value is null or DBNull)
+        {
+            return null;
+        }
+
+        return ParseDate(value);
+    }
+
+    public static TimeOnly? ParseOptionalTimeOnly(object? value)
+    {
+        if (value is null or DBNull)
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            TimeSpan timeSpan => TimeOnly.FromTimeSpan(timeSpan),
+            DateTime dateTime => TimeOnly.FromDateTime(dateTime),
+            _ when TimeOnly.TryParse(
+                Convert.ToString(value, CultureInfo.InvariantCulture),
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out var parsed) => parsed,
+            _ => null,
+        };
+    }
+
     public static string DescribeClrType(object? value) =>
         value is null or DBNull ? "null" : value.GetType().Name;
 }

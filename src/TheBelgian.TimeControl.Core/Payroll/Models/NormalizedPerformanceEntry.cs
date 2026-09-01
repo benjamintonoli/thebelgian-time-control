@@ -6,6 +6,7 @@ namespace TheBelgian.TimeControl.Core.Payroll.Models;
 /// </summary>
 public sealed record NormalizedPerformanceEntry(
     long SourceEntryId,
+    string SourceEntryKey,
     string ResourceId,
     DateOnly Date,
     DateTimeOffset? Start,
