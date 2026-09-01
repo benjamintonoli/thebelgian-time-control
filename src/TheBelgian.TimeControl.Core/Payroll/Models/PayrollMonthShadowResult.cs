@@ -1,7 +1,7 @@
 namespace TheBelgian.TimeControl.Core.Payroll.Models;
 
 /// <summary>
-/// Monthly shadow payroll rollup. Monetary allowance fields remain null until Increment 6C.
+/// Monthly shadow payroll rollup. City allowance populated in Increment 6C-B; KM/Code414 remain null.
 /// </summary>
 public sealed class PayrollMonthShadowResult
 {

@@ -1,3 +1,4 @@
+using TheBelgian.TimeControl.Core.Payroll.Configuration;
 using TheBelgian.TimeControl.Core.Payroll.Models;
 
 namespace TheBelgian.TimeControl.Infrastructure.Payroll.Legacy;
@@ -8,7 +9,16 @@ public static class LegacyMonthlyHoursPipeline
         PayrollPeriodSnapshot period,
         string resourceId,
         IReadOnlyList<LegacyDailyPayrollResult> dailyResults,
-        IReadOnlyDictionary<DateOnly, decimal> dailyStandbyTotals)
+        IReadOnlyDictionary<DateOnly, decimal> dailyStandbyTotals) =>
+        Calculate(period, resourceId, dailyResults, dailyStandbyTotals, null, null);
+
+    public static PayrollMonthShadowResult Calculate(
+        PayrollPeriodSnapshot period,
+        string resourceId,
+        IReadOnlyList<LegacyDailyPayrollResult> dailyResults,
+        IReadOnlyDictionary<DateOnly, decimal> dailyStandbyTotals,
+        int? cityTripUnits,
+        CityAllowanceConfiguration? cityConfiguration)
     {
         var theoreticalHours = LegacyGlobalWeekdayTheoreticalHoursProvider.GetMonthlyHours(period);
         var ordinary = LegacyMonthlyOrdinaryCalculator.Calculate(
@@ -20,6 +30,16 @@ public static class LegacyMonthlyHoursPipeline
 
         var code135At150 = new PayrollCode135ShadowCandidate(150, ordinary.DifferenceHours);
         var code135At200 = new PayrollCode135ShadowCandidate(200, standby.RoundedHours);
+
+        decimal? cityAllowanceAmount = null;
+        var cityStatus = PayrollMonthCalculationStatus.NotCalculated;
+        if (cityTripUnits is not null && cityConfiguration is not null)
+        {
+            var city = LegacyCityAllowanceMonthlyCalculator.Calculate(cityTripUnits.Value, cityConfiguration);
+            cityTripUnits = city.CityTripUnits;
+            cityAllowanceAmount = city.CityAllowanceAmount;
+            cityStatus = PayrollMonthCalculationStatus.Calculated;
+        }
 
         return new PayrollMonthShadowResult
         {
@@ -36,7 +56,7 @@ public static class LegacyMonthlyHoursPipeline
             OrdinaryStatus = PayrollMonthCalculationStatus.Calculated,
             StandbyStatus = PayrollMonthCalculationStatus.Calculated,
             KmStatus = PayrollMonthCalculationStatus.NotCalculated,
-            CityStatus = PayrollMonthCalculationStatus.NotCalculated,
+            CityStatus = cityStatus,
             Code414Status = PayrollMonthCalculationStatus.NotCalculated,
             TheoreticalMinutes = theoreticalHours * 60m,
             PayableOrdinaryMinutes = ordinary.ActualOrdinaryHours * 60m,
@@ -47,8 +67,8 @@ public static class LegacyMonthlyHoursPipeline
             Standby200Units = standby.RoundedHours,
             EligibleKm = null,
             KmAmount = null,
-            CityTripUnits = null,
-            CityAllowanceAmount = null,
+            CityTripUnits = cityTripUnits,
+            CityAllowanceAmount = cityAllowanceAmount,
             Code414Amount = null,
         };
     }

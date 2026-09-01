@@ -11,8 +11,11 @@ public static class PayrollPerformanceMapper
     private const int AbsenceHfdTaakIdNzGe = 18;
     private const int StandbyHfdTaakId = 23;
 
-    public static NormalizedPerformanceEntry Map(PlenionPayrollPerformanceRow row)
+    public static NormalizedPerformanceEntry Map(
+        PlenionPayrollPerformanceRow row,
+        PostcodeResolutionResult? postcodeResolution = null)
     {
+        var postcode = postcodeResolution?.Postcode;
         var time = PerformanceTimeNormalizer.Normalize(row.Datum, row.Van, row.Tot);
         var pause = PauseNormalizer.Normalize(row.Pauze);
         var hfdTaakId = row.IdHfdTaak;
@@ -35,7 +38,7 @@ public static class PayrollPerformanceMapper
             BonNr: row.BonNr,
             Description: row.Omschr,
             Memo: row.Memo,
-            Postcode: null,
+            Postcode: postcode,
             SortKey: row.IdProjPrest,
             IsTravel: hfdTaakId == TravelHfdTaakId,
             IsAbsence: hfdTaakId is AbsenceHfdTaakIdLeave or AbsenceHfdTaakIdNzGe,
@@ -44,6 +47,21 @@ public static class PayrollPerformanceMapper
     }
 
     public static IReadOnlyList<NormalizedPerformanceEntry> MapMany(
-        IEnumerable<PlenionPayrollPerformanceRow> rows) =>
-        rows.Select(Map).ToList();
+        IEnumerable<PlenionPayrollPerformanceRow> rows,
+        IReadOnlyDictionary<long, PostcodeResolutionResult>? postcodesByPerformanceId = null)
+    {
+        return rows
+            .Select(row =>
+            {
+                PostcodeResolutionResult? resolution = null;
+                if (postcodesByPerformanceId is not null
+                    && postcodesByPerformanceId.TryGetValue(row.IdProjPrest, out var resolved))
+                {
+                    resolution = resolved;
+                }
+
+                return Map(row, resolution);
+            })
+            .ToList();
+    }
 }

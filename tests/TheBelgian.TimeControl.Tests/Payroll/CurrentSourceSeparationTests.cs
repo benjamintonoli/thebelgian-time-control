@@ -31,6 +31,24 @@ public sealed class CurrentSourceSeparationTests
     }
 
     [Fact]
+    public void Infrastructure_DoesNotContainLegacyKmAllowanceCalculator()
+    {
+        Assert.Null(typeof(LegacyMonthlyHoursPipeline).Assembly.GetType(
+            "TheBelgian.TimeControl.Infrastructure.Payroll.Legacy.LegacyKmAllowanceCalculator",
+            throwOnError: false));
+    }
+
+    [Fact]
+    public void PlenionPostcodeResolver_DoesNotReferenceHistoricalTestAssembly()
+    {
+        var references = typeof(PlenionPostcodeResolver).Assembly
+            .GetReferencedAssemblies()
+            .Select(assembly => assembly.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        Assert.DoesNotContain(typeof(HistoricalKmResolver).Assembly.GetName().Name, references);
+    }
+
+    [Fact]
     public void CurrentPayrollLegacyAdapter_HasNoHistoricalOverrideParameters()
     {
         var methods = typeof(CurrentPayrollLegacyAdapter)

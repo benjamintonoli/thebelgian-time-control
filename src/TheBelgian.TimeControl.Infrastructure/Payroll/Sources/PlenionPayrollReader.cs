@@ -60,7 +60,51 @@ public sealed class PlenionPayrollReader(
             fromDate,
             throughDate);
 
-        return PayrollPerformanceMapper.MapMany(rows);
+        var postcodes = await PlenionPostcodeResolver.ResolveForRowsAsync(
+            connection,
+            rows,
+            cancellationToken);
+
+        logger.LogInformation(
+            "Plenion payroll postcodes: {Resolved}/{Total} resolved via batched lookup.",
+            postcodes.Values.Count(result => result.IsResolved),
+            rows.Count);
+
+        return PayrollPerformanceMapper.MapMany(rows, postcodes);
+    }
+
+    public async Task<(IReadOnlyList<PlenionPayrollPerformanceRow> Rows, PostcodeCoverageSummary Coverage)>
+        ReadRawRowsWithPostcodeCoverageAsync(
+            DateOnly fromDate,
+            DateOnly throughDate,
+            IReadOnlyCollection<string> resourceIds,
+            CancellationToken cancellationToken = default)
+    {
+        OfflineOnlyGuard.EnsureLiveAccessAllowed("PlenionODBC");
+        ValidateConfiguration();
+        var distinctIds = resourceIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(id => id, StringComparer.Ordinal)
+            .ToArray();
+
+        await using var connection = new OdbcConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        var projectNumbers = await ReadProjectNumbersAsync(connection, cancellationToken);
+        var rows = await ReadRawRowsAsync(
+            connection,
+            fromDate,
+            throughDate,
+            distinctIds,
+            projectNumbers,
+            cancellationToken);
+        var postcodes = await PlenionPostcodeResolver.ResolveForRowsAsync(
+            connection,
+            rows,
+            cancellationToken);
+        var coverage = PlenionPostcodeResolver.SummarizeCoverage(rows, postcodes);
+        return (rows, coverage);
     }
 
     public async Task<IReadOnlyList<PlenionPayrollPerformanceRow>> ReadRawRowsForDiagnosticsAsync(
