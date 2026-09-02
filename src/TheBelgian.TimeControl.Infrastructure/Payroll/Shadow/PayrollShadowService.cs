@@ -90,13 +90,17 @@ internal sealed class PayrollShadowService(
 
         var configurations = await context.PayrollEmployeeConfigurationRecords.AsNoTracking()
             .Where(item => item.ResourceId == resourceId)
-            .OrderByDescending(item => item.ValidFrom)
             .ToListAsync(cancellationToken);
+        configurations = configurations
+            .OrderByDescending(item => item.ValidFrom)
+            .ToList();
         var audit = await context.PayrollShadowReviewAudits.AsNoTracking()
             .Where(item => item.ShadowMonthId == shadowMonth.Id
                 && (item.ResourceId == null || item.ResourceId == resourceId))
-            .OrderByDescending(item => item.TimestampUtc)
             .ToListAsync(cancellationToken);
+        audit = audit
+            .OrderByDescending(item => item.TimestampUtc)
+            .ToList();
         return new PayrollShadowEmployeeDetail(shadowMonth, employee, configurations, audit);
     }
 
@@ -309,6 +313,7 @@ internal sealed class PayrollShadowService(
         var existing = await context.PayrollEmployeeConfigurationRecords
             .Where(item => item.ResourceId == candidateConfig.ResourceId)
             .ToListAsync(cancellationToken);
+        CloseOpenEndedConfigsBefore(existing, candidateConfig.ValidFrom);
         PayrollEligibilityResolver.EnsureNoOverlap(
             existing.Select(item => item.ToDomain()).ToList(),
             candidateConfig);
@@ -413,6 +418,7 @@ internal sealed class PayrollShadowService(
         var existing = await context.PayrollEmployeeConfigurationRecords
             .Where(item => item.ResourceId == candidateConfig.ResourceId)
             .ToListAsync(cancellationToken);
+        CloseOpenEndedConfigsBefore(existing, candidateConfig.ValidFrom);
         PayrollEligibilityResolver.EnsureNoOverlap(
             existing.Select(item => item.ToDomain()).ToList(),
             candidateConfig);
@@ -463,7 +469,8 @@ internal sealed class PayrollShadowService(
             query = query.Where(item => item.ResourceId == resourceId);
         }
 
-        return await query.OrderByDescending(item => item.TimestampUtc).ToListAsync(cancellationToken);
+        var rows = await query.ToListAsync(cancellationToken);
+        return rows.OrderByDescending(item => item.TimestampUtc).ToList();
     }
 
     private void EnsureEnabled()
@@ -491,6 +498,24 @@ internal sealed class PayrollShadowService(
         await context.PayrollShadowMonths.SingleOrDefaultAsync(item =>
             item.Year == year && item.Month == month, cancellationToken)
         ?? throw new InvalidOperationException("Shadow-maand niet gevonden.");
+
+    private static void CloseOpenEndedConfigsBefore(
+        IReadOnlyList<PayrollEmployeeConfigurationRecord> existing,
+        DateOnly nextValidFrom)
+    {
+        var closeThrough = nextValidFrom.AddDays(-1);
+        foreach (var item in existing.Where(item =>
+                     item.ValidTo is null && item.ValidFrom < nextValidFrom))
+        {
+            if (closeThrough < item.ValidFrom)
+            {
+                throw new InvalidOperationException(
+                    $"Kan openstaande payrollconfiguratie voor resource {item.ResourceId} niet afsluiten vóór {nextValidFrom:yyyy-MM-dd}.");
+            }
+
+            item.ValidTo = closeThrough;
+        }
+    }
 
     private static async Task EnsureConfigurationDoesNotOverlapFinalizedPeriodAsync(
         TimeControlDbContext context,

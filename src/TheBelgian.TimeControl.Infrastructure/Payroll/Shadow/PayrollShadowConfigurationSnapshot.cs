@@ -1,4 +1,6 @@
 using System.Reflection;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using TheBelgian.TimeControl.Core.Payroll.Configuration;
 using TheBelgian.TimeControl.Core.Payroll.Models;
@@ -30,8 +32,10 @@ public static class PayrollShadowConfigurationSnapshot
             kmRate = kmConfiguration.RatePerKm,
             cityTripAmount = cityConfiguration.TripAmount,
             cityPostcodeSet = "July2026Qualifying",
+            cityPostcodeSetHash = ComputePostcodeSetHash(cityConfiguration.QualifyingPostcodes),
             eligibilityConfigurationCount,
             eligibilityConfigurationHash,
+            calculationVersion = CurrentCalculationVersion(),
         };
         return JsonSerializer.Serialize(payload, JsonOptions);
     }
@@ -45,8 +49,13 @@ public static class PayrollShadowConfigurationSnapshot
                 $"{item.ResourceId}|{item.ValidFrom:O}|{item.ValidTo:O}|{item.EligibilityStatus}|{item.ReasonCode}")
             .ToArray();
         return Convert.ToHexString(
-            System.Security.Cryptography.SHA256.HashData(
-                System.Text.Encoding.UTF8.GetBytes(string.Join('\n', canonical))));
+            SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n', canonical))));
+    }
+
+    public static string ComputePostcodeSetHash(IReadOnlySet<int> postcodes)
+    {
+        var canonical = string.Join(',', postcodes.OrderBy(item => item));
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
     }
 
     public static CityAllowanceConfiguration CreateCityConfiguration(PayrollPeriodSnapshot period) =>
@@ -68,9 +77,53 @@ public static class PayrollShadowConfigurationSnapshot
         return configuration;
     }
 
-    public static string CurrentCalculationVersion() =>
-        typeof(PayrollShadowConfigurationSnapshot).Assembly
-            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-        ?? typeof(PayrollShadowConfigurationSnapshot).Assembly.GetName().Version?.ToString()
-        ?? "legacy-shadow-unknown";
+    /// <summary>
+    /// Returns assembly informational version with SourceRevisionId (e.g. 1.0.0+e30d365...).
+    /// Never invokes git at runtime.
+    /// </summary>
+    public static string CurrentCalculationVersion()
+    {
+        var assembly = typeof(PayrollShadowConfigurationSnapshot).Assembly;
+        var informational = assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion?
+            .Trim();
+        if (IsReproducibleVersion(informational))
+        {
+            return informational!;
+        }
+
+        var fileVersion = assembly.GetName().Version?.ToString() ?? "0.0.0.0";
+        var sourceRevision = assembly
+            .GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(item => item.Key == "SourceRevisionId")
+            ?.Value?
+            .Trim();
+        if (!string.IsNullOrWhiteSpace(sourceRevision))
+        {
+            return $"{fileVersion}+{sourceRevision}";
+        }
+
+        throw new InvalidOperationException(
+            "Payroll shadow CalculationVersion is not reproducible. " +
+            "Build must embed SourceRevisionId in AssemblyInformationalVersion.");
+    }
+
+    public static bool IsReproducibleVersion(string? version)
+    {
+        if (string.IsNullOrWhiteSpace(version))
+        {
+            return false;
+        }
+
+        var plus = version.IndexOf('+', StringComparison.Ordinal);
+        if (plus <= 0 || plus >= version.Length - 1)
+        {
+            return false;
+        }
+
+        var revision = version[(plus + 1)..];
+        return revision.Length >= 7
+            && !revision.Equals("unspecified", StringComparison.OrdinalIgnoreCase)
+            && !revision.Equals("local", StringComparison.OrdinalIgnoreCase);
+    }
 }

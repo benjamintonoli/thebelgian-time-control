@@ -65,13 +65,24 @@ public sealed class PayrollShadowSnapshotTests
             fixture.Service.SetEligibilityAsync(
                 new SetPayrollEligibilityRequest(
                     "1",
-                    new DateOnly(2026, 8, 1),
+                    new DateOnly(2026, 7, 15),
                     null,
                     PayrollEligibilityStatus.Excluded,
                     "LaterChange",
                     null),
                 "Ada Admin",
                 default));
+
+        await fixture.Service.SetEligibilityAsync(
+            new SetPayrollEligibilityRequest(
+                "1",
+                new DateOnly(2026, 8, 1),
+                null,
+                PayrollEligibilityStatus.Excluded,
+                "FutureAllowed",
+                null),
+            "Ada Admin",
+            default);
 
         var employee = await fixture.EmployeeAsync(
             (await fixture.MonthAsync())!.Id,
