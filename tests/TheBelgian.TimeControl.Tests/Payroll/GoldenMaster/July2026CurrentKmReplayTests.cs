@@ -11,9 +11,9 @@ using Xunit.Abstractions;
 namespace TheBelgian.TimeControl.Tests.Payroll.GoldenMaster;
 
 /// <summary>
-/// Current-source YTD KM + Code414 shadow diagnostics.
-/// Fixed EvaluationDate = 2026-09-01 for reproducibility.
-/// Does not assert equality to historical Power BI (source drift expected).
+/// Current-source JULY payroll-period KM + Code414 shadow diagnostics.
+/// Reads only PeriodStart..PeriodEnd (intersected with CJ window), not Jan→EvaluationDate.
+/// EvaluationDate = 2026-09-01 for reproducibility; does not assert PBI equality.
 /// </summary>
 public sealed class July2026CurrentKmReplayTests(ITestOutputHelper output)
 {
@@ -28,8 +28,6 @@ public sealed class July2026CurrentKmReplayTests(ITestOutputHelper output)
     ];
 
     private static readonly DateOnly EvaluationDate = new(2026, 9, 1);
-    private static readonly LegacyCurrentYearWindow Window =
-        LegacyCurrentYearWindow.FromEvaluationDate(EvaluationDate);
 
     private static readonly KmAllowanceConfiguration KmConfig =
         KmAllowanceConfiguration.Year2026Legacy;
@@ -41,7 +39,7 @@ public sealed class July2026CurrentKmReplayTests(ITestOutputHelper output)
         PayrollPeriodSnapshot.ForMonth(2026, 7, EvaluationDate);
 
     [Fact]
-    public async Task July2026_CurrentSixPersonYtdKmAndCode414_IsDiagnosticOnly()
+    public async Task July2026_CurrentSixPersonJulyPeriodKmAndCode414_IsDiagnosticOnly()
     {
         if (!TryCreateReader(out var reader, out _))
         {
@@ -64,22 +62,20 @@ public sealed class July2026CurrentKmReplayTests(ITestOutputHelper output)
         var overview = PowerBiGoldenMasterReader.ReadOverview(overviewPath)
             .ToDictionary(row => row.ResourceId, StringComparer.Ordinal);
 
+        // Period context only — not CJ_FirstDay..EvaluationDate.
         var performances = await reader.ReadPerformancesAsync(
-            Window.FirstDay,
-            EvaluationDate,
+            JulyPeriod.PeriodStart,
+            JulyPeriod.PeriodEnd,
             Cohort.Select(pair => pair.ResourceId).ToArray(),
             CancellationToken.None);
 
         foreach (var (name, resourceId) in Cohort)
         {
-            var ytdRows = performances.Where(row => row.ResourceId == resourceId).ToList();
-            var dailyInputs = ytdRows.Select(CurrentPayrollLegacyAdapter.ToDailyInputFromPerformance).ToList();
-            var km = LegacyKmAllowanceCalculator.Calculate(dailyInputs, Window, KmConfig);
+            var periodRows = performances.Where(row => row.ResourceId == resourceId).ToList();
+            var dailyInputs = periodRows.Select(CurrentPayrollLegacyAdapter.ToDailyInputFromPerformance).ToList();
+            var km = LegacyKmAllowanceCalculator.Calculate(dailyInputs, JulyPeriod, KmConfig);
 
-            var julyRows = ytdRows
-                .Where(row => row.Date.Month == 7 && row.Date.Year == 2026)
-                .ToList();
-            var cityUnits = CalculateJulyCityUnits(julyRows);
+            var cityUnits = CalculateJulyCityUnits(periodRows);
             var cityAmount = cityUnits * CityConfig.TripAmount;
 
             var monthly = LegacyMonthlyHoursPipeline.Calculate(
@@ -92,14 +88,18 @@ public sealed class July2026CurrentKmReplayTests(ITestOutputHelper output)
                 km);
 
             var historicalKm = overview[resourceId].KmAmount;
+            var historicalImplied = historicalKm is null
+                ? (decimal?)null
+                : historicalKm.Value / KmConfig.RatePerKm + (overview[resourceId].Extra75Hours ?? 0m);
             var classification = Classify(km.KmAmount, historicalKm);
 
             output.WriteLine(
-                $"{name}: rows={ytdRows.Count} eligibleKm={km.EligibleKm:F2} " +
+                $"{name}: rows={periodRows.Count} eligibleKm={km.EligibleKm:F2} " +
                 $"extra75Raw={km.Extra75RawKm:F2} extra75Ytd={km.Extra75YtdHours:F6} " +
                 $"net={km.NetKmLegacyQuantity:F4} kmAmount={km.KmAmount:F4} " +
                 $"cityAmount={cityAmount:F2} code414={monthly.Code414Amount:F4} " +
-                $"historicalPbiKm={historicalKm:F4} [{classification}]");
+                $"historicalPbiKm={historicalKm:F4} historicalImpliedKm={historicalImplied:F2} " +
+                $"diffKmAmount={(km.KmAmount - (historicalKm ?? 0m)):F4} [{classification}]");
 
             Assert.Equal(PayrollMonthCalculationStatus.Calculated, monthly.KmStatus);
             Assert.Equal(PayrollMonthCalculationStatus.Calculated, monthly.CityStatus);
@@ -109,7 +109,7 @@ public sealed class July2026CurrentKmReplayTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public async Task July2026_Current53ResourceYtdKmSummary_IsDiagnosticOnly()
+    public async Task July2026_Current53ResourceJulyPeriodKmSummary_IsDiagnosticOnly()
     {
         if (!TryCreateReader(out var reader, out var overviewResourceIds))
         {
@@ -133,28 +133,26 @@ public sealed class July2026CurrentKmReplayTests(ITestOutputHelper output)
             .ToDictionary(row => row.ResourceId, StringComparer.Ordinal);
 
         var performances = await reader.ReadPerformancesAsync(
-            Window.FirstDay,
-            EvaluationDate,
+            JulyPeriod.PeriodStart,
+            JulyPeriod.PeriodEnd,
             overviewResourceIds,
             CancellationToken.None);
 
         var nonzero = 0;
         var zero = 0;
         var negative = 0;
+        decimal totalEligibleKm = 0m;
         decimal totalKmAmount = 0m;
         decimal totalCode414 = 0m;
         var diffs = new List<(string ResourceId, string Name, decimal Diff)>();
 
         foreach (var resourceId in overviewResourceIds)
         {
-            var ytdRows = performances.Where(row => row.ResourceId == resourceId).ToList();
-            var dailyInputs = ytdRows.Select(CurrentPayrollLegacyAdapter.ToDailyInputFromPerformance).ToList();
-            var km = LegacyKmAllowanceCalculator.Calculate(dailyInputs, Window, KmConfig);
+            var periodRows = performances.Where(row => row.ResourceId == resourceId).ToList();
+            var dailyInputs = periodRows.Select(CurrentPayrollLegacyAdapter.ToDailyInputFromPerformance).ToList();
+            var km = LegacyKmAllowanceCalculator.Calculate(dailyInputs, JulyPeriod, KmConfig);
 
-            var julyRows = ytdRows
-                .Where(row => row.Date.Month == 7 && row.Date.Year == 2026)
-                .ToList();
-            var cityUnits = CalculateJulyCityUnits(julyRows);
+            var cityUnits = CalculateJulyCityUnits(periodRows);
             var cityAmount = cityUnits * CityConfig.TripAmount;
             var code414 = cityAmount + km.KmAmount;
 
@@ -171,6 +169,7 @@ public sealed class July2026CurrentKmReplayTests(ITestOutputHelper output)
                 zero++;
             }
 
+            totalEligibleKm += km.EligibleKm;
             totalKmAmount += km.KmAmount;
             totalCode414 += code414;
 
@@ -179,8 +178,9 @@ public sealed class July2026CurrentKmReplayTests(ITestOutputHelper output)
         }
 
         output.WriteLine(
-            $"53-resource YTD summary: resources={overviewResourceIds.Length} nonzeroKm={nonzero} " +
-            $"zeroKm={zero} negative={negative} totalKmAmount={totalKmAmount:F2} totalCode414={totalCode414:F2}");
+            $"53-resource JULY period summary: resources={overviewResourceIds.Length} nonzeroKm={nonzero} " +
+            $"zeroKm={zero} negative={negative} totalEligibleKm={totalEligibleKm:F2} " +
+            $"totalKmAmount={totalKmAmount:F2} totalCode414={totalCode414:F2}");
         foreach (var diff in diffs.OrderByDescending(item => Math.Abs(item.Diff)).Take(5))
         {
             output.WriteLine($"  topDiff {diff.ResourceId} {diff.Name}: delta={diff.Diff:F2}");

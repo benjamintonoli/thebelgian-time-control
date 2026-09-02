@@ -3,6 +3,7 @@ namespace TheBelgian.TimeControl.Core.Payroll.Models;
 /// <summary>
 /// Power BI CJ / CJ_FirstDay / CJ_LastDay mapped to an explicit EvaluationDate
 /// (replacement for TODAY()). Calculation upper bound is EvaluationDate, not LastDay.
+/// KM measures also require PayrollPeriodSnapshot intersection — see LegacyKmEffectiveDateRange.
 /// </summary>
 public sealed record LegacyCurrentYearWindow(
     int Year,

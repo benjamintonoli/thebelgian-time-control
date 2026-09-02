@@ -27,7 +27,7 @@ public sealed class LegacyCurrentYearWindowTests
     }
 
     [Fact]
-    public void CalculationWindow_IncludesFirstDayAndEvaluationDate_ExcludesAfter()
+    public void CjWindow_IncludesFirstDayAndEvaluationDate_ExcludesAfter()
     {
         var window = LegacyCurrentYearWindow.FromEvaluationDate(new DateOnly(2026, 9, 1));
         Assert.True(window.IsInCalculationWindow(new DateOnly(2026, 1, 1)));
@@ -48,13 +48,162 @@ public sealed class LegacyCurrentYearWindowTests
     }
 }
 
+public sealed class LegacyKmEffectiveDateRangeTests
+{
+    [Fact]
+    public void JulyPeriod_WithSeptemberEvaluation_IntersectsToJulyOnly()
+    {
+        var period = PayrollPeriodSnapshot.ForMonth(2026, 7, new DateOnly(2026, 9, 1));
+        var window = LegacyCurrentYearWindow.FromPeriod(period);
+        var range = LegacyKmEffectiveDateRange.Intersect(period, window);
+
+        Assert.NotNull(range);
+        Assert.Equal(new DateOnly(2026, 7, 1), range!.Start);
+        Assert.Equal(new DateOnly(2026, 7, 31), range.End);
+    }
+
+    [Fact]
+    public void OpenAugust_TruncatesAtEvaluationDate()
+    {
+        var period = PayrollPeriodSnapshot.ForMonth(2026, 8, new DateOnly(2026, 8, 15));
+        var window = LegacyCurrentYearWindow.FromPeriod(period);
+        var range = LegacyKmEffectiveDateRange.Intersect(period, window);
+
+        Assert.NotNull(range);
+        Assert.Equal(new DateOnly(2026, 8, 1), range!.Start);
+        Assert.Equal(new DateOnly(2026, 8, 15), range.End);
+    }
+
+    [Fact]
+    public void YearBoundary_ExcludesDecemberByCjWindow()
+    {
+        var period = new PayrollPeriodSnapshot(
+            2026,
+            1,
+            new DateOnly(2025, 12, 15),
+            new DateOnly(2026, 1, 15),
+            new DateOnly(2026, 1, 15));
+        var window = LegacyCurrentYearWindow.FromPeriod(period);
+        var range = LegacyKmEffectiveDateRange.Intersect(period, window);
+
+        Assert.NotNull(range);
+        Assert.Equal(new DateOnly(2026, 1, 1), range!.Start);
+        Assert.Equal(new DateOnly(2026, 1, 15), range.End);
+    }
+}
+
 public sealed class LegacyKmAllowanceCalculatorTests
 {
-    private static readonly LegacyCurrentYearWindow Window =
-        LegacyCurrentYearWindow.FromEvaluationDate(new DateOnly(2026, 9, 1));
-
     private static readonly KmAllowanceConfiguration Rate =
         KmAllowanceConfiguration.Year2026Legacy;
+
+    private static readonly PayrollPeriodSnapshot JulyPeriod =
+        PayrollPeriodSnapshot.ForMonth(2026, 7, new DateOnly(2026, 9, 1));
+
+    [Fact]
+    public void JulyPeriod_ExcludesJanJunAug_KeepsJulyOnly()
+    {
+        var rows = new[]
+        {
+            Row(1, new DateOnly(2026, 1, 15), hfd: 9, km: 100m),
+            Row(2, new DateOnly(2026, 6, 15), hfd: 9, km: 200m),
+            Row(3, new DateOnly(2026, 7, 15), hfd: 9, km: 300m),
+            Row(4, new DateOnly(2026, 8, 15), hfd: 9, km: 400m),
+        };
+
+        var result = LegacyKmAllowanceCalculator.Calculate(rows, JulyPeriod, Rate);
+        Assert.Equal(300m, result.EligibleKm);
+    }
+
+    [Fact]
+    public void OpenMonth_OnlyThroughEvaluationDate()
+    {
+        var period = PayrollPeriodSnapshot.ForMonth(2026, 8, new DateOnly(2026, 8, 15));
+        var rows = new[]
+        {
+            Row(1, new DateOnly(2026, 7, 31), hfd: 9, km: 100m),
+            Row(2, new DateOnly(2026, 8, 1), hfd: 9, km: 10m),
+            Row(3, new DateOnly(2026, 8, 15), hfd: 9, km: 20m),
+            Row(4, new DateOnly(2026, 8, 16), hfd: 9, km: 100m),
+            Row(5, new DateOnly(2026, 1, 1), hfd: 9, km: 500m),
+        };
+
+        var result = LegacyKmAllowanceCalculator.Calculate(rows, period, Rate);
+        Assert.Equal(30m, result.EligibleKm);
+    }
+
+    [Fact]
+    public void WholeYearContext_UsesCjThroughEvaluationDate()
+    {
+        var period = new PayrollPeriodSnapshot(
+            2026,
+            1,
+            new DateOnly(2026, 1, 1),
+            new DateOnly(2026, 12, 31),
+            new DateOnly(2026, 9, 1));
+        var rows = new[]
+        {
+            Row(1, new DateOnly(2025, 12, 31), hfd: 9, km: 100m),
+            Row(2, new DateOnly(2026, 1, 1), hfd: 9, km: 10m),
+            Row(3, new DateOnly(2026, 9, 1), hfd: 9, km: 20m),
+            Row(4, new DateOnly(2026, 9, 2), hfd: 9, km: 100m),
+        };
+
+        var result = LegacyKmAllowanceCalculator.Calculate(rows, period, Rate);
+        Assert.Equal(30m, result.EligibleKm);
+    }
+
+    [Fact]
+    public void YearBoundaryPeriod_ExcludesDecemberByCj()
+    {
+        var period = new PayrollPeriodSnapshot(
+            2026,
+            1,
+            new DateOnly(2025, 12, 15),
+            new DateOnly(2026, 1, 15),
+            new DateOnly(2026, 1, 15));
+        var rows = new[]
+        {
+            Row(1, new DateOnly(2025, 12, 20), hfd: 9, km: 100m),
+            Row(2, new DateOnly(2026, 1, 1), hfd: 9, km: 10m),
+            Row(3, new DateOnly(2026, 1, 15), hfd: 9, km: 20m),
+            Row(4, new DateOnly(2026, 1, 16), hfd: 9, km: 100m),
+        };
+
+        var result = LegacyKmAllowanceCalculator.Calculate(rows, period, Rate);
+        Assert.Equal(30m, result.EligibleKm);
+    }
+
+    [Fact]
+    public void Extra75_JulyPeriod_UsesJulyOnly_NotJuneOrAugust()
+    {
+        // Single-row days: Extra75 = KM - 150 when KM > 150 and both min+max
+        // June 210 → Extra75 60; July 270 → 120; August 330 → 180
+        var rows = new[]
+        {
+            Row(1, new DateOnly(2026, 6, 15), hfd: 9, km: 210m, vanHours: 8m),
+            Row(2, new DateOnly(2026, 7, 15), hfd: 9, km: 270m, vanHours: 8m),
+            Row(3, new DateOnly(2026, 8, 15), hfd: 9, km: 330m, vanHours: 8m),
+        };
+
+        var result = LegacyKmAllowanceCalculator.Calculate(rows, JulyPeriod, Rate);
+        Assert.Equal(120m, result.Extra75RawKm);
+        Assert.Equal(2m, result.Extra75YtdHours);
+    }
+
+    [Fact]
+    public void Extra75_JulyPeriod_IncludesTask5InsideJuly()
+    {
+        var rows = new[]
+        {
+            Row(1, new DateOnly(2026, 7, 1), hfd: 5, km: 200m, vanHours: 7m),
+        };
+
+        var result = LegacyKmAllowanceCalculator.Calculate(rows, JulyPeriod, Rate);
+        Assert.Equal(0m, result.EligibleKm);
+        Assert.Equal(50m, result.Extra75RawKm);
+        Assert.Equal(50m / 60m, result.Extra75YtdHours);
+    }
 
     [Fact]
     public void EligibleKm_IncludesNormalRow_ExcludesTask5()
@@ -65,7 +214,7 @@ public sealed class LegacyKmAllowanceCalculatorTests
             Row(2, new DateOnly(2026, 7, 1), hfd: 5, km: 50m),
         };
 
-        var result = LegacyKmAllowanceCalculator.Calculate(rows, Window, Rate);
+        var result = LegacyKmAllowanceCalculator.Calculate(rows, JulyPeriod, Rate);
         Assert.Equal(100m, result.EligibleKm);
     }
 
@@ -77,7 +226,7 @@ public sealed class LegacyKmAllowanceCalculatorTests
             Row(1, new DateOnly(2026, 7, 1), hfd: 23, km: 12m),
         };
 
-        var result = LegacyKmAllowanceCalculator.Calculate(rows, Window, Rate);
+        var result = LegacyKmAllowanceCalculator.Calculate(rows, JulyPeriod, Rate);
         Assert.Equal(12m, result.EligibleKm);
     }
 
@@ -90,49 +239,33 @@ public sealed class LegacyKmAllowanceCalculatorTests
             Row(2, new DateOnly(2026, 7, 2), hfd: 9, km: 10m),
         };
 
-        var result = LegacyKmAllowanceCalculator.Calculate(rows, Window, Rate);
+        var result = LegacyKmAllowanceCalculator.Calculate(rows, JulyPeriod, Rate);
         Assert.Equal(10m, result.EligibleKm);
     }
 
     [Fact]
-    public void EligibleKm_ExcludesBeforeFirstDay_AndAfterEvaluationDate()
+    public void EligibleKm_SumsMultipleJulyRowsExactly()
     {
         var rows = new[]
         {
-            Row(1, new DateOnly(2025, 12, 31), hfd: 9, km: 100m),
-            Row(2, new DateOnly(2026, 1, 1), hfd: 9, km: 10m),
-            Row(3, new DateOnly(2026, 9, 1), hfd: 9, km: 20m),
-            Row(4, new DateOnly(2026, 9, 2), hfd: 9, km: 100m),
+            Row(1, new DateOnly(2026, 7, 1), hfd: 9, km: 100.5m),
+            Row(2, new DateOnly(2026, 7, 2), hfd: 9, km: 200.25m),
+            Row(3, new DateOnly(2026, 7, 3), hfd: 14, km: 50m),
         };
 
-        var result = LegacyKmAllowanceCalculator.Calculate(rows, Window, Rate);
-        Assert.Equal(30m, result.EligibleKm);
-    }
-
-    [Fact]
-    public void EligibleKm_SumsMultipleRowsExactly()
-    {
-        var rows = new[]
-        {
-            Row(1, new DateOnly(2026, 2, 1), hfd: 9, km: 100.5m),
-            Row(2, new DateOnly(2026, 3, 1), hfd: 9, km: 200.25m),
-            Row(3, new DateOnly(2026, 4, 1), hfd: 14, km: 50m),
-        };
-
-        var result = LegacyKmAllowanceCalculator.Calculate(rows, Window, Rate);
+        var result = LegacyKmAllowanceCalculator.Calculate(rows, JulyPeriod, Rate);
         Assert.Equal(350.75m, result.EligibleKm);
     }
 
     [Fact]
     public void Extra75Ytd_DividesRawSumBy60()
     {
-        // Single row that is both min and max VAN with KM > 150 → Extra75 = KM - 150
         var rows = new[]
         {
             Row(1, new DateOnly(2026, 7, 1), hfd: 9, km: 214m, vanHours: 8m),
         };
 
-        var result = LegacyKmAllowanceCalculator.Calculate(rows, Window, Rate);
+        var result = LegacyKmAllowanceCalculator.Calculate(rows, JulyPeriod, Rate);
         Assert.Equal(64m, result.Extra75RawKm);
         Assert.Equal(64m / 60m, result.Extra75YtdHours);
     }
@@ -145,68 +278,30 @@ public sealed class LegacyKmAllowanceCalculatorTests
             Row(1, new DateOnly(2026, 7, 1), hfd: 9, km: 50m, vanHours: 8m),
         };
 
-        var result = LegacyKmAllowanceCalculator.Calculate(rows, Window, Rate);
+        var result = LegacyKmAllowanceCalculator.Calculate(rows, JulyPeriod, Rate);
         Assert.Equal(0m, result.Extra75RawKm);
         Assert.Equal(0m, result.Extra75YtdHours);
     }
 
     [Fact]
-    public void Extra75Ytd_IncludesTask5WhenSyntheticNonzeroExtra75()
-    {
-        // Task 5 alone is both min and max; Extra75 YTD measure has no task5 exclusion.
-        var rows = new[]
-        {
-            Row(1, new DateOnly(2026, 7, 1), hfd: 5, km: 200m, vanHours: 7m),
-        };
-
-        var result = LegacyKmAllowanceCalculator.Calculate(rows, Window, Rate);
-        Assert.Equal(0m, result.EligibleKm); // task 5 excluded from Aantal KM
-        Assert.Equal(50m, result.Extra75RawKm); // 200 - 150 (both min+max)
-        Assert.Equal(50m / 60m, result.Extra75YtdHours);
-    }
-
-    [Fact]
-    public void Extra75Ytd_ExcludesOutsideCalculationWindow()
-    {
-        var rows = new[]
-        {
-            Row(1, new DateOnly(2025, 12, 31), hfd: 9, km: 214m, vanHours: 8m),
-            Row(2, new DateOnly(2026, 9, 2), hfd: 9, km: 214m, vanHours: 8m),
-            Row(3, new DateOnly(2026, 7, 1), hfd: 9, km: 214m, vanHours: 8m),
-        };
-
-        var result = LegacyKmAllowanceCalculator.Calculate(rows, Window, Rate);
-        Assert.Equal(64m, result.Extra75RawKm);
-    }
-
-    [Fact]
     public void KmAmount_PreservesDimensionalOddity()
     {
-        // Eligible 941, Extra75Ytd 1.0666... → amount = 0.1448 * (941 - 1.0666...)
         var eligible = 941m;
         var extra75Ytd = 64m / 60m;
         var expected = 0.1448m * (eligible - extra75Ytd);
 
-        // Construct via calculator: one day both min/max with KM=214 → Extra75=64;
-        // remaining eligible filled with middle-of-day rows that aren't min/max.
         var rows = new List<LegacyDailyPerformanceInput>
         {
-            Row(1, new DateOnly(2026, 7, 1), hfd: 9, km: 214m, vanHours: 8m),
+            Row(1, new DateOnly(2026, 7, 1), hfd: 9, km: 50m, vanHours: 7m),
+            Row(2, new DateOnly(2026, 7, 1), hfd: 9, km: 214m, vanHours: 8m),
+            Row(3, new DateOnly(2026, 7, 1), hfd: 9, km: 50m, vanHours: 16m),
+            Row(4, new DateOnly(2026, 7, 2), hfd: 9, km: 214m, vanHours: 8m),
+            Row(5, new DateOnly(2026, 7, 3), hfd: 9, km: 0m, vanHours: 7m),
+            Row(6, new DateOnly(2026, 7, 3), hfd: 9, km: 413m, vanHours: 8m),
+            Row(7, new DateOnly(2026, 7, 3), hfd: 9, km: 0m, vanHours: 16m),
         };
-        // Add 727 km on separate days as neither-only... wait, single row days are always both min+max.
-        // So use multi-row days where only mid rows contribute KM without Extra75.
-        rows.Clear();
-        rows.Add(Row(1, new DateOnly(2026, 7, 1), hfd: 9, km: 50m, vanHours: 7m)); // min, km<=75 → Extra75=0
-        rows.Add(Row(2, new DateOnly(2026, 7, 1), hfd: 9, km: 214m, vanHours: 8m)); // neither → Extra75=0
-        rows.Add(Row(3, new DateOnly(2026, 7, 1), hfd: 9, km: 50m, vanHours: 16m)); // max, km<=75 → Extra75=0
-        // Need Extra75 = 64: use a day with single row KM=214
-        rows.Add(Row(4, new DateOnly(2026, 7, 2), hfd: 9, km: 214m, vanHours: 8m));
-        // Remaining eligible: 50+214+50+214 = 528; need 941 → add 413 on mid-day only
-        rows.Add(Row(5, new DateOnly(2026, 7, 3), hfd: 9, km: 0m, vanHours: 7m));
-        rows.Add(Row(6, new DateOnly(2026, 7, 3), hfd: 9, km: 413m, vanHours: 8m));
-        rows.Add(Row(7, new DateOnly(2026, 7, 3), hfd: 9, km: 0m, vanHours: 16m));
 
-        var result = LegacyKmAllowanceCalculator.Calculate(rows, Window, Rate);
+        var result = LegacyKmAllowanceCalculator.Calculate(rows, JulyPeriod, Rate);
         Assert.Equal(941m, result.EligibleKm);
         Assert.Equal(64m, result.Extra75RawKm);
         Assert.Equal(extra75Ytd, result.Extra75YtdHours);
@@ -217,7 +312,7 @@ public sealed class LegacyKmAllowanceCalculatorTests
     [Fact]
     public void KmAmount_ZeroWhenNoKm()
     {
-        var result = LegacyKmAllowanceCalculator.Calculate([], Window, Rate);
+        var result = LegacyKmAllowanceCalculator.Calculate([], JulyPeriod, Rate);
         Assert.Equal(0m, result.EligibleKm);
         Assert.Equal(0m, result.KmAmount);
     }
@@ -225,13 +320,12 @@ public sealed class LegacyKmAllowanceCalculatorTests
     [Fact]
     public void KmAmount_AllowsNegativeNetQuantity()
     {
-        // Eligible 0 (only task5), Extra75Ytd > 0 from task5 → negative amount
         var rows = new[]
         {
             Row(1, new DateOnly(2026, 7, 1), hfd: 5, km: 200m, vanHours: 7m),
         };
 
-        var result = LegacyKmAllowanceCalculator.Calculate(rows, Window, Rate);
+        var result = LegacyKmAllowanceCalculator.Calculate(rows, JulyPeriod, Rate);
         Assert.Equal(0m, result.EligibleKm);
         Assert.True(result.NetKmLegacyQuantity < 0m);
         Assert.True(result.KmAmount < 0m);
@@ -249,7 +343,7 @@ public sealed class LegacyKmAllowanceCalculatorTests
             Row(3, new DateOnly(2026, 7, 1), hfd: 9, km: 0m, vanHours: 16m),
         };
 
-        var result = LegacyKmAllowanceCalculator.Calculate(rows, Window, config);
+        var result = LegacyKmAllowanceCalculator.Calculate(rows, JulyPeriod, config);
         Assert.Equal(0.2m, result.RatePerKm);
         Assert.Equal(0m, result.Extra75YtdHours);
         Assert.Equal(0.2m * 100m, result.KmAmount);

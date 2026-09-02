@@ -5,8 +5,8 @@ using Xunit.Abstractions;
 namespace TheBelgian.TimeControl.Tests.Payroll.GoldenMaster;
 
 /// <summary>
-/// Validates Power BI KM-bedrag CJ formula identity against overview export.
-/// Does NOT prove historical raw YTD source parity (July detail lacks Jan–eval rows).
+/// ALGEBRAIC_FORMULA_IDENTITY: verifies KM-bedrag = rate × (impliedEligible − Extra75Ytd)
+/// reconstructs exported overview amounts. Does NOT prove historical raw source parity.
 /// </summary>
 public sealed class July2026KmFormulaIdentityTests(ITestOutputHelper output)
 {
@@ -21,7 +21,7 @@ public sealed class July2026KmFormulaIdentityTests(ITestOutputHelper output)
         "Prestaties juli overzicht.csv");
 
     [Fact]
-    public void July2026_Overview_KmAmount_FormulaIdentityParity()
+    public void July2026_Overview_KmAmount_AlgebraicFormulaIdentity()
     {
         if (!File.Exists(OverviewPath))
         {
@@ -44,8 +44,6 @@ public sealed class July2026KmFormulaIdentityTests(ITestOutputHelper output)
 
             evaluated++;
             var pbiExtra75Ytd = row.Extra75Hours ?? 0m;
-            // Reverse: implied eligible = PbiKm/rate + Extra75Ytd
-            // Reconstruct: rate * (implied - Extra75Ytd) must equal PbiKm
             var reconstructed = Rate * ((pbiKm.Value / Rate + pbiExtra75Ytd) - pbiExtra75Ytd);
             var diff = Math.Abs(reconstructed - pbiKm.Value);
             if (diff <= Tolerance)
@@ -60,9 +58,9 @@ public sealed class July2026KmFormulaIdentityTests(ITestOutputHelper output)
         }
 
         output.WriteLine(
-            $"FORMULA_IDENTITY_PARITY: resources={evaluated} exact={exact} mismatches={mismatches.Count}");
+            $"ALGEBRAIC_FORMULA_IDENTITY: resources={evaluated} exact={exact} mismatches={mismatches.Count}");
         output.WriteLine(
-            "FORMULA IDENTITY PROVEN. HISTORICAL RAW YTD SOURCE PARITY NOT PROVEN FROM JULY DETAIL EXPORT.");
+            "ALGEBRAIC FORMULA IDENTITY PROVEN. HISTORICAL RAW SOURCE PARITY NOT PROVEN FROM JULY DETAIL EXPORT.");
         foreach (var mismatch in mismatches.Take(10))
         {
             output.WriteLine($"  {mismatch}");
