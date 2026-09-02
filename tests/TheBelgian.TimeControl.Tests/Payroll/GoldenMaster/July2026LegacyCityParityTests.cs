@@ -185,7 +185,7 @@ public sealed class July2026LegacyCityParityTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void July2026_MonthlyPipeline_KmAndCode414RemainNotCalculated()
+    public void July2026_MonthlyPipeline_CityOnly_LeavesKmAndCode414NotCalculated()
     {
         var monthly = LegacyMonthlyHoursPipeline.Calculate(
             JulyPeriod,

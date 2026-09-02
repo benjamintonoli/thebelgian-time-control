@@ -31,11 +31,24 @@ public sealed class CurrentSourceSeparationTests
     }
 
     [Fact]
-    public void Infrastructure_DoesNotContainLegacyKmAllowanceCalculator()
+    public void LegacyKmAllowanceCalculator_DoesNotReferenceHistoricalTestAssembly()
     {
-        Assert.Null(typeof(LegacyMonthlyHoursPipeline).Assembly.GetType(
-            "TheBelgian.TimeControl.Infrastructure.Payroll.Legacy.LegacyKmAllowanceCalculator",
-            throwOnError: false));
+        var references = typeof(LegacyKmAllowanceCalculator).Assembly
+            .GetReferencedAssemblies()
+            .Select(assembly => assembly.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        Assert.DoesNotContain(typeof(HistoricalKmResolver).Assembly.GetName().Name, references);
+        Assert.NotNull(typeof(LegacyKmAllowanceCalculator));
+    }
+
+    [Fact]
+    public void LegacyCode414ShadowCalculator_DoesNotReferenceHistoricalTestAssembly()
+    {
+        var references = typeof(LegacyCode414ShadowCalculator).Assembly
+            .GetReferencedAssemblies()
+            .Select(assembly => assembly.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        Assert.DoesNotContain(typeof(HistoricalKmResolver).Assembly.GetName().Name, references);
     }
 
     [Fact]

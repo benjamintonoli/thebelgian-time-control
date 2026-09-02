@@ -10,7 +10,7 @@ public static class LegacyMonthlyHoursPipeline
         string resourceId,
         IReadOnlyList<LegacyDailyPayrollResult> dailyResults,
         IReadOnlyDictionary<DateOnly, decimal> dailyStandbyTotals) =>
-        Calculate(period, resourceId, dailyResults, dailyStandbyTotals, null, null);
+        Calculate(period, resourceId, dailyResults, dailyStandbyTotals, null, null, null);
 
     public static PayrollMonthShadowResult Calculate(
         PayrollPeriodSnapshot period,
@@ -18,7 +18,17 @@ public static class LegacyMonthlyHoursPipeline
         IReadOnlyList<LegacyDailyPayrollResult> dailyResults,
         IReadOnlyDictionary<DateOnly, decimal> dailyStandbyTotals,
         int? cityTripUnits,
-        CityAllowanceConfiguration? cityConfiguration)
+        CityAllowanceConfiguration? cityConfiguration) =>
+        Calculate(period, resourceId, dailyResults, dailyStandbyTotals, cityTripUnits, cityConfiguration, null);
+
+    public static PayrollMonthShadowResult Calculate(
+        PayrollPeriodSnapshot period,
+        string resourceId,
+        IReadOnlyList<LegacyDailyPayrollResult> dailyResults,
+        IReadOnlyDictionary<DateOnly, decimal> dailyStandbyTotals,
+        int? cityTripUnits,
+        CityAllowanceConfiguration? cityConfiguration,
+        LegacyKmAllowanceResult? kmResult)
     {
         var theoreticalHours = LegacyGlobalWeekdayTheoreticalHoursProvider.GetMonthlyHours(period);
         var ordinary = LegacyMonthlyOrdinaryCalculator.Calculate(
@@ -41,6 +51,28 @@ public static class LegacyMonthlyHoursPipeline
             cityStatus = PayrollMonthCalculationStatus.Calculated;
         }
 
+        decimal? eligibleKm = null;
+        decimal? extra75YtdHours = null;
+        decimal? kmRate = null;
+        decimal? netKmLegacyQuantity = null;
+        decimal? kmAmount = null;
+        var kmStatus = PayrollMonthCalculationStatus.NotCalculated;
+        if (kmResult is not null)
+        {
+            eligibleKm = kmResult.EligibleKm;
+            extra75YtdHours = kmResult.Extra75YtdHours;
+            kmRate = kmResult.RatePerKm;
+            netKmLegacyQuantity = kmResult.NetKmLegacyQuantity;
+            kmAmount = kmResult.KmAmount;
+            kmStatus = PayrollMonthCalculationStatus.Calculated;
+        }
+
+        var (code414Status, code414Amount) = LegacyCode414ShadowCalculator.Calculate(
+            cityStatus,
+            cityAllowanceAmount,
+            kmStatus,
+            kmAmount);
+
         return new PayrollMonthShadowResult
         {
             ResourceId = resourceId,
@@ -55,9 +87,9 @@ public static class LegacyMonthlyHoursPipeline
             Code135At200 = code135At200,
             OrdinaryStatus = PayrollMonthCalculationStatus.Calculated,
             StandbyStatus = PayrollMonthCalculationStatus.Calculated,
-            KmStatus = PayrollMonthCalculationStatus.NotCalculated,
+            KmStatus = kmStatus,
             CityStatus = cityStatus,
-            Code414Status = PayrollMonthCalculationStatus.NotCalculated,
+            Code414Status = code414Status,
             TheoreticalMinutes = theoreticalHours * 60m,
             PayableOrdinaryMinutes = ordinary.ActualOrdinaryHours * 60m,
             DifferenceMinutes = ordinary.DifferenceHours * 60m,
@@ -65,11 +97,14 @@ public static class LegacyMonthlyHoursPipeline
             StandbyExactMinutes = standby.ExactHours * 60m,
             StandbyRoundedHours = standby.RoundedHours,
             Standby200Units = standby.RoundedHours,
-            EligibleKm = null,
-            KmAmount = null,
+            EligibleKm = eligibleKm,
+            Extra75YtdHours = extra75YtdHours,
+            KmRate = kmRate,
+            NetKmLegacyQuantity = netKmLegacyQuantity,
+            KmAmount = kmAmount,
             CityTripUnits = cityTripUnits,
             CityAllowanceAmount = cityAllowanceAmount,
-            Code414Amount = null,
+            Code414Amount = code414Amount,
         };
     }
 }

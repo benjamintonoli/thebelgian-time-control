@@ -1,3 +1,4 @@
+using TheBelgian.TimeControl.Core.Payroll.Configuration;
 using TheBelgian.TimeControl.Core.Payroll.Models;
 using TheBelgian.TimeControl.Infrastructure.Payroll.Legacy;
 
@@ -48,5 +49,30 @@ public sealed class LegacyMonthlyHoursPipelineTests
         Assert.Null(result.KmAmount);
         Assert.Null(result.Code414Amount);
         Assert.Equal(4m, result.Code135At200!.CalculatedUnits);
+    }
+
+    [Fact]
+    public void Calculate_WithCityAndKm_PopulatesCode414()
+    {
+        var period = PayrollPeriodSnapshot.ForMonth(2026, 7, new DateOnly(2026, 9, 1));
+        var km = new LegacyKmAllowanceResult(941m, 64m, 64m / 60m, 941m - 64m / 60m, 0.1448m, 0.1448m * (941m - 64m / 60m));
+        var result = LegacyMonthlyHoursPipeline.Calculate(
+            period,
+            "495",
+            [],
+            new Dictionary<DateOnly, decimal>(),
+            9,
+            CityAllowanceConfiguration.July2026Legacy,
+            km);
+
+        Assert.Equal(PayrollMonthCalculationStatus.Calculated, result.CityStatus);
+        Assert.Equal(PayrollMonthCalculationStatus.Calculated, result.KmStatus);
+        Assert.Equal(PayrollMonthCalculationStatus.Calculated, result.Code414Status);
+        Assert.Equal(45m, result.CityAllowanceAmount);
+        Assert.Equal(km.KmAmount, result.KmAmount);
+        Assert.Equal(45m + km.KmAmount, result.Code414Amount);
+        Assert.Equal(941m, result.EligibleKm);
+        Assert.Equal(64m / 60m, result.Extra75YtdHours);
+        Assert.Equal(0.1448m, result.KmRate);
     }
 }

@@ -1,7 +1,7 @@
 namespace TheBelgian.TimeControl.Core.Payroll.Models;
 
 /// <summary>
-/// Monthly shadow payroll rollup. City allowance populated in Increment 6C-B; KM/Code414 remain null.
+/// Monthly shadow payroll rollup. City (6C-B) + KM/Code414 (6C-C) when supplied.
 /// </summary>
 public sealed class PayrollMonthShadowResult
 {
@@ -34,6 +34,9 @@ public sealed class PayrollMonthShadowResult
     public decimal? StandbyRoundedHours { get; init; }
     public decimal? Standby200Units { get; init; }
     public decimal? EligibleKm { get; init; }
+    public decimal? Extra75YtdHours { get; init; }
+    public decimal? KmRate { get; init; }
+    public decimal? NetKmLegacyQuantity { get; init; }
     public decimal? KmAmount { get; init; }
     public int? CityTripUnits { get; init; }
     public decimal? CityAllowanceAmount { get; init; }
