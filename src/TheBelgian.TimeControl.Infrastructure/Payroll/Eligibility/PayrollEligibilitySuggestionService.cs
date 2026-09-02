@@ -1,3 +1,4 @@
+using TheBelgian.TimeControl.Core.Payroll.Configuration;
 using TheBelgian.TimeControl.Core.Payroll.Models;
 
 namespace TheBelgian.TimeControl.Infrastructure.Payroll.Eligibility;
@@ -15,15 +16,14 @@ public static class PayrollEligibilitySuggestionService
             return (PayrollEligibilityStatus.Excluded, "Uit dienst vóór begin van de loonperiode.");
         }
 
-        if (ContainsMarker(candidate.DisplayName, "(OA)"))
+        if (LegacyPayrollNameMarkers.IsLegacyOaMarker(candidate.DisplayName))
         {
-            return (PayrollEligibilityStatus.Excluded, "Naam suggereert onderaannemer (OA).");
+            return (PayrollEligibilityStatus.Excluded, "Legacy naammarker OA (voorstel, geen beslissing).");
         }
 
-        if (ContainsMarker(candidate.DisplayName, "stagiair")
-            || ContainsMarker(candidate.DisplayName, "intern"))
+        if (LegacyPayrollNameMarkers.IsLegacyStagiairMarker(candidate.DisplayName))
         {
-            return (PayrollEligibilityStatus.Excluded, "Naam suggereert stagiair/intern.");
+            return (PayrollEligibilityStatus.Excluded, "Legacy naammarker stagiair (voorstel, geen beslissing).");
         }
 
         if (candidate.AcertaIdentityStatus == AcertaIdentityStatus.Missing)
@@ -50,8 +50,4 @@ public static class PayrollEligibilitySuggestionService
             : $"{baseSuggestion.SuggestedReason} Aanwezig in ververst Power BI-overzicht (referentie).";
         return (baseSuggestion.SuggestedEligibility, reason);
     }
-
-    private static bool ContainsMarker(string? value, string marker) =>
-        !string.IsNullOrWhiteSpace(value)
-        && value.Contains(marker, StringComparison.OrdinalIgnoreCase);
 }

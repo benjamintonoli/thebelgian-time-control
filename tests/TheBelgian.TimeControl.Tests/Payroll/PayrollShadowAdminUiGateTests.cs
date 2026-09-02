@@ -102,5 +102,17 @@ public sealed class PayrollShadowAdminUiGateTests
         public Task<PayrollShadowMonth> StartReviewAsync(
             int year, int month, string actor, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
+
+        public Task<PayrollRosterPage> GetPayrollRosterAsync(
+            PayrollRosterFilter filter, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task ConfirmPayrollRosterSelectionAsync(
+            ConfirmPayrollRosterSelectionRequest request, string actor, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task AddManualPayrollEmployeeAsync(
+            AddManualPayrollEmployeeRequest request, string actor, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 }

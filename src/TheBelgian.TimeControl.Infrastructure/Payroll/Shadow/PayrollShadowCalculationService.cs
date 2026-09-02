@@ -1,4 +1,4 @@
-using TheBelgian.TimeControl.Core.Payroll.Configuration;
+using TheBelgian.TimeControl.Core.Payroll.Legacy;
 using TheBelgian.TimeControl.Core.Payroll.Models;
 using TheBelgian.TimeControl.Infrastructure.Payroll.Legacy;
 using TheBelgian.TimeControl.Infrastructure.Payroll.Sources;
@@ -10,6 +10,14 @@ public sealed class PayrollShadowCalculationService
     public PayrollMonthShadowResult Calculate(
         PayrollPeriodSnapshot period,
         string resourceId,
+        IReadOnlyList<NormalizedPerformanceEntry> performances,
+        IReadOnlyList<CalendarSyntheticEntry> syntheticAbsences) =>
+        Calculate(period, resourceId, function: null, performances, syntheticAbsences);
+
+    public PayrollMonthShadowResult Calculate(
+        PayrollPeriodSnapshot period,
+        string resourceId,
+        string? function,
         IReadOnlyList<NormalizedPerformanceEntry> performances,
         IReadOnlyList<CalendarSyntheticEntry> syntheticAbsences)
     {
@@ -23,6 +31,7 @@ public sealed class PayrollShadowCalculationService
 
         var resourcePerformances = performances
             .Where(row => row.ResourceId == resourceId)
+            .Where(row => LegacyPayrollPerformanceEligibility.IsIncluded(function, row.HfdTaakId))
             .ToList();
         var resourceSynthetic = syntheticAbsences
             .Where(row => row.ResourceId == resourceId)

@@ -204,7 +204,7 @@ public sealed class PayrollShadowSnapshotTests
                     "1",
                     null,
                     null,
-                    null,
+                    "Technieker",
                     1,
                     null,
                     AcertaIdentityStatus.Present),

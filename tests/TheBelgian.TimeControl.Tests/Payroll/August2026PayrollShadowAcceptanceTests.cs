@@ -242,7 +242,7 @@ public sealed class PayrollShadowAcceptanceInvariantTests
                     "1",
                     null,
                     null,
-                    null,
+                    "Technieker",
                     1,
                     null,
                     missingAcerta ? AcertaIdentityStatus.Missing : AcertaIdentityStatus.Present),
@@ -363,10 +363,26 @@ public sealed class August2026PayrollShadowAcceptanceTests(ITestOutputHelper out
         var pbiIds = overview.Select(row => row.ResourceId).ToHashSet(StringComparer.Ordinal);
         var snapshotIds = detail.Employees.Select(row => row.ResourceId).ToHashSet(StringComparer.Ordinal);
         var candidateIds = candidates.Select(row => row.ResourceId).ToHashSet(StringComparer.Ordinal);
+        var captured = pbiIds.Intersect(snapshotIds).Count();
+        var missed = pbiIds.Except(snapshotIds).OrderBy(id => id, StringComparer.Ordinal).ToList();
         output.WriteLine(
-            $"Population PBI={pbiIds.Count} candidates={candidateIds.Count} snapshot={snapshotIds.Count} " +
-            $"intersection={pbiIds.Intersect(snapshotIds).Count()} " +
-            $"pbiOnly={pbiIds.Except(snapshotIds).Count()} snapshotOnly={snapshotIds.Except(pbiIds).Count()}");
+            $"Population master={candidateIds.Count} snapshot={snapshotIds.Count} PBI={pbiIds.Count} " +
+            $"captured={captured} missed={missed.Count} extras={snapshotIds.Except(pbiIds).Count()}");
+        foreach (var id in missed)
+        {
+            var master = candidates.FirstOrDefault(item => item.ResourceId == id);
+            output.WriteLine(
+                $"MISSED {id} name={master?.DisplayName} functie={master?.Function} " +
+                $"end={master?.EmploymentEndDate}");
+        }
+
+        Assert.True(
+            snapshotIds.Count < candidateIds.Count,
+            $"Expected bounded snapshot ({snapshotIds.Count}) < master resources ({candidateIds.Count}).");
+        Assert.True(
+            snapshotIds.Count < 200,
+            $"Expected operational candidate size, got {snapshotIds.Count}.");
+        Assert.True(captured >= 40, $"Expected high PBI recall, captured={captured} of {pbiIds.Count}.");
 
         Assert.Equal(detail.Employees.Count, detail.Summary.NeedsDecision);
         Assert.Equal(0, detail.Summary.Included);
@@ -514,7 +530,7 @@ public sealed class August2026PayrollShadowAcceptanceTests(ITestOutputHelper out
             audits.SelectMany(item => new[] { item.Comment, item.ReasonCode, item.ResourceId }),
             value => value is not null && value.Contains("rijksreg", StringComparison.OrdinalIgnoreCase));
 
-        WriteReport(repoRoot, dbPath, month, detail, comparison, pick, audits.Count);
+        WriteReport(repoRoot, dbPath, month, detail, comparison, pick, audits.Count, candidates.Count, overview.Count);
     }
 
     private static void AssertSafeAcceptanceDbPath(string dbPath)
@@ -687,7 +703,9 @@ public sealed class August2026PayrollShadowAcceptanceTests(ITestOutputHelper out
         PayrollShadowMonthDetail detail,
         ComparisonSummary comparison,
         (string A, string B, string C, string D) pick,
-        int auditCount)
+        int auditCount,
+        int resourcesMaster,
+        int pbiReference)
     {
         var path = Path.Combine(repoRoot, "artifacts", "payroll-acceptance", "august-2026-acceptance-summary.txt");
         File.WriteAllText(
@@ -697,8 +715,11 @@ public sealed class August2026PayrollShadowAcceptanceTests(ITestOutputHelper out
             Period=2026-08-01..2026-08-31
             EvaluationDate={month.EvaluationDate:yyyy-MM-dd}
             CalculationVersion={month.CalculationVersion}
-            Resources={detail.Employees.Count}
+            ResourcesMaster={resourcesMaster}
+            SnapshotCandidates={detail.Employees.Count}
             NeedsDecisionInitial={detail.Summary.NeedsDecision}
+            PbiReference={pbiReference}
+            PbiCaptured={comparison.Compared}
             Compared={comparison.Compared}
             ExactOrPrecision={comparison.ExactOrPrecision}
             Mismatch={comparison.Mismatch}

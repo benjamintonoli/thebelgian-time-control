@@ -11,7 +11,10 @@
         <h1 class="mb-1">Loonshadow-maanden</h1>
         <p class="text-muted mb-0">Legacy shadow-berekening met expliciete eligibility en adminreview. Geen Acerta-export.</p>
     </div>
-    <div class="cockpit-safety">Suggesties ≠ beslissing · Geen Plenion-writes</div>
+    <div class="cockpit-safety">
+        <a asp-page="./Employees">Payroll medewerkers</a>
+        · Suggesties ≠ beslissing · Geen Plenion-writes
+    </div>
 </div>
 
 @if (!string.IsNullOrWhiteSpace(Model.Message)) { <div class="alert alert-success">@Model.Message</div> }

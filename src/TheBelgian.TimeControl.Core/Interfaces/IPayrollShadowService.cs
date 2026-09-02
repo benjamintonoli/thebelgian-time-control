@@ -58,7 +58,83 @@ public interface IPayrollShadowService
         int month,
         string? resourceId,
         CancellationToken cancellationToken);
+
+    Task<PayrollRosterPage> GetPayrollRosterAsync(
+        PayrollRosterFilter filter,
+        CancellationToken cancellationToken);
+
+    Task ConfirmPayrollRosterSelectionAsync(
+        ConfirmPayrollRosterSelectionRequest request,
+        string actor,
+        CancellationToken cancellationToken);
+
+    Task AddManualPayrollEmployeeAsync(
+        AddManualPayrollEmployeeRequest request,
+        string actor,
+        CancellationToken cancellationToken);
 }
+
+public enum PayrollRosterSource
+{
+    AutoProposal = 0,
+    ManualIncluded = 1,
+    ManualExcluded = 2,
+}
+
+public enum PayrollRosterFilterKind
+{
+    All = 0,
+    AutoProposed = 1,
+    Included = 2,
+    Excluded = 3,
+    NeedsDecision = 4,
+    ManualExtras = 5,
+    MissingAcerta = 6,
+}
+
+public sealed record PayrollRosterFilter(
+    PayrollRosterFilterKind Kind = PayrollRosterFilterKind.All,
+    string? Search = null,
+    DateOnly? AsOfDate = null);
+
+public sealed record PayrollRosterRow(
+    string ResourceId,
+    string DisplayName,
+    string? Function,
+    bool AutoSuggested,
+    bool OnPayrollSuggested,
+    PayrollEligibilityStatus EffectiveEligibility,
+    bool HasExplicitConfiguration,
+    PayrollRosterSource Source,
+    AcertaIdentityStatus AcertaIdentityStatus,
+    DateOnly? ValidFrom,
+    DateOnly? ValidTo,
+    string? ReasonCode,
+    string? Comment,
+    bool LegacyOaMarker,
+    bool LegacyStagiairMarker);
+
+public sealed record PayrollRosterPage(
+    DateOnly AsOfDate,
+    IReadOnlyList<PayrollRosterRow> Rows,
+    int AutoSuggestedCount,
+    int IncludedCount,
+    int ExcludedCount,
+    int NeedsDecisionCount);
+
+public sealed record ConfirmPayrollRosterSelectionRequest(
+    DateOnly ValidFrom,
+    IReadOnlyList<string> IncludedResourceIds,
+    IReadOnlyList<string> ExcludedResourceIds,
+    string ReasonCode,
+    string? Comment);
+
+public sealed record AddManualPayrollEmployeeRequest(
+    string ResourceId,
+    DateOnly ValidFrom,
+    DateOnly? ValidTo,
+    string ReasonCode,
+    string? Comment);
 
 public sealed record SetPayrollEligibilityResetRequest(
     string ResourceId,

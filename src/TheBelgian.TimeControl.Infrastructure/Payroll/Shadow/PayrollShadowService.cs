@@ -4,7 +4,9 @@ using Microsoft.Extensions.Options;
 using TheBelgian.TimeControl.Core.Configuration;
 using TheBelgian.TimeControl.Core.Interfaces;
 using TheBelgian.TimeControl.Core.Models;
+using TheBelgian.TimeControl.Core.Payroll.Configuration;
 using TheBelgian.TimeControl.Core.Payroll.Interfaces;
+using TheBelgian.TimeControl.Core.Payroll.Legacy;
 using TheBelgian.TimeControl.Core.Payroll.Models;
 using TheBelgian.TimeControl.Infrastructure.Payroll.Eligibility;
 using TheBelgian.TimeControl.Infrastructure.Payroll.Legacy;
@@ -130,7 +132,18 @@ internal sealed class PayrollShadowService(
 
         var configurations = await LoadConfigurationsAsync(context, cancellationToken);
         var configurationDomains = configurations.Select(item => item.ToDomain()).ToList();
-        var candidates = await resourceReader.ReadCandidatesAsync(cancellationToken);
+        var allResources = await resourceReader.ReadCandidatesAsync(cancellationToken);
+        var task23ResourceIds = await ResolveProjectLeiderTask23ResourceIdsAsync(
+            allResources,
+            period.PeriodStart,
+            period.PeriodEnd,
+            cancellationToken);
+        var candidates = LegacyPayrollAutoCandidateSelector.SelectSnapshotCandidates(
+            allResources,
+            period.PeriodStart,
+            period.PeriodEnd,
+            task23ResourceIds,
+            configurationDomains);
         var activeCandidates = candidates.Where(item => item.IsActiveForPeriod(period.PeriodStart)).ToList();
         var resourceIds = activeCandidates.Select(item => item.ResourceId).ToArray();
 
@@ -191,6 +204,7 @@ internal sealed class PayrollShadowService(
                 calculated = calculationService.Calculate(
                     period,
                     candidate.ResourceId,
+                    candidate.Function,
                     performances,
                     synthetic);
             }
@@ -471,6 +485,248 @@ internal sealed class PayrollShadowService(
 
         var rows = await query.ToListAsync(cancellationToken);
         return rows.OrderByDescending(item => item.TimestampUtc).ToList();
+    }
+
+    public async Task<PayrollRosterPage> GetPayrollRosterAsync(
+        PayrollRosterFilter filter,
+        CancellationToken cancellationToken)
+    {
+        EnsureEnabled();
+        var asOf = filter.AsOfDate ?? DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var configurations = (await LoadConfigurationsAsync(context, cancellationToken))
+            .Select(item => item.ToDomain())
+            .ToList();
+        var allResources = await resourceReader.ReadCandidatesAsync(cancellationToken);
+        var task23ResourceIds = await ResolveProjectLeiderTask23ResourceIdsAsync(
+            allResources,
+            asOf,
+            asOf,
+            cancellationToken);
+        var autoIds = LegacyPayrollAutoCandidateSelector
+            .SelectAutoCandidates(allResources, asOf, task23ResourceIds)
+            .Select(item => item.ResourceId)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var rosterResourceIds = new HashSet<string>(autoIds, StringComparer.Ordinal);
+        foreach (var config in configurations.Where(item => item.IsActiveFor(asOf, asOf)))
+        {
+            rosterResourceIds.Add(config.ResourceId);
+        }
+
+        var rows = new List<PayrollRosterRow>();
+        foreach (var resource in allResources
+                     .Where(item => rosterResourceIds.Contains(item.ResourceId))
+                     .OrderBy(item => item.DisplayName, StringComparer.OrdinalIgnoreCase))
+        {
+            var resolution = PayrollEligibilityResolver.Resolve(resource, asOf, asOf, configurations);
+            var activeConfig = configurations
+                .Where(item => item.ResourceId == resource.ResourceId && item.IsActiveFor(asOf, asOf))
+                .SingleOrDefault();
+            var autoSuggested = autoIds.Contains(resource.ResourceId);
+            var source = ResolveRosterSource(resolution, autoSuggested);
+            var onPayrollSuggested = resolution.HasExplicitConfiguration
+                ? resolution.EligibilityStatus == PayrollEligibilityStatus.Included
+                : autoSuggested;
+            var row = new PayrollRosterRow(
+                resource.ResourceId,
+                resource.DisplayName,
+                resource.Function,
+                autoSuggested,
+                onPayrollSuggested,
+                resolution.EligibilityStatus,
+                resolution.HasExplicitConfiguration,
+                source,
+                resource.AcertaIdentityStatus,
+                activeConfig?.ValidFrom,
+                activeConfig?.ValidTo,
+                activeConfig?.ReasonCode ?? resolution.EligibilityReason,
+                activeConfig?.Comment,
+                LegacyPayrollNameMarkers.IsLegacyOaMarker(resource.DisplayName),
+                LegacyPayrollNameMarkers.IsLegacyStagiairMarker(resource.DisplayName));
+
+            if (!MatchesRosterFilter(row, filter))
+            {
+                continue;
+            }
+
+            rows.Add(row);
+        }
+
+        return new PayrollRosterPage(
+            asOf,
+            rows,
+            rows.Count(item => item.AutoSuggested),
+            rows.Count(item => item.EffectiveEligibility == PayrollEligibilityStatus.Included),
+            rows.Count(item => item.EffectiveEligibility == PayrollEligibilityStatus.Excluded),
+            rows.Count(item => item.EffectiveEligibility == PayrollEligibilityStatus.NeedsDecision));
+    }
+
+    public async Task ConfirmPayrollRosterSelectionAsync(
+        ConfirmPayrollRosterSelectionRequest request,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        EnsureEnabled();
+        ValidateActor(actor);
+        ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(request.ReasonCode))
+        {
+            throw new ArgumentException("ReasonCode is verplicht.", nameof(request));
+        }
+
+        var included = (request.IncludedResourceIds ?? [])
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        var excluded = (request.ExcludedResourceIds ?? [])
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (included.Intersect(excluded, StringComparer.Ordinal).Any())
+        {
+            throw new InvalidOperationException("Een resource kan niet tegelijk Included en Excluded zijn.");
+        }
+
+        foreach (var resourceId in included)
+        {
+            await SetEligibilityAsync(
+                new SetPayrollEligibilityRequest(
+                    resourceId,
+                    request.ValidFrom,
+                    null,
+                    PayrollEligibilityStatus.Included,
+                    request.ReasonCode.Trim(),
+                    request.Comment),
+                actor,
+                cancellationToken);
+        }
+
+        foreach (var resourceId in excluded)
+        {
+            await SetEligibilityAsync(
+                new SetPayrollEligibilityRequest(
+                    resourceId,
+                    request.ValidFrom,
+                    null,
+                    PayrollEligibilityStatus.Excluded,
+                    request.ReasonCode.Trim(),
+                    request.Comment),
+                actor,
+                cancellationToken);
+        }
+    }
+
+    public async Task AddManualPayrollEmployeeAsync(
+        AddManualPayrollEmployeeRequest request,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        EnsureEnabled();
+        ValidateActor(actor);
+        ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(request.ResourceId))
+        {
+            throw new ArgumentException("ResourceId is verplicht.", nameof(request));
+        }
+
+        var reason = string.IsNullOrWhiteSpace(request.ReasonCode)
+            ? "ManualPayrollInclusion"
+            : request.ReasonCode.Trim();
+
+        var allResources = await resourceReader.ReadCandidatesAsync(cancellationToken);
+        if (!allResources.Any(item => string.Equals(item.ResourceId, request.ResourceId.Trim(), StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException($"Resource {request.ResourceId} is niet gevonden in Plenion.");
+        }
+
+        await SetEligibilityAsync(
+            new SetPayrollEligibilityRequest(
+                request.ResourceId.Trim(),
+                request.ValidFrom,
+                request.ValidTo,
+                PayrollEligibilityStatus.Included,
+                reason,
+                request.Comment),
+            actor,
+            cancellationToken);
+    }
+
+    private async Task<IReadOnlySet<string>> ResolveProjectLeiderTask23ResourceIdsAsync(
+        IReadOnlyList<PayrollEmployeeCandidate> resources,
+        DateOnly periodStart,
+        DateOnly periodEnd,
+        CancellationToken cancellationToken)
+    {
+        var projectLeaderIds = resources
+            .Where(item => item.IsActiveForPeriod(periodStart))
+            .Where(item => LegacyPayrollTechnicianFunctions.IsProjectLeider(item.Function))
+            .Where(item => !LegacyPayrollNameMarkers.IsLegacyOaMarker(item.DisplayName))
+            .Where(item => !LegacyPayrollNameMarkers.IsLegacyStagiairMarker(item.DisplayName))
+            .Select(item => item.ResourceId)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (projectLeaderIds.Length == 0)
+        {
+            return new HashSet<string>(StringComparer.Ordinal);
+        }
+
+        var performances = await performanceSource.ReadPerformancesAsync(
+            periodStart,
+            periodEnd,
+            projectLeaderIds,
+            cancellationToken);
+        return performances
+            .Where(item => item.HfdTaakId == LegacyPayrollPerformanceEligibility.ProjectLeiderIncludedHfdTaakId)
+            .Select(item => item.ResourceId)
+            .ToHashSet(StringComparer.Ordinal);
+    }
+
+    private static PayrollRosterSource ResolveRosterSource(
+        PayrollEligibilityResolution resolution,
+        bool autoSuggested)
+    {
+        if (!resolution.HasExplicitConfiguration)
+        {
+            return PayrollRosterSource.AutoProposal;
+        }
+
+        return resolution.EligibilityStatus switch
+        {
+            PayrollEligibilityStatus.Included => PayrollRosterSource.ManualIncluded,
+            PayrollEligibilityStatus.Excluded => PayrollRosterSource.ManualExcluded,
+            _ => PayrollRosterSource.AutoProposal,
+        };
+    }
+
+    private static bool MatchesRosterFilter(PayrollRosterRow row, PayrollRosterFilter filter)
+    {
+        if (!string.IsNullOrWhiteSpace(filter.Search))
+        {
+            var search = filter.Search.Trim();
+            var haystack = $"{row.DisplayName} {row.Function} {row.ResourceId}";
+            if (haystack.Contains(search, StringComparison.OrdinalIgnoreCase) == false)
+            {
+                return false;
+            }
+        }
+
+        return filter.Kind switch
+        {
+            PayrollRosterFilterKind.All => true,
+            PayrollRosterFilterKind.AutoProposed => row.AutoSuggested,
+            PayrollRosterFilterKind.Included => row.EffectiveEligibility == PayrollEligibilityStatus.Included,
+            PayrollRosterFilterKind.Excluded => row.EffectiveEligibility == PayrollEligibilityStatus.Excluded,
+            PayrollRosterFilterKind.NeedsDecision => row.EffectiveEligibility == PayrollEligibilityStatus.NeedsDecision,
+            PayrollRosterFilterKind.ManualExtras =>
+                row.HasExplicitConfiguration
+                && row.EffectiveEligibility == PayrollEligibilityStatus.Included
+                && !row.AutoSuggested,
+            PayrollRosterFilterKind.MissingAcerta => row.AcertaIdentityStatus == AcertaIdentityStatus.Missing,
+            _ => true,
+        };
     }
 
     private void EnsureEnabled()
