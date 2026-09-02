@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using TheBelgian.TimeControl.Core.Configuration;
 using TheBelgian.TimeControl.Core.Interfaces;
+using TheBelgian.TimeControl.Core.Payroll.Interfaces;
 using TheBelgian.TimeControl.Core.Services;
 using TheBelgian.TimeControl.Infrastructure.AdminReview;
 using TheBelgian.TimeControl.Infrastructure.Authentication;
@@ -13,6 +14,8 @@ using TheBelgian.TimeControl.Infrastructure.Persistence;
 using TheBelgian.TimeControl.Infrastructure.Pilot;
 using TheBelgian.TimeControl.Infrastructure.Plenion;
 using TheBelgian.TimeControl.Infrastructure.Powerfleet;
+using TheBelgian.TimeControl.Infrastructure.Payroll.Shadow;
+using TheBelgian.TimeControl.Infrastructure.Payroll.Sources;
 using TheBelgian.TimeControl.Infrastructure.Synchronization;
 using TheBelgian.TimeControl.Infrastructure.VehicleAssignments;
 
@@ -53,6 +56,21 @@ public static class DependencyInjection
             .Bind(configuration.GetSection(AdminReviewWorkflowOptions.SectionName))
             .Validate(options => !string.IsNullOrWhiteSpace(options.DefaultReviewer),
                 "AdminReview:DefaultReviewer ontbreekt.")
+            .ValidateOnStart();
+        services.AddOptions<PayrollShadowOptions>()
+            .Bind(configuration.GetSection(PayrollShadowOptions.SectionName))
+            .Validate(options =>
+            {
+                try
+                {
+                    options.Validate();
+                    return true;
+                }
+                catch (InvalidOperationException)
+                {
+                    return false;
+                }
+            }, "PayrollShadow-configuratie is ongeldig.")
             .ValidateOnStart();
         services.AddOptions<CloudflareAccessOptions>()
             .Bind(configuration.GetSection(CloudflareAccessOptions.SectionName))
@@ -223,6 +241,15 @@ public static class DependencyInjection
                 ? provider.GetRequiredService<MockPlenionCorrectionClient>()
                 : provider.GetRequiredService<HttpPlenionCorrectionClient>());
         services.AddScoped<IMonthlyReviewService, MonthlyReviewService>();
+        services.AddScoped<PayrollShadowCalculationService>();
+        services.AddScoped<IPayrollResourceReader, PlenionPayrollResourceReader>();
+        services.AddScoped<PlenionPayrollReader>();
+        services.AddScoped<PlenionPayrollCalendarReader>();
+        services.AddScoped<IPayrollPerformanceSource>(provider =>
+            provider.GetRequiredService<PlenionPayrollReader>());
+        services.AddScoped<IPayrollCalendarSource>(provider =>
+            provider.GetRequiredService<PlenionPayrollCalendarReader>());
+        services.AddScoped<IPayrollShadowService, PayrollShadowService>();
         return services;
     }
 
@@ -448,6 +475,89 @@ public static class DependencyInjection
             );
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_MonthlyReviewCaseSnapshots_Period_Case"
                 ON "MonthlyReviewCaseSnapshots" ("MonthlyReviewPeriodId", "CaseId");
+            CREATE TABLE IF NOT EXISTS "PayrollEmployeeConfigurationRecords" (
+                "Id" INTEGER NOT NULL CONSTRAINT "PK_PayrollEmployeeConfigurationRecords" PRIMARY KEY AUTOINCREMENT,
+                "ResourceId" TEXT NOT NULL,
+                "ValidFrom" TEXT NOT NULL,
+                "ValidTo" TEXT NULL,
+                "EligibilityStatus" INTEGER NOT NULL,
+                "ReasonCode" TEXT NOT NULL,
+                "Comment" TEXT NULL,
+                "DecisionSource" INTEGER NOT NULL,
+                "CreatedAtUtc" TEXT NOT NULL,
+                "CreatedBy" TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS "IX_PayrollEmployeeConfigurationRecords_ResourceId_ValidFrom"
+                ON "PayrollEmployeeConfigurationRecords" ("ResourceId", "ValidFrom");
+            CREATE TABLE IF NOT EXISTS "PayrollShadowMonths" (
+                "Id" INTEGER NOT NULL CONSTRAINT "PK_PayrollShadowMonths" PRIMARY KEY AUTOINCREMENT,
+                "Year" INTEGER NOT NULL,
+                "Month" INTEGER NOT NULL,
+                "PeriodStart" TEXT NOT NULL,
+                "PeriodEnd" TEXT NOT NULL,
+                "EvaluationDate" TEXT NOT NULL,
+                "Status" INTEGER NOT NULL,
+                "CalculationVersion" TEXT NOT NULL,
+                "CreatedAtUtc" TEXT NOT NULL,
+                "CreatedBy" TEXT NOT NULL,
+                "LastReviewedAtUtc" TEXT NULL,
+                "LastReviewedBy" TEXT NULL,
+                "FinalizedAtUtc" TEXT NULL,
+                "FinalizedBy" TEXT NULL,
+                "ConfigurationSnapshotJson" TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_PayrollShadowMonths_Year_Month"
+                ON "PayrollShadowMonths" ("Year", "Month");
+            CREATE TABLE IF NOT EXISTS "PayrollShadowEmployeeResults" (
+                "Id" INTEGER NOT NULL CONSTRAINT "PK_PayrollShadowEmployeeResults" PRIMARY KEY AUTOINCREMENT,
+                "ShadowMonthId" INTEGER NOT NULL,
+                "ResourceId" TEXT NOT NULL,
+                "DisplayNameSnapshot" TEXT NOT NULL,
+                "ResourceCodeSnapshot" TEXT NOT NULL,
+                "EmailSnapshot" TEXT NULL,
+                "EligibilityStatus" INTEGER NOT NULL,
+                "EligibilityReason" TEXT NULL,
+                "SuggestedEligibility" INTEGER NULL,
+                "SuggestedReason" TEXT NULL,
+                "LegacyTheoreticalHours" REAL NULL,
+                "LegacyActualOrdinaryHours" REAL NULL,
+                "LegacyDifferenceHours" REAL NULL,
+                "StandbyExactHours" REAL NULL,
+                "StandbyRoundedHours" REAL NULL,
+                "Code135At150Units" REAL NULL,
+                "Code135At200Units" REAL NULL,
+                "CityTripUnits" INTEGER NULL,
+                "CityAllowanceAmount" REAL NULL,
+                "EligibleKm" REAL NULL,
+                "Extra75LegacyValue" REAL NULL,
+                "KmRate" REAL NULL,
+                "KmAmount" REAL NULL,
+                "Code414Amount" REAL NULL,
+                "AcertaIdentityStatus" INTEGER NOT NULL,
+                "OrdinaryStatus" INTEGER NOT NULL,
+                "StandbyStatus" INTEGER NOT NULL,
+                "CityStatus" INTEGER NOT NULL,
+                "KmStatus" INTEGER NOT NULL,
+                "Code414Status" INTEGER NOT NULL,
+                "ReviewStatus" INTEGER NOT NULL,
+                "ReviewComment" TEXT NULL,
+                "ReviewedAtUtc" TEXT NULL,
+                "ReviewedBy" TEXT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_PayrollShadowEmployeeResults_Month_Resource"
+                ON "PayrollShadowEmployeeResults" ("ShadowMonthId", "ResourceId");
+            CREATE TABLE IF NOT EXISTS "PayrollShadowReviewAudits" (
+                "Id" INTEGER NOT NULL CONSTRAINT "PK_PayrollShadowReviewAudits" PRIMARY KEY AUTOINCREMENT,
+                "ShadowMonthId" INTEGER NOT NULL,
+                "ResourceId" TEXT NULL,
+                "Action" INTEGER NOT NULL,
+                "Actor" TEXT NOT NULL,
+                "TimestampUtc" TEXT NOT NULL,
+                "ReasonCode" TEXT NULL,
+                "Comment" TEXT NULL
+            );
+            CREATE INDEX IF NOT EXISTS "IX_PayrollShadowReviewAudits_Month_Timestamp"
+                ON "PayrollShadowReviewAudits" ("ShadowMonthId", "TimestampUtc");
             """,
             cancellationToken);
         await EnsureColumnAsync(

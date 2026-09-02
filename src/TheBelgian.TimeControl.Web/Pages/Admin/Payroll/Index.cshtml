@@ -1,0 +1,79 @@
+@page "/Admin/Payroll"
+@model TheBelgian.TimeControl.Web.Pages.Admin.Payroll.IndexModel
+@using TheBelgian.TimeControl.Core.Payroll.Models
+@{
+    ViewData["Title"] = "Payroll shadow";
+}
+
+<div class="cockpit-heading mb-4">
+    <div>
+        <div class="text-uppercase small text-muted fw-semibold">Payroll shadow</div>
+        <h1 class="mb-1">Loonshadow-maanden</h1>
+        <p class="text-muted mb-0">Legacy shadow-berekening met expliciete eligibility en adminreview. Geen Acerta-export.</p>
+    </div>
+    <div class="cockpit-safety">Suggesties ≠ beslissing · Geen Plenion-writes</div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(Model.Message)) { <div class="alert alert-success">@Model.Message</div> }
+@if (!string.IsNullOrWhiteSpace(Model.Error)) { <div class="alert alert-danger">@Model.Error</div> }
+
+<section class="card mb-4">
+    <div class="card-body">
+        <h2 class="h5">Nieuwe shadow-maand</h2>
+        <form method="post" asp-page-handler="Create" class="row g-2 align-items-end">
+            <div class="col-auto">
+                <label class="form-label">Jaar</label>
+                <input class="form-control form-control-sm" type="number" name="Year" value="@(Model.Year ?? 2026)" min="2000" max="2100" />
+            </div>
+            <div class="col-auto">
+                <label class="form-label">Maand</label>
+                <input class="form-control form-control-sm" type="number" name="Month" value="@(Model.Month ?? 7)" min="1" max="12" />
+            </div>
+            <div class="col-auto">
+                <label class="form-label">Evaluatiedatum</label>
+                <input class="form-control form-control-sm" type="date" name="EvaluationDate" />
+            </div>
+            <div class="col-auto">
+                <button class="btn btn-sm btn-dark" type="submit">Snapshot aanmaken</button>
+            </div>
+        </form>
+    </div>
+</section>
+
+<section class="card">
+    <div class="card-body table-responsive">
+        <table class="table table-sm align-middle">
+            <thead>
+                <tr>
+                    <th>Maand</th>
+                    <th>Status</th>
+                    <th>Aangemaakt</th>
+                    <th>Evaluatie</th>
+                    <th>Versie</th>
+                    <th>Kandidaten</th>
+                    <th>Incl.</th>
+                    <th>Uitgesl.</th>
+                    <th>Beslissing</th>
+                    <th>Review</th>
+                </tr>
+            </thead>
+            <tbody>
+            @foreach (var item in Model.Months)
+            {
+                <tr>
+                    <td><a asp-page="./Month" asp-route-year="@item.Year" asp-route-month="@item.Month">@item.Month.ToString("00")/@item.Year</a></td>
+                    <td>@item.Status</td>
+                    <td>@item.CreatedAtUtc.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</td>
+                    <td>@item.EvaluationDate.ToString("dd/MM/yyyy")</td>
+                    <td class="small font-monospace">@item.CalculationVersion</td>
+                    <td>@item.TotalCandidates</td>
+                    <td>@item.Included</td>
+                    <td>@item.Excluded</td>
+                    <td>@item.NeedsDecision</td>
+                    <td>@item.PendingReview / @item.NeedsFollowUp / @item.Accepted</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+</section>

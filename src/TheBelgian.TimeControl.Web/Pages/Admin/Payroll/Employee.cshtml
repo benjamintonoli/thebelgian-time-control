@@ -1,0 +1,105 @@
+@page "/Admin/Payroll/{year:int}/{month:int}/{resourceId}"
+@model TheBelgian.TimeControl.Web.Pages.Admin.Payroll.EmployeeModel
+@using TheBelgian.TimeControl.Core.Payroll.Models
+@{
+    ViewData["Title"] = $"Payroll shadow {Model.ResourceId}";
+    var detail = Model.Detail;
+    var employee = detail?.Employee;
+}
+
+<div class="d-flex justify-content-between align-items-start mb-3">
+    <div>
+        <h1>@(employee?.DisplayNameSnapshot ?? Model.ResourceId)</h1>
+        <p class="text-muted mb-0">@Model.Month.ToString("00")/@Model.Year · Resource @Model.ResourceId</p>
+    </div>
+    <a class="btn btn-sm btn-outline-secondary" asp-page="./Month" asp-route-year="@Model.Year" asp-route-month="@Model.Month">← Maand</a>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(Model.Message)) { <div class="alert alert-success">@Model.Message</div> }
+@if (!string.IsNullOrWhiteSpace(Model.Error)) { <div class="alert alert-danger">@Model.Error</div> }
+
+@if (employee is null)
+{
+    <div class="alert alert-warning">Medewerker niet gevonden.</div>
+}
+else
+{
+    <div class="row g-3 mb-4">
+        <div class="col-md-6"><div class="card h-100"><div class="card-body">
+            <h2 class="h6">Legacy shadow berekening</h2>
+            <dl class="row small mb-0">
+                <dt class="col-5">Theoretisch</dt><dd class="col-7">@employee.LegacyTheoreticalHours</dd>
+                <dt class="col-5">Actual</dt><dd class="col-7">@employee.LegacyActualOrdinaryHours</dd>
+                <dt class="col-5">Verschil</dt><dd class="col-7">@employee.LegacyDifferenceHours</dd>
+                <dt class="col-5">Standby exact</dt><dd class="col-7">@employee.StandbyExactHours</dd>
+                <dt class="col-5">Standby 200%</dt><dd class="col-7">@employee.StandbyRoundedHours</dd>
+                <dt class="col-5">City units / €</dt><dd class="col-7">@employee.CityTripUnits / @employee.CityAllowanceAmount</dd>
+                <dt class="col-5">KM eligible</dt><dd class="col-7">@employee.EligibleKm</dd>
+                <dt class="col-5">Extra75 legacy</dt><dd class="col-7">@employee.Extra75LegacyValue</dd>
+                <dt class="col-5">KM rate / €</dt><dd class="col-7">@employee.KmRate / @employee.KmAmount</dd>
+                <dt class="col-5">Code135 150/200</dt><dd class="col-7">@employee.Code135At150Units / @employee.Code135At200Units</dd>
+                <dt class="col-5">Code414 €</dt><dd class="col-7">@employee.Code414Amount</dd>
+            </dl>
+        </div></div></div>
+        <div class="col-md-6"><div class="card h-100"><div class="card-body">
+            <h2 class="h6">Eligibility &amp; review</h2>
+            <p><strong>Effectief:</strong> @employee.EligibilityStatus @(employee.EligibilityReason is not null ? $"({employee.EligibilityReason})" : "")</p>
+            <p class="small text-muted"><strong>Suggestie:</strong> @(employee.SuggestedEligibility?.ToString() ?? "—") · @(employee.SuggestedReason ?? "—")</p>
+            <p><strong>Review:</strong> @employee.ReviewStatus</p>
+            <p><strong>Acerta ID:</strong> @employee.AcertaIdentityStatus</p>
+        </div></div></div>
+    </div>
+
+    @if (detail!.Month.Status != PayrollShadowMonthStatus.Finalized)
+    {
+        <div class="row g-3 mb-4">
+            <div class="col-md-6"><div class="card"><div class="card-body">
+                <h2 class="h6">Eligibility-actie</h2>
+                <form method="post" class="row g-2">
+                    <input type="hidden" asp-for="Year" /><input type="hidden" asp-for="Month" /><input type="hidden" asp-for="ResourceId" />
+                    <div class="col-6"><label class="form-label">ValidFrom</label><input class="form-control form-control-sm" type="date" asp-for="ValidFrom" /></div>
+                    <div class="col-6"><label class="form-label">ValidTo</label><input class="form-control form-control-sm" type="date" asp-for="ValidTo" /></div>
+                    <div class="col-12"><label class="form-label">Reason</label><input class="form-control form-control-sm" asp-for="ReasonCode" required /></div>
+                    <div class="col-12"><label class="form-label">Comment</label><input class="form-control form-control-sm" asp-for="Comment" /></div>
+                    <div class="col-12 d-flex gap-2">
+                        <button class="btn btn-sm btn-success" type="submit" asp-page-handler="Include">Include</button>
+                        <button class="btn btn-sm btn-warning" type="submit" asp-page-handler="Exclude">Exclude</button>
+                        <button class="btn btn-sm btn-outline-secondary" type="submit" asp-page-handler="ResetEligibility">Reset NeedsDecision</button>
+                    </div>
+                </form>
+            </div></div></div>
+            <div class="col-md-6"><div class="card"><div class="card-body">
+                <h2 class="h6">Review-actie</h2>
+                <form method="post" class="row g-2">
+                    <input type="hidden" asp-for="Year" /><input type="hidden" asp-for="Month" /><input type="hidden" asp-for="ResourceId" />
+                    <div class="col-12"><label class="form-label">Comment</label><input class="form-control form-control-sm" asp-for="ReviewComment" /></div>
+                    <div class="col-12 d-flex gap-2">
+                        <button class="btn btn-sm btn-success" type="submit" asp-page-handler="Accept">Accepted</button>
+                        <button class="btn btn-sm btn-warning" type="submit" asp-page-handler="NeedsFollowUp">NeedsFollowUp</button>
+                        <button class="btn btn-sm btn-outline-secondary" type="submit" asp-page-handler="ResetReview">Reset Pending</button>
+                    </div>
+                </form>
+            </div></div></div>
+        </div>
+    }
+
+    <section class="card mb-3"><div class="card-body">
+        <h2 class="h6">Eligibility-configuratie (effectief gedateerd)</h2>
+        <ul class="small mb-0">
+        @foreach (var config in detail.EligibilityConfigurations)
+        {
+            <li>@config.ValidFrom.ToString("dd/MM/yyyy") – @(config.ValidTo?.ToString("dd/MM/yyyy") ?? "∞"): @config.EligibilityStatus — @config.ReasonCode (@config.DecisionSource)</li>
+        }
+        </ul>
+    </div></section>
+
+    <section class="card"><div class="card-body">
+        <h2 class="h6">Audit</h2>
+        <ul class="small mb-0">
+        @foreach (var audit in detail.AuditTrail)
+        {
+            <li>@audit.TimestampUtc.ToLocalTime(): @audit.Action by @audit.Actor @(audit.ReasonCode is not null ? $"({audit.ReasonCode})" : "")</li>
+        }
+        </ul>
+    </div></section>
+}

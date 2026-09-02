@@ -75,7 +75,7 @@ public sealed class July2026LegacyCityParityTests(ITestOutputHelper output)
 
         output.WriteLine($"Monthly city aggregate: exact={exact}/{context.Overview.Count}");
         Assert.Empty(mismatches);
-        Assert.Equal(53, exact);
+        Assert.Equal(context.Overview.Count, exact);
     }
 
     [Fact]

@@ -1,0 +1,78 @@
+@page "/Admin/Payroll/{year:int}/{month:int}"
+@model TheBelgian.TimeControl.Web.Pages.Admin.Payroll.MonthModel
+@using TheBelgian.TimeControl.Core.Payroll.Models
+@{
+    ViewData["Title"] = $"Payroll shadow {Model.Month:00}/{Model.Year}";
+    var detail = Model.Detail;
+}
+
+<div class="d-flex justify-content-between align-items-start mb-3">
+    <div>
+        <div class="text-uppercase small text-muted fw-semibold">Payroll shadow</div>
+        <h1>@Model.Month.ToString("00")/@Model.Year</h1>
+        @if (detail is not null)
+        {
+            <p class="text-muted mb-0">Status: <strong>@detail.Month.Status</strong> · Evaluatie: @detail.Month.EvaluationDate.ToString("dd/MM/yyyy")</p>
+        }
+    </div>
+    <a class="btn btn-sm btn-outline-secondary" asp-page="./Index">← Overzicht</a>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(Model.Message)) { <div class="alert alert-success">@Model.Message</div> }
+@if (!string.IsNullOrWhiteSpace(Model.Error)) { <div class="alert alert-danger">@Model.Error</div> }
+
+@if (detail is null)
+{
+    <div class="alert alert-warning">Shadow-maand niet gevonden.</div>
+}
+else
+{
+    <section class="card mb-3"><div class="card-body d-flex flex-wrap gap-2">
+        @if (detail.Month.Status != PayrollShadowMonthStatus.Finalized)
+        {
+            <form method="post" asp-page-handler="StartReview"><button class="btn btn-sm btn-outline-primary">Start review</button></form>
+            <form method="post" asp-page-handler="Finalize"><button class="btn btn-sm btn-danger">Maand afsluiten</button></form>
+        }
+    </div></section>
+
+    <form method="get" class="card mb-3"><div class="card-body row g-2 align-items-end">
+        <input type="hidden" name="year" value="@Model.Year" />
+        <input type="hidden" name="month" value="@Model.Month" />
+        <div class="col-auto"><label class="form-label">Eligibility</label><select class="form-select form-select-sm" asp-for="Eligibility" asp-items="Html.GetEnumSelectList<PayrollEligibilityStatus>()"><option value="">—</option></select></div>
+        <div class="col-auto"><label class="form-label">Review</label><select class="form-select form-select-sm" asp-for="Review" asp-items="Html.GetEnumSelectList<PayrollEmployeeReviewStatus>()"><option value="">—</option></select></div>
+        <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="NeedsDecisionOnly" /><label class="form-check-label">NeedsDecision</label></div>
+        <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="NeedsFollowUpOnly" /><label class="form-check-label">NeedsFollowUp</label></div>
+        <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="MissingAcertaIdentityOnly" /><label class="form-check-label">Missing Acerta ID</label></div>
+        <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="NegativeDifferenceOnly" /><label class="form-check-label">Neg. diff.</label></div>
+        <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="NonzeroStandbyOnly" /><label class="form-check-label">Standby ≠ 0</label></div>
+        <div class="col-auto"><button class="btn btn-sm btn-outline-secondary" type="submit">Filter</button></div>
+    </div></form>
+
+    <div class="table-responsive card"><div class="card-body p-0">
+        <table class="table table-sm align-middle mb-0">
+            <thead><tr>
+                <th>Resource</th><th>Eligibility</th><th>Suggestie</th><th>Review</th>
+                <th>Theo</th><th>Actual</th><th>Diff</th><th>Standby</th><th>City €</th><th>KM €</th><th>414 €</th><th>Acerta</th>
+            </tr></thead>
+            <tbody>
+            @foreach (var row in detail.Employees)
+            {
+                <tr>
+                    <td><a asp-page="./Employee" asp-route-year="@Model.Year" asp-route-month="@Model.Month" asp-route-resourceId="@row.ResourceId">@row.DisplayName</a></td>
+                    <td>@row.EligibilityStatus</td>
+                    <td class="small text-muted">@(row.SuggestedEligibility?.ToString() ?? "—")</td>
+                    <td>@row.ReviewStatus</td>
+                    <td>@row.LegacyTheoreticalHours</td>
+                    <td>@row.LegacyActualOrdinaryHours</td>
+                    <td>@row.LegacyDifferenceHours</td>
+                    <td>@row.StandbyRoundedHours</td>
+                    <td>@row.CityAllowanceAmount</td>
+                    <td>@row.KmAmount</td>
+                    <td>@row.Code414Amount</td>
+                    <td>@row.AcertaIdentityStatus</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div></div>
+}

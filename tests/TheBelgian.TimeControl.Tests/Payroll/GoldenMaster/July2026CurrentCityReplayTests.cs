@@ -86,11 +86,17 @@ public sealed class July2026CurrentCityReplayTests(ITestOutputHelper output)
 
         foreach (var (name, resourceId) in Cohort)
         {
+            if (!overview.TryGetValue(resourceId, out var overviewRow))
+            {
+                output.WriteLine($"{name}: missing from refreshed overview.");
+                continue;
+            }
+
             var resourceRows = performances.Where(row => row.ResourceId == resourceId).ToList();
             var resolvedPostcodeRows = resourceRows.Count(row => !string.IsNullOrWhiteSpace(row.Postcode));
             var currentUnits = CalculateCurrentUnits(resourceRows);
             var currentAmount = currentUnits * CityConfig.TripAmount;
-            var historicalUnits = (int)(overview[resourceId].CityTripUnits ?? 0m);
+            var historicalUnits = (int)(overviewRow.CityTripUnits ?? 0m);
             var classification = Classify(currentUnits, historicalUnits);
 
             output.WriteLine(

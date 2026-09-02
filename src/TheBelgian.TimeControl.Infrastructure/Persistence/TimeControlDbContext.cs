@@ -38,6 +38,13 @@ public sealed class TimeControlDbContext(DbContextOptions<TimeControlDbContext> 
     public DbSet<MonthlyReviewPeriod> MonthlyReviewPeriods => Set<MonthlyReviewPeriod>();
     public DbSet<MonthlyReviewCaseSnapshot> MonthlyReviewCaseSnapshots =>
         Set<MonthlyReviewCaseSnapshot>();
+    public DbSet<PayrollEmployeeConfigurationRecord> PayrollEmployeeConfigurationRecords =>
+        Set<PayrollEmployeeConfigurationRecord>();
+    public DbSet<PayrollShadowMonth> PayrollShadowMonths => Set<PayrollShadowMonth>();
+    public DbSet<PayrollShadowEmployeeResult> PayrollShadowEmployeeResults =>
+        Set<PayrollShadowEmployeeResult>();
+    public DbSet<PayrollShadowReviewAudit> PayrollShadowReviewAudits =>
+        Set<PayrollShadowReviewAudit>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -82,6 +89,16 @@ public sealed class TimeControlDbContext(DbContextOptions<TimeControlDbContext> 
         modelBuilder.Entity<MonthlyReviewCaseSnapshot>()
             .HasIndex(item => new { item.MonthlyReviewPeriodId, item.CaseId })
             .IsUnique();
+        modelBuilder.Entity<PayrollEmployeeConfigurationRecord>()
+            .HasIndex(item => new { item.ResourceId, item.ValidFrom });
+        modelBuilder.Entity<PayrollShadowMonth>()
+            .HasIndex(item => new { item.Year, item.Month })
+            .IsUnique();
+        modelBuilder.Entity<PayrollShadowEmployeeResult>()
+            .HasIndex(item => new { item.ShadowMonthId, item.ResourceId })
+            .IsUnique();
+        modelBuilder.Entity<PayrollShadowReviewAudit>()
+            .HasIndex(item => new { item.ShadowMonthId, item.TimestampUtc });
 
         modelBuilder.Entity<PlenionPerformance>().Property(item => item.Kilometres).HasPrecision(12, 3);
         modelBuilder.Entity<PowerfleetTrip>().Property(item => item.DistanceKilometres).HasPrecision(12, 3);
