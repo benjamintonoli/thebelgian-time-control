@@ -14,7 +14,7 @@
         <p class="text-muted mb-0">Wie hoort in onze TimeControl payrollcontrole? Voorstel ≠ bevestigde beslissing.</p>
     </div>
     <div class="cockpit-safety">
-        <a asp-page="./Index">Shadow-maanden</a>
+        <a asp-page="/Admin/Payroll/Index">Shadow-maanden</a>
     </div>
 </div>
 
@@ -60,6 +60,9 @@
         <p class="small text-muted">Vinkjes zonder expliciete config zijn een <strong>voorstel</strong>. Bevestigen schrijft auditeerbare Included/Excluded beslissingen.</p>
         <form method="post" asp-page-handler="Confirm">
             @Html.AntiForgeryToken()
+            <input type="hidden" asp-for="Kind" />
+            <input type="hidden" name="Search" value="@Model.Search" />
+            <input type="hidden" name="AsOfDate" value="@((Model.AsOfDate ?? Model.ValidFrom).ToString("yyyy-MM-dd"))" />
             <div class="row g-2 align-items-end mb-3">
                 <div class="col-auto">
                     <label class="form-label">Geldig vanaf</label>
@@ -85,7 +88,7 @@
                 <table class="table table-sm align-middle">
                     <thead>
                         <tr>
-                            <th>Op payroll</th>
+                            <th>In payrollcontrole</th>
                             <th>Resource</th>
                             <th>Functie</th>
                             <th>Auto voorstel</th>
@@ -98,12 +101,14 @@
                         </tr>
                     </thead>
                     <tbody>
-                    @foreach (var row in rows)
+                    @for (var i = 0; i < rows.Count; i++)
                     {
+                        var row = rows[i];
                         <tr>
                             <td>
-                                <input type="hidden" name="VisibleResourceIds" value="@row.ResourceId" />
-                                <input class="form-check-input" type="checkbox" name="SelectedResourceIds" value="@row.ResourceId"
+                                <input type="hidden" name="Rows[@i].ResourceId" value="@row.ResourceId" />
+                                <input type="hidden" name="Rows[@i].IsOnPayroll" value="false" />
+                                <input class="form-check-input" type="checkbox" name="Rows[@i].IsOnPayroll" value="true"
                                        @(row.OnPayrollSuggested ? "checked" : null) />
                             </td>
                             <td>@row.DisplayName <span class="text-muted small">(@row.ResourceId)</span></td>

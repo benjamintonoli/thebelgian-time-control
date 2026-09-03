@@ -26,6 +26,107 @@ public sealed class PayrollRosterAndBoundedSnapshotTests
     }
 
     [Fact]
+    public async Task AutoProposal_WithoutConfig_IsRenderedChecked()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var page = await fixture.Service.GetPayrollRosterAsync(new PayrollRosterFilter(), default);
+        var joris = Assert.Single(page.Rows, row => row.ResourceId == "476");
+        Assert.True(joris.AutoSuggested);
+        Assert.False(joris.HasExplicitConfiguration);
+        Assert.True(joris.OnPayrollSuggested);
+        Assert.Equal(PayrollRosterSource.AutoProposal, joris.Source);
+        Assert.Equal(PayrollEligibilityStatus.NeedsDecision, joris.EffectiveEligibility);
+    }
+
+    [Fact]
+    public async Task UncheckedJorisShapedProposal_PersistsExcluded_OnNextGet()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var validFrom = new DateOnly(2026, 9, 3);
+        await fixture.Service.ConfirmPayrollRosterSelectionAsync(
+            new ConfirmPayrollRosterSelectionRequest(
+                validFrom,
+                [],
+                ["476"],
+                "RosterConfirmation",
+                "long-term unavailable"),
+            "Ada Admin",
+            default);
+
+        var page = await fixture.Service.GetPayrollRosterAsync(
+            new PayrollRosterFilter(AsOfDate: validFrom),
+            default);
+        var joris = Assert.Single(page.Rows, row => row.ResourceId == "476");
+        Assert.False(joris.OnPayrollSuggested);
+        Assert.True(joris.HasExplicitConfiguration);
+        Assert.Equal(PayrollEligibilityStatus.Excluded, joris.EffectiveEligibility);
+        Assert.Equal(PayrollRosterSource.ManualExcluded, joris.Source);
+        Assert.Equal(validFrom, joris.ValidFrom);
+        Assert.NotEqual(PayrollRosterSource.AutoProposal, joris.Source);
+
+        await using var context = await fixture.Factory.CreateDbContextAsync();
+        var config = Assert.Single(await context.PayrollEmployeeConfigurationRecords.AsNoTracking()
+            .Where(item => item.ResourceId == "476").ToListAsync());
+        Assert.Equal(PayrollEligibilityStatus.Excluded, config.EligibilityStatus);
+        Assert.Equal(validFrom, config.ValidFrom);
+        var audit = Assert.Single(await context.PayrollShadowReviewAudits.AsNoTracking()
+            .Where(item => item.ResourceId == "476").ToListAsync());
+        Assert.Equal("Ada Admin", audit.Actor);
+        Assert.Equal(PayrollShadowAuditAction.EligibilityExcluded, audit.Action);
+    }
+
+    [Fact]
+    public async Task FilteredConfirm_DoesNotModifyNonSubmittedEmployees()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        await fixture.Service.ConfirmPayrollRosterSelectionAsync(
+            new ConfirmPayrollRosterSelectionRequest(
+                new DateOnly(2026, 9, 3),
+                [],
+                ["476"],
+                "RosterConfirmation",
+                "filter only joris"),
+            "Ada Admin",
+            default);
+
+        var page = await fixture.Service.GetPayrollRosterAsync(
+            new PayrollRosterFilter(AsOfDate: new DateOnly(2026, 9, 3)),
+            default);
+        var ada = Assert.Single(page.Rows, row => row.ResourceId == "10");
+        Assert.True(ada.AutoSuggested);
+        Assert.False(ada.HasExplicitConfiguration);
+        Assert.Equal(PayrollEligibilityStatus.NeedsDecision, ada.EffectiveEligibility);
+        Assert.Equal(PayrollRosterSource.AutoProposal, ada.Source);
+
+        await using var context = await fixture.Factory.CreateDbContextAsync();
+        Assert.Empty(await context.PayrollEmployeeConfigurationRecords.AsNoTracking()
+            .Where(item => item.ResourceId == "10").ToListAsync());
+    }
+
+    [Fact]
+    public async Task ConfirmValidFrom_AppliesToIncludedAndExcluded()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var validFrom = new DateOnly(2026, 9, 3);
+        await fixture.Service.ConfirmPayrollRosterSelectionAsync(
+            new ConfirmPayrollRosterSelectionRequest(
+                validFrom,
+                ["10"],
+                ["476"],
+                "RosterConfirmation",
+                null),
+            "Ada Admin",
+            default);
+
+        await using var context = await fixture.Factory.CreateDbContextAsync();
+        var configs = await context.PayrollEmployeeConfigurationRecords.AsNoTracking().ToListAsync();
+        Assert.Equal(validFrom, configs.Single(item => item.ResourceId == "10").ValidFrom);
+        Assert.Equal(PayrollEligibilityStatus.Included, configs.Single(item => item.ResourceId == "10").EligibilityStatus);
+        Assert.Equal(validFrom, configs.Single(item => item.ResourceId == "476").ValidFrom);
+        Assert.Equal(PayrollEligibilityStatus.Excluded, configs.Single(item => item.ResourceId == "476").EligibilityStatus);
+    }
+
+    [Fact]
     public async Task ConfirmCheckedProposal_CreatesIncludedConfiguration()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -106,11 +207,13 @@ public sealed class PayrollRosterAndBoundedSnapshotTests
             new PayrollShadowEmployeeFilter(),
             default);
 
-        Assert.Single(detail!.Employees);
-        Assert.Equal("10", detail.Employees[0].ResourceId);
-        Assert.Equal(PayrollEligibilityStatus.NeedsDecision, detail.Employees[0].EligibilityStatus);
+        Assert.Contains(detail!.Employees, item => item.ResourceId == "10");
+        Assert.All(
+            detail.Employees,
+            item => Assert.Equal(PayrollEligibilityStatus.NeedsDecision, item.EligibilityStatus));
         Assert.DoesNotContain(detail.Employees, item => item.ResourceId == "20");
         Assert.DoesNotContain(detail.Employees, item => item.ResourceId == "25");
+        Assert.DoesNotContain(detail.Employees, item => item.ResourceId == "12");
         _ = month;
     }
 
@@ -266,6 +369,7 @@ public sealed class PayrollRosterAndBoundedSnapshotTests
                 new("25", "R25", "Kevin (OA)", null, null, null, null, "Technieker", 1, null, AcertaIdentityStatus.Present),
                 new("30", "R30", "Pat Leader", null, null, null, null, LegacyPayrollTechnicianFunctions.ProjectLeider, 1, null, AcertaIdentityStatus.Present),
                 new("99", "R99", "Mgr", null, null, null, null, "Manager", 2, null, AcertaIdentityStatus.Present),
+                new("476", "R476", "Joris Govaerts", null, null, null, null, "Technieker", 1, null, AcertaIdentityStatus.Present),
             ]);
     }
 

@@ -24,8 +24,7 @@ public sealed class EmployeesModel(
     [BindProperty] public DateOnly ValidFrom { get; set; }
     [BindProperty] public string ReasonCode { get; set; } = "RosterConfirmation";
     [BindProperty] public string? Comment { get; set; }
-    [BindProperty] public List<string> SelectedResourceIds { get; set; } = [];
-    [BindProperty] public List<string> VisibleResourceIds { get; set; } = [];
+    [BindProperty] public List<PayrollRosterSelectionRow> Rows { get; set; } = [];
 
     [BindProperty] public string? ManualResourceId { get; set; }
     [BindProperty] public DateOnly ManualValidFrom { get; set; }
@@ -61,17 +60,7 @@ public sealed class EmployeesModel(
 
         try
         {
-            var selected = SelectedResourceIds
-                .Where(id => !string.IsNullOrWhiteSpace(id))
-                .Select(id => id.Trim())
-                .ToHashSet(StringComparer.Ordinal);
-            var visible = VisibleResourceIds
-                .Where(id => !string.IsNullOrWhiteSpace(id))
-                .Select(id => id.Trim())
-                .Distinct(StringComparer.Ordinal)
-                .ToList();
-            var included = visible.Where(selected.Contains).ToList();
-            var excluded = visible.Where(id => !selected.Contains(id)).ToList();
+            var (included, excluded) = PayrollRosterSelectionSplitter.Split(Rows);
             PreviewIncludeCount = included.Count;
             PreviewExcludeCount = excluded.Count;
 
@@ -84,12 +73,14 @@ public sealed class EmployeesModel(
                     Comment),
                 RequireActor().AuditIdentity,
                 cancellationToken);
-            Message = $"Selectie bevestigd. Included={included.Count}, Excluded={excluded.Count}.";
+            Message = $"Payrollselectie opgeslagen: {included.Count} inbegrepen, {excluded.Count} uitgesloten.";
         }
         catch (Exception exception)
         {
             logger.LogWarning(exception, "Payroll roster confirmation failed.");
             Error = exception.Message;
+            await LoadAsync(cancellationToken);
+            return Page();
         }
 
         return await OnGetAsync(cancellationToken);
