@@ -17,21 +17,31 @@ public sealed class LegacyPayrollAutoCandidateSelectorTests
     [InlineData("CCTV Technieker")]
     [InlineData("Project Technician")]
     [InlineData("Project Technieker")]
-    public void TechnicianFunction_IsAutoCandidate(string function)
+    public void TechnicianFunction_WithAcertaPresent_IsAutoCandidate(string function)
     {
         var candidate = Candidate("10", "Ada Technician", function);
         Assert.True(LegacyPayrollAutoCandidateSelector.IsAutoCandidate(candidate, PeriodStart, NoTask23));
     }
 
     [Fact]
-    public void Designer_WithOrdinaryPerformances_IsNotAutoCandidate()
+    public void Technician_WithAcertaMissing_IsNotAutoCandidate()
+    {
+        var candidate = Candidate("11", "Vendor Transport", "Technieker") with
+        {
+            AcertaIdentityStatus = AcertaIdentityStatus.Missing,
+        };
+        Assert.False(LegacyPayrollAutoCandidateSelector.IsAutoCandidate(candidate, PeriodStart, NoTask23));
+    }
+
+    [Fact]
+    public void Designer_WithAcertaPresent_IsNotAutoCandidate()
     {
         var candidate = Candidate("20", "Dana Designer", "Designer");
         Assert.False(LegacyPayrollAutoCandidateSelector.IsAutoCandidate(candidate, PeriodStart, NoTask23));
     }
 
     [Fact]
-    public void Technician_WithOaMarker_IsNotAutoCandidate()
+    public void Technician_WithOaMarker_AndAcertaPresent_IsNotAutoCandidate()
     {
         var candidate = Candidate("25", "Kevin De Coster (OA)", "Technieker");
         Assert.False(LegacyPayrollAutoCandidateSelector.IsAutoCandidate(candidate, PeriodStart, NoTask23));
@@ -39,7 +49,7 @@ public sealed class LegacyPayrollAutoCandidateSelectorTests
     }
 
     [Fact]
-    public void Technician_WithStagiairMarker_IsNotAutoCandidate()
+    public void Technician_WithStagiairMarker_AndAcertaPresent_IsNotAutoCandidate()
     {
         var candidate = Candidate("637", "Bedi Mavinga (Stagair)", "Technieker");
         Assert.False(LegacyPayrollAutoCandidateSelector.IsAutoCandidate(candidate, PeriodStart, NoTask23));
@@ -54,7 +64,7 @@ public sealed class LegacyPayrollAutoCandidateSelectorTests
     }
 
     [Fact]
-    public void ProjectLeider_WithTask23_IsAutoCandidate()
+    public void ProjectLeider_WithTask23_AndAcertaPresent_IsAutoCandidate()
     {
         var candidate = Candidate("30", "Pat Leader", LegacyPayrollTechnicianFunctions.ProjectLeider);
         var task23 = new HashSet<string>(StringComparer.Ordinal) { "30" };
@@ -62,13 +72,54 @@ public sealed class LegacyPayrollAutoCandidateSelectorTests
     }
 
     [Fact]
-    public void EndedBeforePeriod_IsNotAutoCandidate()
+    public void ProjectLeider_WithTask23_AndAcertaMissing_IsNotAutoCandidate()
+    {
+        var candidate = Candidate("30", "Pat Leader", LegacyPayrollTechnicianFunctions.ProjectLeider) with
+        {
+            AcertaIdentityStatus = AcertaIdentityStatus.Missing,
+        };
+        var task23 = new HashSet<string>(StringComparer.Ordinal) { "30" };
+        Assert.False(LegacyPayrollAutoCandidateSelector.IsAutoCandidate(candidate, PeriodStart, task23));
+    }
+
+    [Fact]
+    public void Departure_August15_EligibleThroughSeptember_NotFromOctober()
     {
         var candidate = Candidate("40", "Former Tech", "Technieker") with
         {
+            EmploymentEndDate = new DateOnly(2026, 8, 15),
+        };
+        Assert.True(LegacyPayrollAutoCandidateSelector.IsAutoCandidate(
+            candidate, new DateOnly(2026, 9, 30), NoTask23));
+        Assert.False(LegacyPayrollAutoCandidateSelector.IsAutoCandidate(
+            candidate, new DateOnly(2026, 10, 1), NoTask23));
+    }
+
+    [Fact]
+    public void Departure_August31_EligibleThroughSeptember_NotFromOctober()
+    {
+        var candidate = Candidate("41", "Former Tech EndMonth", "Technieker") with
+        {
+            EmploymentEndDate = new DateOnly(2026, 8, 31),
+        };
+        Assert.True(LegacyPayrollAutoCandidateSelector.IsAutoCandidate(
+            candidate, new DateOnly(2026, 9, 30), NoTask23));
+        Assert.False(LegacyPayrollAutoCandidateSelector.IsAutoCandidate(
+            candidate, new DateOnly(2026, 10, 1), NoTask23));
+    }
+
+    [Fact]
+    public void EndedBeyondGrace_IsNotAutoCandidate()
+    {
+        var candidate = Candidate("42", "Long Gone", "Technieker") with
+        {
             EmploymentEndDate = new DateOnly(2026, 7, 31),
         };
-        Assert.False(LegacyPayrollAutoCandidateSelector.IsAutoCandidate(candidate, PeriodStart, NoTask23));
+        // Grace through August 31; September 1 is outside.
+        Assert.False(LegacyPayrollAutoCandidateSelector.IsAutoCandidate(
+            candidate, new DateOnly(2026, 9, 1), NoTask23));
+        Assert.True(LegacyPayrollAutoCandidateSelector.IsAutoCandidate(
+            candidate, new DateOnly(2026, 8, 1), NoTask23));
     }
 
     [Fact]
@@ -97,6 +148,37 @@ public sealed class LegacyPayrollAutoCandidateSelectorTests
 
         Assert.Contains(selected, item => item.ResourceId == "10");
         Assert.Contains(selected, item => item.ResourceId == "20");
+    }
+
+    [Fact]
+    public void SnapshotUniverse_ExplicitIncluded_OverridesAcertaMissingAutoExclusion()
+    {
+        var missingTech = Candidate("11", "Vendor Transport", "Technieker") with
+        {
+            AcertaIdentityStatus = AcertaIdentityStatus.Missing,
+        };
+        Assert.False(LegacyPayrollAutoCandidateSelector.IsAutoCandidate(missingTech, PeriodStart, NoTask23));
+
+        var configs = new[]
+        {
+            new PayrollEmployeeConfiguration(
+                "11",
+                PeriodStart,
+                null,
+                PayrollEligibilityStatus.Included,
+                "ManualPayrollInclusion",
+                null,
+                PayrollEligibilityDecisionSource.Admin),
+        };
+
+        var selected = LegacyPayrollAutoCandidateSelector.SelectSnapshotCandidates(
+            [missingTech],
+            PeriodStart,
+            new DateOnly(2026, 8, 31),
+            NoTask23,
+            configs);
+
+        Assert.Contains(selected, item => item.ResourceId == "11");
     }
 
     [Fact]
@@ -132,6 +214,28 @@ public sealed class LegacyPayrollAutoCandidateSelectorTests
             null,
             null,
             AcertaIdentityStatus.Present);
+}
+
+public sealed class PayrollRosterEmploymentWindowTests
+{
+    [Theory]
+    [InlineData(2026, 8, 15, 2026, 9, 30)]
+    [InlineData(2026, 8, 31, 2026, 9, 30)]
+    [InlineData(2026, 9, 30, 2026, 10, 31)]
+    public void AutoEligibleThrough_IsEndOfMonthAfterDeparture(
+        int endY, int endM, int endD,
+        int throughY, int throughM, int throughD)
+    {
+        var through = PayrollRosterEmploymentWindow.AutoEligibleThrough(new DateOnly(endY, endM, endD));
+        Assert.Equal(new DateOnly(throughY, throughM, throughD), through);
+    }
+
+    [Fact]
+    public void AutoEligibleThrough_NullEmployment_HasNoEnd()
+    {
+        Assert.Null(PayrollRosterEmploymentWindow.AutoEligibleThrough(null));
+        Assert.True(PayrollRosterEmploymentWindow.IsAutoEligibleOn(null, new DateOnly(2099, 1, 1)));
+    }
 }
 
 public sealed class LegacyPayrollPerformanceEligibilityTests

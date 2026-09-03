@@ -115,7 +115,7 @@ public sealed class PayrollShadowAcceptanceInvariantTests
     public async Task MissingAcertaIdentity_BlocksFinalizationForIncluded()
     {
         await using var fixture = await InvariantFixture.CreateAsync(missingAcerta: true);
-        await fixture.Service.CreateSnapshotAsync(2026, 8, new DateOnly(2026, 9, 2), "Ada Admin", default);
+        // Missing Acerta is not auto-proposed; explicit Included still forces candidacy.
         await fixture.Service.SetEligibilityAsync(
             new SetPayrollEligibilityRequest(
                 "1",
@@ -126,6 +126,13 @@ public sealed class PayrollShadowAcceptanceInvariantTests
                 null),
             "Ada Admin",
             default);
+        await fixture.Service.CreateSnapshotAsync(2026, 8, new DateOnly(2026, 9, 2), "Ada Admin", default);
+        var detail = await fixture.Service.GetMonthDetailAsync(2026, 8, new PayrollShadowEmployeeFilter(), default);
+        Assert.Contains(detail!.Employees, item => item.ResourceId == "1");
+        Assert.Equal(
+            PayrollEligibilityStatus.Included,
+            detail.Employees.Single(item => item.ResourceId == "1").EligibilityStatus);
+
         await fixture.Service.SetReviewStatusAsync(
             new SetPayrollReviewStatusRequest(2026, 8, "1", PayrollEmployeeReviewStatus.Accepted, null),
             "Ada Admin",

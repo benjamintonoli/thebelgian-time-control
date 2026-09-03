@@ -1,3 +1,5 @@
+using TheBelgian.TimeControl.Core.Payroll.Legacy;
+
 namespace TheBelgian.TimeControl.Core.Payroll.Models;
 
 public sealed record PayrollEmployeeCandidate(
@@ -13,6 +15,10 @@ public sealed record PayrollEmployeeCandidate(
     DateOnly? EmploymentEndDate,
     AcertaIdentityStatus AcertaIdentityStatus)
 {
+    /// <summary>
+    /// Active for payroll roster/candidacy on period start, including the full calendar
+    /// month after DATUMUITDIENST (one-month payroll lag).
+    /// </summary>
     public bool IsActiveForPeriod(DateOnly periodStart) =>
-        EmploymentEndDate is null || EmploymentEndDate >= periodStart;
+        PayrollRosterEmploymentWindow.IsAutoEligibleOn(EmploymentEndDate, periodStart);
 }

@@ -1,4 +1,5 @@
 using TheBelgian.TimeControl.Core.Payroll.Configuration;
+using TheBelgian.TimeControl.Core.Payroll.Legacy;
 using TheBelgian.TimeControl.Core.Payroll.Models;
 
 namespace TheBelgian.TimeControl.Infrastructure.Payroll.Eligibility;
@@ -11,9 +12,9 @@ public static class PayrollEligibilitySuggestionService
     {
         ArgumentNullException.ThrowIfNull(candidate);
 
-        if (candidate.EmploymentEndDate is not null && candidate.EmploymentEndDate < periodStart)
+        if (!PayrollRosterEmploymentWindow.IsAutoEligibleOn(candidate.EmploymentEndDate, periodStart))
         {
-            return (PayrollEligibilityStatus.Excluded, "Uit dienst vóór begin van de loonperiode.");
+            return (PayrollEligibilityStatus.Excluded, "Uit dienst buiten payroll-grace (volledige maand na uitdienst).");
         }
 
         if (LegacyPayrollNameMarkers.IsLegacyOaMarker(candidate.DisplayName))

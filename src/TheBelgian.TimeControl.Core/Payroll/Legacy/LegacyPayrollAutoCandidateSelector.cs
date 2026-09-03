@@ -22,6 +22,12 @@ public static class LegacyPayrollAutoCandidateSelector
             return false;
         }
 
+        // Auto proposals represent probable payroll employees only (Present/Missing; never raw ID).
+        if (candidate.AcertaIdentityStatus != AcertaIdentityStatus.Present)
+        {
+            return false;
+        }
+
         if (LegacyPayrollNameMarkers.IsLegacyOaMarker(candidate.DisplayName))
         {
             return false;

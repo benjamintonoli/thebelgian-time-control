@@ -136,6 +136,51 @@ public sealed class PayrollRosterAndBoundedSnapshotTests
     }
 
     [Fact]
+    public async Task ExplicitIncluded_MissingAcerta_EntersSnapshot_ButFinalizeBlocked()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        await fixture.Service.AddManualPayrollEmployeeAsync(
+            new AddManualPayrollEmployeeRequest(
+                "12",
+                new DateOnly(2026, 8, 1),
+                null,
+                "ManualPayrollInclusion",
+                "missing acerta override"),
+            "Ada Admin",
+            default);
+        await fixture.Service.CreateSnapshotAsync(2026, 8, new DateOnly(2026, 9, 2), "Ada Admin", default);
+        var detail = await fixture.Service.GetMonthDetailAsync(2026, 8, new PayrollShadowEmployeeFilter(), default);
+        var missing = Assert.Single(detail!.Employees, item => item.ResourceId == "12");
+        Assert.Equal(PayrollEligibilityStatus.Included, missing.EligibilityStatus);
+        Assert.Equal(AcertaIdentityStatus.Missing, missing.AcertaIdentityStatus);
+
+        await fixture.Service.SetReviewStatusAsync(
+            new SetPayrollReviewStatusRequest(2026, 8, "12", PayrollEmployeeReviewStatus.Accepted, null),
+            "Ada Admin",
+            default);
+        // Exclude other NeedsDecision so finalization gate is specifically Acerta.
+        foreach (var employee in detail.Employees.Where(item =>
+                     item.EligibilityStatus == PayrollEligibilityStatus.NeedsDecision))
+        {
+            await fixture.Service.SetEligibilityAsync(
+                new SetPayrollEligibilityRequest(
+                    employee.ResourceId,
+                    new DateOnly(2026, 8, 1),
+                    null,
+                    PayrollEligibilityStatus.Excluded,
+                    "TestExclude",
+                    null),
+                "Ada Admin",
+                default);
+        }
+
+        await fixture.Service.StartReviewAsync(2026, 8, "Ada Admin", default);
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Service.FinalizeAsync(2026, 8, "Ada Admin", default));
+        Assert.Contains("Acerta", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ProjectLeider_Task23_EntersSnapshot_AndFiltersOrdinaryRows()
     {
         await using var fixture = await Fixture.CreateAsync(includeProjectLeaderTask23: true);
@@ -216,6 +261,7 @@ public sealed class PayrollRosterAndBoundedSnapshotTests
             Task.FromResult<IReadOnlyList<PayrollEmployeeCandidate>>(
             [
                 new("10", "R10", "Ada Technician", null, null, null, null, "Technieker", 1, null, AcertaIdentityStatus.Present),
+                new("12", "R12", "Vendor Transport", null, null, null, null, "Technieker", 1, null, AcertaIdentityStatus.Missing),
                 new("20", "R20", "Dana Designer", null, null, null, null, "Designer", 1, null, AcertaIdentityStatus.Present),
                 new("25", "R25", "Kevin (OA)", null, null, null, null, "Technieker", 1, null, AcertaIdentityStatus.Present),
                 new("30", "R30", "Pat Leader", null, null, null, null, LegacyPayrollTechnicianFunctions.ProjectLeider, 1, null, AcertaIdentityStatus.Present),
