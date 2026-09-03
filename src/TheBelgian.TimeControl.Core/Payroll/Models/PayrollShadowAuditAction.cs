@@ -10,4 +10,5 @@ public enum PayrollShadowAuditAction
     ReviewReset = 5,
     MonthReviewStarted = 6,
     MonthFinalized = 7,
+    MonthSnapshotRebuilt = 8,
 }

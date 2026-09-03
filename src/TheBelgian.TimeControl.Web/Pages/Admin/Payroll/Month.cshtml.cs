@@ -62,6 +62,40 @@ public sealed class MonthModel(
         return await OnGetAsync(cancellationToken);
     }
 
+    public async Task<IActionResult> OnPostRebuildAsync(CancellationToken cancellationToken)
+    {
+        if (!EnsureUiEnabled())
+        {
+            return NotFound();
+        }
+
+        try
+        {
+            var existing = await payrollShadowService.GetMonthDetailAsync(
+                Year,
+                Month,
+                new PayrollShadowEmployeeFilter(HideExcluded: false),
+                cancellationToken);
+            var evaluationDate = existing?.Month.EvaluationDate
+                ?? new DateOnly(Year, Month, 1).AddMonths(1);
+
+            await payrollShadowService.RebuildSnapshotAsync(
+                Year,
+                Month,
+                evaluationDate,
+                RequireActor().AuditIdentity,
+                cancellationToken);
+            Message = "Shadow-maand herberekend.";
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Payroll shadow rebuild failed.");
+            Error = exception.Message;
+        }
+
+        return await OnGetAsync(cancellationToken);
+    }
+
     public async Task<IActionResult> OnPostFinalizeAsync(CancellationToken cancellationToken)
     {
         if (!EnsureUiEnabled())

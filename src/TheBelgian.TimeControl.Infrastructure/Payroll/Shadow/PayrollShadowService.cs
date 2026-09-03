@@ -130,48 +130,7 @@ internal sealed class PayrollShadowService(
                 "Er bestaat al een shadow-maandsnapshot voor deze periode.");
         }
 
-        var configurations = await LoadConfigurationsAsync(context, cancellationToken);
-        var configurationDomains = configurations.Select(item => item.ToDomain()).ToList();
-        var allResources = await resourceReader.ReadCandidatesAsync(cancellationToken);
-        var task23ResourceIds = await ResolveProjectLeiderTask23ResourceIdsAsync(
-            allResources,
-            period.PeriodStart,
-            period.PeriodEnd,
-            cancellationToken);
-        var candidates = LegacyPayrollAutoCandidateSelector.SelectSnapshotCandidates(
-            allResources,
-            period.PeriodStart,
-            period.PeriodEnd,
-            task23ResourceIds,
-            configurationDomains);
-        var activeCandidates = candidates.Where(item => item.IsActiveForPeriod(period.PeriodStart)).ToList();
-        var resourceIds = activeCandidates.Select(item => item.ResourceId).ToArray();
-
-        var performances = resourceIds.Length == 0
-            ? []
-            : await performanceSource.ReadPerformancesAsync(
-                period.PeriodStart,
-                period.PeriodEnd,
-                resourceIds,
-                cancellationToken);
-        var calendarRows = await calendarSource.ReadCalendarRowsAsync(
-            period.PeriodStart,
-            period.PeriodEnd,
-            cancellationToken);
-        var synthetic = LegacyCalendarSynthesis.Synthesize(
-            calendarRows,
-            period.PeriodStart,
-            period.PeriodEnd,
-            resourceIds.ToHashSet(StringComparer.Ordinal));
-
-        var kmConfiguration = PayrollShadowConfigurationSnapshot.ResolveKmConfiguration(period);
-        var cityConfiguration = PayrollShadowConfigurationSnapshot.CreateCityConfiguration(period);
-        var configurationSnapshotJson = PayrollShadowConfigurationSnapshot.Build(
-            period,
-            kmConfiguration,
-            cityConfiguration,
-            configurationDomains.Count,
-            PayrollShadowConfigurationSnapshot.ComputeEligibilityHash(configurationDomains));
+        var material = await MaterializeSnapshotAsync(context, period, cancellationToken);
         var now = timeProvider.GetUtcNow();
 
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
@@ -186,41 +145,65 @@ internal sealed class PayrollShadowService(
             CalculationVersion = PayrollShadowConfigurationSnapshot.CurrentCalculationVersion(),
             CreatedAtUtc = now,
             CreatedBy = actor.Trim(),
-            ConfigurationSnapshotJson = configurationSnapshotJson,
+            ConfigurationSnapshotJson = material.ConfigurationSnapshotJson,
         };
         context.PayrollShadowMonths.Add(shadowMonth);
         await context.SaveChangesAsync(cancellationToken);
+        AddEmployeeResults(context, shadowMonth.Id, material);
+        await context.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return shadowMonth;
+    }
 
-        foreach (var candidate in candidates)
+    public async Task<PayrollShadowMonth> RebuildSnapshotAsync(
+        int year,
+        int month,
+        DateOnly evaluationDate,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        EnsureEnabled();
+        ValidateActor(actor);
+        var period = PayrollPeriodSnapshot.ForMonth(year, month, evaluationDate);
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var shadowMonth = await context.PayrollShadowMonths
+            .SingleOrDefaultAsync(item => item.Year == year && item.Month == month, cancellationToken);
+        if (shadowMonth is null)
         {
-            var resolution = PayrollEligibilityResolver.Resolve(
-                candidate,
-                period.PeriodStart,
-                period.PeriodEnd,
-                configurationDomains);
-            PayrollMonthShadowResult? calculated = null;
-            if (candidate.IsActiveForPeriod(period.PeriodStart))
-            {
-                calculated = calculationService.Calculate(
-                    period,
-                    candidate.ResourceId,
-                    candidate.Function,
-                    performances,
-                    synthetic);
-            }
-
-            var reviewStatus = resolution.EligibilityStatus == PayrollEligibilityStatus.Excluded
-                ? PayrollEmployeeReviewStatus.ExcludedFromPayroll
-                : PayrollEmployeeReviewStatus.Pending;
-
-            context.PayrollShadowEmployeeResults.Add(MapEmployeeResult(
-                shadowMonth.Id,
-                candidate,
-                resolution,
-                calculated,
-                reviewStatus));
+            throw new InvalidOperationException("Shadow-maand bestaat niet en kan niet herbouwd worden.");
         }
 
+        if (shadowMonth.Status == PayrollShadowMonthStatus.Finalized)
+        {
+            throw new InvalidOperationException("Een afgesloten shadow-maand kan niet opnieuw berekend worden.");
+        }
+
+        var material = await MaterializeSnapshotAsync(context, period, cancellationToken);
+
+        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        var existingEmployees = await context.PayrollShadowEmployeeResults
+            .Where(item => item.ShadowMonthId == shadowMonth.Id)
+            .ToListAsync(cancellationToken);
+        context.PayrollShadowEmployeeResults.RemoveRange(existingEmployees);
+
+        shadowMonth.PeriodStart = period.PeriodStart;
+        shadowMonth.PeriodEnd = period.PeriodEnd;
+        shadowMonth.EvaluationDate = evaluationDate;
+        shadowMonth.Status = PayrollShadowMonthStatus.ReadyForReview;
+        shadowMonth.CalculationVersion = PayrollShadowConfigurationSnapshot.CurrentCalculationVersion();
+        shadowMonth.ConfigurationSnapshotJson = material.ConfigurationSnapshotJson;
+        shadowMonth.LastReviewedAtUtc = null;
+        shadowMonth.LastReviewedBy = null;
+
+        AddEmployeeResults(context, shadowMonth.Id, material);
+        await AppendAuditAsync(
+            context,
+            shadowMonth.Id,
+            null,
+            PayrollShadowAuditAction.MonthSnapshotRebuilt,
+            actor,
+            null,
+            "Non-finalized shadow month rebuilt after roster/eligibility correction.");
         await context.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return shadowMonth;
@@ -922,6 +905,10 @@ internal sealed class PayrollShadowService(
         {
             query = query.Where(item => item.EligibilityStatus == filter.Eligibility);
         }
+        else if (filter.HideExcluded)
+        {
+            query = query.Where(item => item.EligibilityStatus != PayrollEligibilityStatus.Excluded);
+        }
 
         if (filter.Review is not null)
         {
@@ -955,6 +942,109 @@ internal sealed class PayrollShadowService(
 
         return query;
     }
+
+    private async Task<SnapshotMaterial> MaterializeSnapshotAsync(
+        TimeControlDbContext context,
+        PayrollPeriodSnapshot period,
+        CancellationToken cancellationToken)
+    {
+        var configurations = await LoadConfigurationsAsync(context, cancellationToken);
+        var configurationDomains = configurations.Select(item => item.ToDomain()).ToList();
+        var allResources = await resourceReader.ReadCandidatesAsync(cancellationToken);
+        var task23ResourceIds = await ResolveProjectLeiderTask23ResourceIdsAsync(
+            allResources,
+            period.PeriodStart,
+            period.PeriodEnd,
+            cancellationToken);
+        var candidates = LegacyPayrollAutoCandidateSelector.SelectSnapshotCandidates(
+            allResources,
+            period.PeriodStart,
+            period.PeriodEnd,
+            task23ResourceIds,
+            configurationDomains);
+        var activeCandidates = candidates.Where(item => item.IsActiveForPeriod(period.PeriodStart)).ToList();
+        var resourceIds = activeCandidates.Select(item => item.ResourceId).ToArray();
+
+        var performances = resourceIds.Length == 0
+            ? []
+            : await performanceSource.ReadPerformancesAsync(
+                period.PeriodStart,
+                period.PeriodEnd,
+                resourceIds,
+                cancellationToken);
+        var calendarRows = await calendarSource.ReadCalendarRowsAsync(
+            period.PeriodStart,
+            period.PeriodEnd,
+            cancellationToken);
+        var synthetic = LegacyCalendarSynthesis.Synthesize(
+            calendarRows,
+            period.PeriodStart,
+            period.PeriodEnd,
+            resourceIds.ToHashSet(StringComparer.Ordinal));
+
+        var kmConfiguration = PayrollShadowConfigurationSnapshot.ResolveKmConfiguration(period);
+        var cityConfiguration = PayrollShadowConfigurationSnapshot.CreateCityConfiguration(period);
+        var configurationSnapshotJson = PayrollShadowConfigurationSnapshot.Build(
+            period,
+            kmConfiguration,
+            cityConfiguration,
+            configurationDomains.Count,
+            PayrollShadowConfigurationSnapshot.ComputeEligibilityHash(configurationDomains));
+
+        var rows = new List<PendingEmployeeResult>(candidates.Count);
+        foreach (var candidate in candidates)
+        {
+            var resolution = PayrollEligibilityResolver.Resolve(
+                candidate,
+                period.PeriodStart,
+                period.PeriodEnd,
+                configurationDomains);
+            PayrollMonthShadowResult? calculated = null;
+            if (candidate.IsActiveForPeriod(period.PeriodStart))
+            {
+                calculated = calculationService.Calculate(
+                    period,
+                    candidate.ResourceId,
+                    candidate.Function,
+                    performances,
+                    synthetic);
+            }
+
+            var reviewStatus = resolution.EligibilityStatus == PayrollEligibilityStatus.Excluded
+                ? PayrollEmployeeReviewStatus.ExcludedFromPayroll
+                : PayrollEmployeeReviewStatus.Pending;
+
+            rows.Add(new PendingEmployeeResult(candidate, resolution, calculated, reviewStatus));
+        }
+
+        return new SnapshotMaterial(configurationSnapshotJson, rows);
+    }
+
+    private void AddEmployeeResults(
+        TimeControlDbContext context,
+        int shadowMonthId,
+        SnapshotMaterial material)
+    {
+        foreach (var row in material.Rows)
+        {
+            context.PayrollShadowEmployeeResults.Add(MapEmployeeResult(
+                shadowMonthId,
+                row.Candidate,
+                row.Resolution,
+                row.Calculated,
+                row.ReviewStatus));
+        }
+    }
+
+    private sealed record PendingEmployeeResult(
+        PayrollEmployeeCandidate Candidate,
+        PayrollEligibilityResolution Resolution,
+        PayrollMonthShadowResult? Calculated,
+        PayrollEmployeeReviewStatus ReviewStatus);
+
+    private sealed record SnapshotMaterial(
+        string ConfigurationSnapshotJson,
+        IReadOnlyList<PendingEmployeeResult> Rows);
 
     private async Task<PayrollShadowMonthSummary> BuildSummaryAsync(
         TimeControlDbContext context,

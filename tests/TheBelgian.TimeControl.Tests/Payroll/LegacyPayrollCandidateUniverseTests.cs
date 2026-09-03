@@ -123,6 +123,32 @@ public sealed class LegacyPayrollAutoCandidateSelectorTests
     }
 
     [Fact]
+    public void SnapshotUniverse_ExplicitExcluded_RemovesAutoTechnician()
+    {
+        var tech = Candidate("10", "Ada Technician", "Technieker");
+        var configs = new[]
+        {
+            new PayrollEmployeeConfiguration(
+                "10",
+                PeriodStart,
+                null,
+                PayrollEligibilityStatus.Excluded,
+                "RosterConfirmation",
+                null,
+                PayrollEligibilityDecisionSource.Admin),
+        };
+
+        var selected = LegacyPayrollAutoCandidateSelector.SelectSnapshotCandidates(
+            [tech],
+            PeriodStart,
+            new DateOnly(2026, 8, 31),
+            NoTask23,
+            configs);
+
+        Assert.DoesNotContain(selected, item => item.ResourceId == "10");
+    }
+
+    [Fact]
     public void SnapshotUniverse_IncludesExplicitConfigOutsideAutoSet()
     {
         var designer = Candidate("20", "Dana Designer", "Designer");

@@ -107,9 +107,10 @@
                         <tr>
                             <td>
                                 <input type="hidden" name="Rows[@i].ResourceId" value="@row.ResourceId" />
-                                <input type="hidden" name="Rows[@i].IsOnPayroll" value="false" />
+                                @* Checkbox BEFORE hidden so ASP.NET Core FirstValue binds checked=true correctly. *@
                                 <input class="form-check-input" type="checkbox" name="Rows[@i].IsOnPayroll" value="true"
                                        @(row.OnPayrollSuggested ? "checked" : null) />
+                                <input type="hidden" name="Rows[@i].IsOnPayroll" value="false" />
                             </td>
                             <td>@row.DisplayName <span class="text-muted small">(@row.ResourceId)</span></td>
                             <td>@row.Function</td>

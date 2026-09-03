@@ -26,6 +26,17 @@ public interface IPayrollShadowService
         string actor,
         CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Rebuilds employee results for an existing non-finalized shadow month.
+    /// Finalized months cannot be rebuilt.
+    /// </summary>
+    Task<PayrollShadowMonth> RebuildSnapshotAsync(
+        int year,
+        int month,
+        DateOnly evaluationDate,
+        string actor,
+        CancellationToken cancellationToken);
+
     Task<PayrollShadowMonth> StartReviewAsync(
         int year,
         int month,
@@ -191,7 +202,8 @@ public sealed record PayrollShadowEmployeeFilter(
     bool NeedsFollowUpOnly = false,
     bool MissingAcertaIdentityOnly = false,
     bool NegativeDifferenceOnly = false,
-    bool NonzeroStandbyOnly = false);
+    bool NonzeroStandbyOnly = false,
+    bool HideExcluded = true);
 
 public sealed record SetPayrollEligibilityRequest(
     string ResourceId,

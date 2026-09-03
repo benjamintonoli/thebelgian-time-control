@@ -66,7 +66,8 @@ public static class LegacyPayrollAutoCandidateSelector
     }
 
     /// <summary>
-    /// Period snapshot universe = auto candidates ∪ resources with any effective explicit config.
+    /// Period snapshot universe =
+    /// (auto candidates EXCEPT effective Explicit Excluded) UNION effective Explicit Included.
     /// </summary>
     public static IReadOnlyList<PayrollEmployeeCandidate> SelectSnapshotCandidates(
         IReadOnlyList<PayrollEmployeeCandidate> resources,
@@ -90,6 +91,17 @@ public static class LegacyPayrollAutoCandidateSelector
         foreach (var config in configurations)
         {
             if (!config.IsActiveFor(periodStart, periodEnd))
+            {
+                continue;
+            }
+
+            if (config.EligibilityStatus == PayrollEligibilityStatus.Excluded)
+            {
+                selected.Remove(config.ResourceId);
+                continue;
+            }
+
+            if (config.EligibilityStatus != PayrollEligibilityStatus.Included)
             {
                 continue;
             }

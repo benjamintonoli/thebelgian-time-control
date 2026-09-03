@@ -143,6 +143,12 @@ public sealed class PayrollRosterUxFixTests
         Assert.Contains("value=\"false\"", markup);
         Assert.Contains("value=\"true\"", markup);
         Assert.Contains("In payrollcontrole", markup);
+        // Checkbox must precede hidden false so ASP.NET Core FirstValue binds checked=true.
+        var checkboxIndex = markup.IndexOf("type=\"checkbox\" name=\"Rows[@i].IsOnPayroll\"", StringComparison.Ordinal);
+        var hiddenFalseIndex = markup.IndexOf(
+            "type=\"hidden\" name=\"Rows[@i].IsOnPayroll\" value=\"false\"",
+            StringComparison.Ordinal);
+        Assert.True(checkboxIndex >= 0 && hiddenFalseIndex > checkboxIndex);
         Assert.DoesNotContain("SelectedResourceIds", markup);
         Assert.DoesNotContain("VisibleResourceIds", markup);
     }
@@ -225,6 +231,10 @@ public sealed class PayrollRosterUxFixTests
                 0));
 
         public Task<PayrollShadowMonth> CreateSnapshotAsync(
+            int year, int month, DateOnly evaluationDate, string actor, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<PayrollShadowMonth> RebuildSnapshotAsync(
             int year, int month, DateOnly evaluationDate, string actor, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 

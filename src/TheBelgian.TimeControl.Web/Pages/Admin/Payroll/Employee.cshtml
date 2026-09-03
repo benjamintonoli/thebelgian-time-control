@@ -28,17 +28,17 @@ else
         <div class="col-md-6"><div class="card h-100"><div class="card-body">
             <h2 class="h6">Legacy shadow berekening</h2>
             <dl class="row small mb-0">
-                <dt class="col-5">Theoretisch</dt><dd class="col-7">@employee.LegacyTheoreticalHours</dd>
-                <dt class="col-5">Actual</dt><dd class="col-7">@employee.LegacyActualOrdinaryHours</dd>
-                <dt class="col-5">Verschil</dt><dd class="col-7">@employee.LegacyDifferenceHours</dd>
-                <dt class="col-5">Standby exact</dt><dd class="col-7">@employee.StandbyExactHours</dd>
-                <dt class="col-5">Standby 200%</dt><dd class="col-7">@employee.StandbyRoundedHours</dd>
-                <dt class="col-5">City units / €</dt><dd class="col-7">@employee.CityTripUnits / @employee.CityAllowanceAmount</dd>
-                <dt class="col-5">KM eligible</dt><dd class="col-7">@employee.EligibleKm</dd>
-                <dt class="col-5">Extra75 legacy</dt><dd class="col-7">@employee.Extra75LegacyValue</dd>
-                <dt class="col-5">KM rate / €</dt><dd class="col-7">@employee.KmRate / @employee.KmAmount</dd>
-                <dt class="col-5">Code135 150/200</dt><dd class="col-7">@employee.Code135At150Units / @employee.Code135At200Units</dd>
-                <dt class="col-5">Code414 €</dt><dd class="col-7">@employee.Code414Amount</dd>
+                <dt class="col-5">Theoretisch</dt><dd class="col-7">@PayrollDisplayFormatting.Hours(employee.LegacyTheoreticalHours)</dd>
+                <dt class="col-5">Actual</dt><dd class="col-7">@PayrollDisplayFormatting.Hours(employee.LegacyActualOrdinaryHours)</dd>
+                <dt class="col-5">Verschil</dt><dd class="col-7">@PayrollDisplayFormatting.Hours(employee.LegacyDifferenceHours)</dd>
+                <dt class="col-5">Standby exact</dt><dd class="col-7">@PayrollDisplayFormatting.Hours(employee.StandbyExactHours)</dd>
+                <dt class="col-5">Standby 200%</dt><dd class="col-7">@PayrollDisplayFormatting.Hours(employee.StandbyRoundedHours)</dd>
+                <dt class="col-5">City units / €</dt><dd class="col-7">@(employee.CityTripUnits?.ToString() ?? "—") / @PayrollDisplayFormatting.Euro(employee.CityAllowanceAmount)</dd>
+                <dt class="col-5">KM eligible</dt><dd class="col-7">@PayrollDisplayFormatting.Hours(employee.EligibleKm)</dd>
+                <dt class="col-5">Extra75 legacy</dt><dd class="col-7">@PayrollDisplayFormatting.Hours(employee.Extra75LegacyValue)</dd>
+                <dt class="col-5">KM rate / €</dt><dd class="col-7">@PayrollDisplayFormatting.Hours(employee.KmRate) / @PayrollDisplayFormatting.Euro(employee.KmAmount)</dd>
+                <dt class="col-5">Code135 150/200</dt><dd class="col-7">@PayrollDisplayFormatting.Hours(employee.Code135At150Units) / @PayrollDisplayFormatting.Hours(employee.Code135At200Units)</dd>
+                <dt class="col-5">Code414 €</dt><dd class="col-7">@PayrollDisplayFormatting.Euro(employee.Code414Amount)</dd>
             </dl>
         </div></div></div>
         <div class="col-md-6"><div class="card h-100"><div class="card-body">

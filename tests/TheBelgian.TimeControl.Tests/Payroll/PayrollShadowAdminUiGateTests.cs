@@ -68,6 +68,10 @@ public sealed class PayrollShadowAdminUiGateTests
             int year, int month, DateOnly evaluationDate, string actor, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 
+        public Task<PayrollShadowMonth> RebuildSnapshotAsync(
+            int year, int month, DateOnly evaluationDate, string actor, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
         public Task<PayrollShadowMonth> FinalizeAsync(
             int year, int month, string actor, CancellationToken cancellationToken) =>
             throw new NotSupportedException();

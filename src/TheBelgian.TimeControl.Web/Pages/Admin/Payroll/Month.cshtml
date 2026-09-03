@@ -31,6 +31,10 @@ else
         @if (detail.Month.Status != PayrollShadowMonthStatus.Finalized)
         {
             <form method="post" asp-page-handler="StartReview"><button class="btn btn-sm btn-outline-primary">Start review</button></form>
+            <form method="post" asp-page-handler="Rebuild"
+                  onsubmit="return confirm('Niet-afgesloten shadow-maand herberekenen op basis van huidige roster?');">
+                <button class="btn btn-sm btn-outline-warning">Herbereken snapshot</button>
+            </form>
             <form method="post" asp-page-handler="Finalize"><button class="btn btn-sm btn-danger">Maand afsluiten</button></form>
         }
     </div></section>
@@ -38,7 +42,12 @@ else
     <form method="get" class="card mb-3"><div class="card-body row g-2 align-items-end">
         <input type="hidden" name="year" value="@Model.Year" />
         <input type="hidden" name="month" value="@Model.Month" />
-        <div class="col-auto"><label class="form-label">Eligibility</label><select class="form-select form-select-sm" asp-for="Eligibility" asp-items="Html.GetEnumSelectList<PayrollEligibilityStatus>()"><option value="">—</option></select></div>
+        <div class="col-auto">
+            <label class="form-label">Eligibility</label>
+            <select class="form-select form-select-sm" asp-for="Eligibility" asp-items="Html.GetEnumSelectList<PayrollEligibilityStatus>()">
+                <option value="">Actief (zonder Excluded)</option>
+            </select>
+        </div>
         <div class="col-auto"><label class="form-label">Review</label><select class="form-select form-select-sm" asp-for="Review" asp-items="Html.GetEnumSelectList<PayrollEmployeeReviewStatus>()"><option value="">—</option></select></div>
         <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="NeedsDecisionOnly" /><label class="form-check-label">NeedsDecision</label></div>
         <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="NeedsFollowUpOnly" /><label class="form-check-label">NeedsFollowUp</label></div>
@@ -47,6 +56,7 @@ else
         <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="NonzeroStandbyOnly" /><label class="form-check-label">Standby ≠ 0</label></div>
         <div class="col-auto"><button class="btn btn-sm btn-outline-secondary" type="submit">Filter</button></div>
     </div></form>
+    <p class="small text-muted mb-2">Standaardzicht verbergt Excluded. Kies Eligibility = Excluded voor audit.</p>
 
     <div class="table-responsive card"><div class="card-body p-0">
         <table class="table table-sm align-middle mb-0">
@@ -62,13 +72,13 @@ else
                     <td>@row.EligibilityStatus</td>
                     <td class="small text-muted">@(row.SuggestedEligibility?.ToString() ?? "—")</td>
                     <td>@row.ReviewStatus</td>
-                    <td>@row.LegacyTheoreticalHours</td>
-                    <td>@row.LegacyActualOrdinaryHours</td>
-                    <td>@row.LegacyDifferenceHours</td>
-                    <td>@row.StandbyRoundedHours</td>
-                    <td>@row.CityAllowanceAmount</td>
-                    <td>@row.KmAmount</td>
-                    <td>@row.Code414Amount</td>
+                    <td>@PayrollDisplayFormatting.Hours(row.LegacyTheoreticalHours)</td>
+                    <td>@PayrollDisplayFormatting.Hours(row.LegacyActualOrdinaryHours)</td>
+                    <td>@PayrollDisplayFormatting.Hours(row.LegacyDifferenceHours)</td>
+                    <td>@PayrollDisplayFormatting.Hours(row.StandbyRoundedHours)</td>
+                    <td>@PayrollDisplayFormatting.Euro(row.CityAllowanceAmount)</td>
+                    <td>@PayrollDisplayFormatting.Euro(row.KmAmount)</td>
+                    <td>@PayrollDisplayFormatting.Euro(row.Code414Amount)</td>
                     <td>@row.AcertaIdentityStatus</td>
                 </tr>
             }
