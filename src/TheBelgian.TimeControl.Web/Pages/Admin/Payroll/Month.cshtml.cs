@@ -26,6 +26,9 @@ public sealed class MonthModel(
     [BindProperty(SupportsGet = true)] public bool NegativeDifferenceOnly { get; set; }
     [BindProperty(SupportsGet = true)] public bool NonzeroStandbyOnly { get; set; }
     [BindProperty(SupportsGet = true)] public bool LargeAbsoluteDifferenceOnly { get; set; }
+    [BindProperty(SupportsGet = true)] public bool HasFindingsOnly { get; set; }
+    [BindProperty(SupportsGet = true)] public bool HighFindingsOnly { get; set; }
+    [BindProperty(SupportsGet = true)] public string? FindingFilter { get; set; }
 
     public PayrollShadowMonthDetail? Detail { get; private set; }
     public PayrollMonthPeriodEligibilityInsight? PeriodInsight { get; private set; }
@@ -168,7 +171,12 @@ public sealed class MonthModel(
                 NegativeDifferenceOnly,
                 NonzeroStandbyOnly,
                 HideExcluded: true,
-                LargeAbsoluteDifferenceOnly),
+                LargeAbsoluteDifferenceOnly,
+                PrioritizeReviewExceptions: true,
+                HasFindingsOnly,
+                HighFindingsOnly,
+                FindingType: null,
+                FindingFamily: string.IsNullOrWhiteSpace(FindingFilter) ? null : FindingFilter.Trim()),
             cancellationToken);
         if (Detail is null)
         {

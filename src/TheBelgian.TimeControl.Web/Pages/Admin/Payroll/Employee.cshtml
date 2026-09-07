@@ -91,6 +91,52 @@ else
     }
 
     <section class="card mb-3"><div class="card-body">
+        <h2 class="h6">Bevindingen</h2>
+        @if (detail.Findings.Count == 0)
+        {
+            <p class="mb-0 text-muted">Geen bevindingen voor deze medewerker.</p>
+        }
+        else
+        {
+            <div class="vstack gap-3">
+            @foreach (var finding in detail.Findings)
+            {
+                <div class="border rounded p-2">
+                    <div class="d-flex flex-wrap gap-2 align-items-center mb-1">
+                        <span class="badge @PayrollReviewLabels.SeverityBadgeClass(finding.Severity)">@PayrollReviewLabels.FindingSeverity(finding.Severity)</span>
+                        <strong>@finding.Title</strong>
+                        <span class="text-muted small">@finding.Date.ToString("dd/MM/yyyy")</span>
+                        <span class="text-muted small">@PayrollReviewLabels.FindingType(finding.FindingType)</span>
+                    </div>
+                    <p class="mb-1">@finding.Description</p>
+                    @if (finding.PlannedHours is not null || finding.BookedHours is not null)
+                    {
+                        <p class="mb-1 small">
+                            Gepland: @PayrollDisplayFormatting.Hours(finding.PlannedHours)
+                            · Geboekt: @PayrollDisplayFormatting.Hours(finding.BookedHours)
+                            @if (finding.OverlapHours is not null)
+                            {
+                                <text>· Overlap: @PayrollDisplayFormatting.Hours(finding.OverlapHours)</text>
+                            }
+                            @if (finding.SuggestedOvertimeAdjustmentHours is not null)
+                            {
+                                <text>· Voorstel overuren: @PayrollDisplayFormatting.Hours(finding.SuggestedOvertimeAdjustmentHours)</text>
+                            }
+                        </p>
+                    }
+                    <p class="mb-1 small"><em>@finding.SuggestedAction</em></p>
+                    <details>
+                        <summary class="small text-muted">Technische evidence</summary>
+                        <pre class="small mb-0 mt-1">@finding.Evidence</pre>
+                        <div class="small text-muted">Key=@finding.FindingKey · Status=@finding.Status · Ids=@finding.RelatedPerformanceIdsJson</div>
+                    </details>
+                </div>
+            }
+            </div>
+        }
+    </div></section>
+
+    <section class="card mb-3"><div class="card-body">
         <h2 class="h6">Eligibility-configuratie (effectief gedateerd)</h2>
         <ul class="small mb-0">
         @foreach (var config in detail.EligibilityConfigurations)

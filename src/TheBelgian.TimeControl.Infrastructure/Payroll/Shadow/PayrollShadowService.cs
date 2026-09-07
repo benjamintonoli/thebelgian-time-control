@@ -5,11 +5,14 @@ using TheBelgian.TimeControl.Core.Configuration;
 using TheBelgian.TimeControl.Core.Interfaces;
 using TheBelgian.TimeControl.Core.Models;
 using TheBelgian.TimeControl.Core.Payroll.Configuration;
+using TheBelgian.TimeControl.Core.Payroll.Findings;
 using TheBelgian.TimeControl.Core.Payroll.Interfaces;
 using TheBelgian.TimeControl.Core.Payroll.Legacy;
 using TheBelgian.TimeControl.Core.Payroll.Models;
 using TheBelgian.TimeControl.Infrastructure.Payroll.Eligibility;
+using TheBelgian.TimeControl.Infrastructure.Payroll.Findings;
 using TheBelgian.TimeControl.Infrastructure.Payroll.Legacy;
+using TheBelgian.TimeControl.Infrastructure.Payroll.Sources;
 using TheBelgian.TimeControl.Infrastructure.Persistence;
 
 namespace TheBelgian.TimeControl.Infrastructure.Payroll.Shadow;
@@ -19,6 +22,7 @@ internal sealed class PayrollShadowService(
     IPayrollResourceReader resourceReader,
     IPayrollPerformanceSource performanceSource,
     IPayrollCalendarSource calendarSource,
+    IPayrollPlanningSource planningSource,
     PayrollShadowCalculationService calculationService,
     IOptions<PayrollShadowOptions> options,
     TimeProvider timeProvider) : IPayrollShadowService
@@ -60,17 +64,37 @@ internal sealed class PayrollShadowService(
             .Where(item => item.ShadowMonthId == shadowMonth.Id)
             .OrderBy(item => item.DisplayNameSnapshot)
             .ToListAsync(cancellationToken);
-        var query = ApplyFilter(employees, filter);
+        var findings = await context.PayrollFindingRecords.AsNoTracking()
+            .Where(item => item.ShadowMonthId == shadowMonth.Id)
+            .ToListAsync(cancellationToken);
+        var findingsByResource = findings
+            .GroupBy(item => item.ResourceId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
+
+        var query = ApplyFilter(employees, findingsByResource, filter);
         IEnumerable<PayrollShadowEmployeeResult> ordered = filter.PrioritizeReviewExceptions
             ? query
-                .OrderByDescending(item => item.ReviewStatus == PayrollEmployeeReviewStatus.NeedsFollowUp)
+                .OrderByDescending(item => HighestSeverity(findingsByResource, item.ResourceId))
+                .ThenByDescending(item => FindingCount(findingsByResource, item.ResourceId))
+                .ThenByDescending(item => item.ReviewStatus == PayrollEmployeeReviewStatus.NeedsFollowUp)
                 .ThenByDescending(item => Math.Abs(item.LegacyDifferenceHours.GetValueOrDefault()))
                 .ThenBy(item => item.ReviewStatus == PayrollEmployeeReviewStatus.Pending ? 0 : 1)
                 .ThenBy(item => item.DisplayNameSnapshot, StringComparer.OrdinalIgnoreCase)
             : query.OrderBy(item => item.DisplayNameSnapshot, StringComparer.OrdinalIgnoreCase);
-        var filtered = ordered.Select(MapEmployeeRow).ToList();
+        var filtered = ordered
+            .Select(item => MapEmployeeRow(item, findingsByResource.GetValueOrDefault(item.ResourceId) ?? []))
+            .ToList();
         var summary = await BuildSummaryAsync(context, shadowMonth, cancellationToken);
-        return new PayrollShadowMonthDetail(shadowMonth, summary, filtered);
+        var withFindings = employees.Count(item =>
+            item.EligibilityStatus == PayrollEligibilityStatus.Included
+            && findingsByResource.ContainsKey(item.ResourceId));
+        var includedCount = employees.Count(item => item.EligibilityStatus == PayrollEligibilityStatus.Included);
+        return new PayrollShadowMonthDetail(
+            shadowMonth,
+            summary,
+            filtered,
+            withFindings,
+            Math.Max(0, includedCount - withFindings));
     }
 
     public async Task<PayrollShadowEmployeeDetail?> GetEmployeeDetailAsync(
@@ -109,7 +133,12 @@ internal sealed class PayrollShadowService(
         audit = audit
             .OrderByDescending(item => item.TimestampUtc)
             .ToList();
-        return new PayrollShadowEmployeeDetail(shadowMonth, employee, configurations, audit);
+        var findings = await context.PayrollFindingRecords.AsNoTracking()
+            .Where(item => item.ShadowMonthId == shadowMonth.Id && item.ResourceId == resourceId)
+            .OrderByDescending(item => item.Severity)
+            .ThenBy(item => item.Date)
+            .ToListAsync(cancellationToken);
+        return new PayrollShadowEmployeeDetail(shadowMonth, employee, configurations, audit, findings);
     }
 
     public async Task<PayrollShadowMonth> CreateSnapshotAsync(
@@ -156,6 +185,7 @@ internal sealed class PayrollShadowService(
         context.PayrollShadowMonths.Add(shadowMonth);
         await context.SaveChangesAsync(cancellationToken);
         AddEmployeeResults(context, shadowMonth.Id, material);
+        ReplaceFindings(context, shadowMonth.Id, material);
         await context.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return shadowMonth;
@@ -204,6 +234,10 @@ internal sealed class PayrollShadowService(
                 StringComparer.Ordinal);
 
         context.PayrollShadowEmployeeResults.RemoveRange(existingEmployees);
+        var existingFindings = await context.PayrollFindingRecords
+            .Where(item => item.ShadowMonthId == shadowMonth.Id)
+            .ToListAsync(cancellationToken);
+        context.PayrollFindingRecords.RemoveRange(existingFindings);
 
         shadowMonth.PeriodStart = period.PeriodStart;
         shadowMonth.PeriodEnd = period.PeriodEnd;
@@ -215,6 +249,7 @@ internal sealed class PayrollShadowService(
         shadowMonth.ConfigurationSnapshotJson = material.ConfigurationSnapshotJson;
 
         AddEmployeeResults(context, shadowMonth.Id, material);
+        ReplaceFindings(context, shadowMonth.Id, material);
         await context.SaveChangesAsync(cancellationToken);
 
         if (preservedReviews.Count > 0)
@@ -1188,8 +1223,14 @@ internal sealed class PayrollShadowService(
             ReviewStatus = reviewStatus,
         };
 
-    private static PayrollShadowEmployeeRow MapEmployeeRow(PayrollShadowEmployeeResult employee) =>
-        new(
+    private static PayrollShadowEmployeeRow MapEmployeeRow(
+        PayrollShadowEmployeeResult employee,
+        List<PayrollFindingRecord> findings)
+    {
+        var highest = findings.Count == 0
+            ? (PayrollFindingSeverity?)null
+            : findings.Max(item => item.Severity);
+        return new(
             employee.ResourceId,
             employee.DisplayNameSnapshot,
             employee.EligibilityStatus,
@@ -1202,10 +1243,14 @@ internal sealed class PayrollShadowService(
             employee.CityAllowanceAmount,
             employee.KmAmount,
             employee.Code414Amount,
-            employee.AcertaIdentityStatus);
+            employee.AcertaIdentityStatus,
+            findings.Count,
+            highest);
+    }
 
     private static IEnumerable<PayrollShadowEmployeeResult> ApplyFilter(
         IEnumerable<PayrollShadowEmployeeResult> employees,
+        Dictionary<string, List<PayrollFindingRecord>> findingsByResource,
         PayrollShadowEmployeeFilter filter)
     {
         var query = employees;
@@ -1253,8 +1298,47 @@ internal sealed class PayrollShadowService(
             query = query.Where(item => Math.Abs(item.LegacyDifferenceHours.GetValueOrDefault()) >= 8m);
         }
 
+        if (filter.HasFindingsOnly)
+        {
+            query = query.Where(item => findingsByResource.ContainsKey(item.ResourceId));
+        }
+
+        if (filter.HighFindingsOnly)
+        {
+            query = query.Where(item =>
+                findingsByResource.TryGetValue(item.ResourceId, out var rows)
+                && rows.Any(finding => finding.Severity == PayrollFindingSeverity.High));
+        }
+
+        if (filter.FindingType is not null)
+        {
+            query = query.Where(item =>
+                findingsByResource.TryGetValue(item.ResourceId, out var rows)
+                && rows.Any(finding => finding.FindingType == filter.FindingType));
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.FindingFamily))
+        {
+            query = query.Where(item =>
+                findingsByResource.TryGetValue(item.ResourceId, out var rows)
+                && rows.Any(finding => MatchesFindingFamily(finding.FindingType, filter.FindingFamily)));
+        }
+
         return query;
     }
+
+    private static bool MatchesFindingFamily(PayrollFindingType type, string family) =>
+        family.Trim().ToUpperInvariant() switch
+        {
+            "PROJECT100" => type is PayrollFindingType.Project100TrainingHours
+                or PayrollFindingType.Project100TrainingInOvertime
+                or PayrollFindingType.Project100ExceedsPlannedDuration,
+            "PROJECT200" => type is PayrollFindingType.Project200WithoutPlanning
+                or PayrollFindingType.Project200ExceedsPlanning,
+            "PROJECT300" => type is PayrollFindingType.Project300WithoutPlanning,
+            "OVERLAP" => type is PayrollFindingType.OverlappingPerformances,
+            _ => false,
+        };
 
     private async Task<SnapshotMaterial> MaterializeSnapshotAsync(
         TimeControlDbContext context,
@@ -1285,6 +1369,16 @@ internal sealed class PayrollShadowService(
                 period.PeriodEnd,
                 resourceIds,
                 cancellationToken);
+        var planning = resourceIds.Length == 0
+            ? []
+            : await planningSource.ReadWorkReservationsAsync(
+                period.PeriodStart,
+                period.PeriodEnd,
+                resourceIds,
+                cancellationToken);
+        var planningQueryCount = planningSource is PlenionPayrollPlanningReader planningReader
+            ? planningReader.LastQueryCount
+            : 1;
         var calendarRows = await calendarSource.ReadCalendarRowsAsync(
             period.PeriodStart,
             period.PeriodEnd,
@@ -1330,7 +1424,17 @@ internal sealed class PayrollShadowService(
             rows.Add(new PendingEmployeeResult(candidate, resolution, calculated, reviewStatus));
         }
 
-        return new SnapshotMaterial(configurationSnapshotJson, rows);
+        var legacyDiff = rows.ToDictionary(
+            item => item.Candidate.ResourceId,
+            item => item.Calculated?.LegacyDifferenceHours,
+            StringComparer.Ordinal);
+        var findingsRun = PayrollFindingsEngine.Evaluate(
+            performances,
+            planning,
+            legacyDiff,
+            planningQueryCount);
+
+        return new SnapshotMaterial(configurationSnapshotJson, rows, findingsRun);
     }
 
     private void AddEmployeeResults(
@@ -1349,6 +1453,29 @@ internal sealed class PayrollShadowService(
         }
     }
 
+    private static void ReplaceFindings(
+        TimeControlDbContext context,
+        int shadowMonthId,
+        SnapshotMaterial material)
+    {
+        foreach (var finding in material.Findings.Findings)
+        {
+            context.PayrollFindingRecords.Add(PayrollFindingsEngine.ToRecord(shadowMonthId, finding));
+        }
+    }
+
+    private static int FindingCount(
+        Dictionary<string, List<PayrollFindingRecord>> findingsByResource,
+        string resourceId) =>
+        findingsByResource.TryGetValue(resourceId, out var rows) ? rows.Count : 0;
+
+    private static int HighestSeverity(
+        Dictionary<string, List<PayrollFindingRecord>> findingsByResource,
+        string resourceId) =>
+        findingsByResource.TryGetValue(resourceId, out var rows) && rows.Count > 0
+            ? rows.Max(item => (int)item.Severity)
+            : -1;
+
     private sealed record PendingEmployeeResult(
         PayrollEmployeeCandidate Candidate,
         PayrollEligibilityResolution Resolution,
@@ -1357,7 +1484,8 @@ internal sealed class PayrollShadowService(
 
     private sealed record SnapshotMaterial(
         string ConfigurationSnapshotJson,
-        IReadOnlyList<PendingEmployeeResult> Rows);
+        IReadOnlyList<PendingEmployeeResult> Rows,
+        PayrollFindingsRunResult Findings);
 
     private async Task<PayrollShadowMonthSummary> BuildSummaryAsync(
         TimeControlDbContext context,

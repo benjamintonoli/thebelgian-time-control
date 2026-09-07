@@ -245,10 +245,13 @@ public static class DependencyInjection
         services.AddScoped<IPayrollResourceReader, PlenionPayrollResourceReader>();
         services.AddScoped<PlenionPayrollReader>();
         services.AddScoped<PlenionPayrollCalendarReader>();
+        services.AddScoped<PlenionPayrollPlanningReader>();
         services.AddScoped<IPayrollPerformanceSource>(provider =>
             provider.GetRequiredService<PlenionPayrollReader>());
         services.AddScoped<IPayrollCalendarSource>(provider =>
             provider.GetRequiredService<PlenionPayrollCalendarReader>());
+        services.AddScoped<IPayrollPlanningSource>(provider =>
+            provider.GetRequiredService<PlenionPayrollPlanningReader>());
         services.AddScoped<IPayrollShadowService, PayrollShadowService>();
         return services;
     }
@@ -558,6 +561,30 @@ public static class DependencyInjection
             );
             CREATE INDEX IF NOT EXISTS "IX_PayrollShadowReviewAudits_Month_Timestamp"
                 ON "PayrollShadowReviewAudits" ("ShadowMonthId", "TimestampUtc");
+            CREATE TABLE IF NOT EXISTS "PayrollFindingRecords" (
+                "Id" INTEGER NOT NULL CONSTRAINT "PK_PayrollFindingRecords" PRIMARY KEY AUTOINCREMENT,
+                "ShadowMonthId" INTEGER NOT NULL,
+                "FindingKey" TEXT NOT NULL,
+                "ResourceId" TEXT NOT NULL,
+                "Date" TEXT NOT NULL,
+                "FindingType" INTEGER NOT NULL,
+                "Severity" INTEGER NOT NULL,
+                "Status" INTEGER NOT NULL,
+                "Title" TEXT NOT NULL,
+                "Description" TEXT NOT NULL,
+                "Evidence" TEXT NOT NULL,
+                "SuggestedAction" TEXT NOT NULL,
+                "RelatedPerformanceIdsJson" TEXT NOT NULL,
+                "PlannedHours" REAL NULL,
+                "BookedHours" REAL NULL,
+                "OverlapHours" REAL NULL,
+                "SuggestedOvertimeAdjustmentHours" REAL NULL,
+                "LegacyDifferenceHours" REAL NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_PayrollFindingRecords_Month_FindingKey"
+                ON "PayrollFindingRecords" ("ShadowMonthId", "FindingKey");
+            CREATE INDEX IF NOT EXISTS "IX_PayrollFindingRecords_Month_Resource"
+                ON "PayrollFindingRecords" ("ShadowMonthId", "ResourceId");
             """,
             cancellationToken);
         await EnsureColumnAsync(

@@ -1,4 +1,5 @@
 using TheBelgian.TimeControl.Core.Models;
+using TheBelgian.TimeControl.Core.Payroll.Findings;
 using TheBelgian.TimeControl.Core.Payroll.Models;
 
 namespace TheBelgian.TimeControl.Core.Interfaces;
@@ -193,7 +194,9 @@ public sealed record PayrollShadowMonthSummary(
 public sealed record PayrollShadowMonthDetail(
     PayrollShadowMonth Month,
     PayrollShadowMonthSummary Summary,
-    IReadOnlyList<PayrollShadowEmployeeRow> Employees);
+    IReadOnlyList<PayrollShadowEmployeeRow> Employees,
+    int EmployeesWithFindings = 0,
+    int EmployeesWithoutFindings = 0);
 
 public sealed record PayrollShadowEmployeeRow(
     string ResourceId,
@@ -208,13 +211,16 @@ public sealed record PayrollShadowEmployeeRow(
     decimal? CityAllowanceAmount,
     decimal? KmAmount,
     decimal? Code414Amount,
-    AcertaIdentityStatus AcertaIdentityStatus);
+    AcertaIdentityStatus AcertaIdentityStatus,
+    int FindingsCount = 0,
+    PayrollFindingSeverity? HighestFindingSeverity = null);
 
 public sealed record PayrollShadowEmployeeDetail(
     PayrollShadowMonth Month,
     PayrollShadowEmployeeResult Employee,
     IReadOnlyList<PayrollEmployeeConfigurationRecord> EligibilityConfigurations,
-    IReadOnlyList<PayrollShadowReviewAudit> AuditTrail);
+    IReadOnlyList<PayrollShadowReviewAudit> AuditTrail,
+    IReadOnlyList<PayrollFindingRecord> Findings);
 
 public sealed record PayrollShadowEmployeeFilter(
     PayrollEligibilityStatus? Eligibility = null,
@@ -226,7 +232,11 @@ public sealed record PayrollShadowEmployeeFilter(
     bool NonzeroStandbyOnly = false,
     bool HideExcluded = true,
     bool LargeAbsoluteDifferenceOnly = false,
-    bool PrioritizeReviewExceptions = true);
+    bool PrioritizeReviewExceptions = true,
+    bool HasFindingsOnly = false,
+    bool HighFindingsOnly = false,
+    PayrollFindingType? FindingType = null,
+    string? FindingFamily = null);
 
 public sealed record PayrollMonthPeriodEligibilityInsight(
     DateOnly PeriodStart,

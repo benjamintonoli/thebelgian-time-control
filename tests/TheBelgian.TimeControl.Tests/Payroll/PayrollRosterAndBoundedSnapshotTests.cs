@@ -613,6 +613,7 @@ public sealed class PayrollRosterAndBoundedSnapshotTests
                 new TestResourceReader(),
                 new TestPerformanceSource(includeProjectLeaderTask23),
                 new TestCalendarSource(),
+                new EmptyPayrollPlanningSource(),
                 new PayrollShadowCalculationService(),
                 payrollOptions,
                 TimeProvider.System);

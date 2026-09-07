@@ -45,6 +45,7 @@ public sealed class TimeControlDbContext(DbContextOptions<TimeControlDbContext> 
         Set<PayrollShadowEmployeeResult>();
     public DbSet<PayrollShadowReviewAudit> PayrollShadowReviewAudits =>
         Set<PayrollShadowReviewAudit>();
+    public DbSet<PayrollFindingRecord> PayrollFindingRecords => Set<PayrollFindingRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -99,6 +100,11 @@ public sealed class TimeControlDbContext(DbContextOptions<TimeControlDbContext> 
             .IsUnique();
         modelBuilder.Entity<PayrollShadowReviewAudit>()
             .HasIndex(item => new { item.ShadowMonthId, item.TimestampUtc });
+        modelBuilder.Entity<PayrollFindingRecord>()
+            .HasIndex(item => new { item.ShadowMonthId, item.FindingKey })
+            .IsUnique();
+        modelBuilder.Entity<PayrollFindingRecord>()
+            .HasIndex(item => new { item.ShadowMonthId, item.ResourceId });
 
         modelBuilder.Entity<PlenionPerformance>().Property(item => item.Kilometres).HasPrecision(12, 3);
         modelBuilder.Entity<PowerfleetTrip>().Property(item => item.DistanceKilometres).HasPrecision(12, 3);

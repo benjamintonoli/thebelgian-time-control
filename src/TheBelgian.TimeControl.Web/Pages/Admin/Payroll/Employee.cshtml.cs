@@ -173,6 +173,15 @@ public sealed class EmployeeModel(
         {
             ValidFrom = Detail.Month.PeriodStart;
         }
+
+        if (Detail is not null
+            && string.IsNullOrWhiteSpace(ReviewComment)
+            && Detail.Findings.Count > 0)
+        {
+            ReviewComment = "Bevindingen: " + string.Join(
+                "; ",
+                Detail.Findings.Take(5).Select(item => item.Title));
+        }
     }
 
     private bool EnsureUiEnabled() =>

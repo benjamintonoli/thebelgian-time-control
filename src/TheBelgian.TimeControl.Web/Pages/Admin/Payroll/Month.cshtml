@@ -59,7 +59,9 @@ else
             <p class="mb-1"><strong>@summary.PendingReview</strong> nog te controleren</p>
             <p class="mb-1"><strong>@summary.Accepted</strong> goedgekeurd</p>
             <p class="mb-1"><strong>@summary.NeedsFollowUp</strong> opvolging nodig</p>
-            <p class="mb-0 text-muted small">Excluded=@summary.Excluded · NeedsDecision=@summary.NeedsDecision · Totaal kandidaten=@summary.TotalCandidates</p>
+            <p class="mb-1"><strong>@detail.EmployeesWithFindings</strong> met bevindingen</p>
+            <p class="mb-0"><strong>@detail.EmployeesWithoutFindings</strong> zonder bevindingen</p>
+            <p class="mb-0 mt-1 text-muted small">Excluded=@summary.Excluded · NeedsDecision=@summary.NeedsDecision · Totaal kandidaten=@summary.TotalCandidates</p>
         </div></section>
     }
 
@@ -150,15 +152,28 @@ else
         <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="NegativeDifferenceOnly" /><label class="form-check-label">Neg. diff.</label></div>
         <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="NonzeroStandbyOnly" /><label class="form-check-label">Standby ≠ 0</label></div>
         <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="LargeAbsoluteDifferenceOnly" /><label class="form-check-label">|Diff| ≥ 8u</label></div>
+        <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="HasFindingsOnly" /><label class="form-check-label">Heeft bevindingen</label></div>
+        <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="HighFindingsOnly" /><label class="form-check-label">High</label></div>
+        <div class="col-auto">
+            <label class="form-label">Bevinding</label>
+            <select class="form-select form-select-sm" asp-for="FindingFilter">
+                <option value="">—</option>
+                <option value="Project100">Project 100</option>
+                <option value="Project200">Project 200</option>
+                <option value="Project300">Project 300</option>
+                <option value="Overlap">Overlap</option>
+            </select>
+        </div>
         <div class="col-auto"><button class="btn btn-sm btn-outline-secondary" type="submit">Filter</button></div>
     </div></form>
-    <p class="small text-muted mb-2">Standaardzicht verbergt Excluded en sorteert opvolging / grote verschillen eerst.</p>
+    <p class="small text-muted mb-2">Standaardzicht verbergt Excluded en sorteert High-bevindingen eerst, daarna andere bevindingen, daarna schone rijen.</p>
 
     <div class="table-responsive card"><div class="card-body p-0">
         <table class="table table-sm align-middle mb-0">
             <thead><tr>
                 <th>Resource</th><th>Eligibility</th><th>Suggestie</th><th>Review</th>
                 <th>Theo</th><th>Actual</th><th>Diff</th><th>Standby</th><th>City €</th><th>KM €</th><th>414 €</th><th>Acerta</th>
+                <th>Findings</th><th>Hoogste</th>
             </tr></thead>
             <tbody>
             @foreach (var row in detail.Employees)
@@ -193,6 +208,17 @@ else
                     <td>@PayrollDisplayFormatting.Euro(row.KmAmount)</td>
                     <td>@PayrollDisplayFormatting.Euro(row.Code414Amount)</td>
                     <td>@row.AcertaIdentityStatus</td>
+                    <td>@(row.FindingsCount == 0 ? "—" : row.FindingsCount.ToString())</td>
+                    <td>
+                        @if (row.HighestFindingSeverity is null)
+                        {
+                            <text>—</text>
+                        }
+                        else
+                        {
+                            <span class="badge @PayrollReviewLabels.SeverityBadgeClass(row.HighestFindingSeverity.Value)">@PayrollReviewLabels.FindingSeverity(row.HighestFindingSeverity.Value)</span>
+                        }
+                    </td>
                 </tr>
             }
             </tbody>

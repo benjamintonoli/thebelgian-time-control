@@ -197,6 +197,7 @@ public sealed class PayrollShadowAcceptanceInvariantTests
                 new TestResourceReader(missingAcerta),
                 new TestPerformanceSource(),
                 new TestCalendarSource(),
+                new EmptyPayrollPlanningSource(),
                 new PayrollShadowCalculationService(),
                 Options.Create(new PayrollShadowOptions { Enabled = true, AdminUiEnabled = true }),
                 TimeProvider.System);
@@ -839,6 +840,7 @@ public sealed class August2026PayrollShadowAcceptanceTests(ITestOutputHelper out
                 resourceReader,
                 performanceSource,
                 calendarSource,
+                new EmptyPayrollPlanningSource(),
                 new PayrollShadowCalculationService(),
                 Options.Create(new PayrollShadowOptions { Enabled = true, AdminUiEnabled = true }),
                 TimeProvider.System);
