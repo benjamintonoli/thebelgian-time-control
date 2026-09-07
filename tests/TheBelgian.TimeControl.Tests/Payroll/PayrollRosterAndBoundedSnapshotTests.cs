@@ -614,6 +614,7 @@ public sealed class PayrollRosterAndBoundedSnapshotTests
                 new TestPerformanceSource(includeProjectLeaderTask23),
                 new TestCalendarSource(),
                 new EmptyPayrollPlanningSource(),
+                new EmptyPayrollStandbyGpsSource(),
                 new PayrollShadowCalculationService(),
                 payrollOptions,
                 TimeProvider.System);

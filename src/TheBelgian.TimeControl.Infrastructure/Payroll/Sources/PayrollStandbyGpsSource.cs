@@ -1,0 +1,215 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using TheBelgian.TimeControl.Core.Models;
+using TheBelgian.TimeControl.Core.Payroll.Findings;
+using TheBelgian.TimeControl.Core.Payroll.Interfaces;
+using TheBelgian.TimeControl.Infrastructure.Persistence;
+using TheBelgian.TimeControl.Infrastructure.Pilot;
+using TheBelgian.TimeControl.Infrastructure.VehicleAssignments;
+
+namespace TheBelgian.TimeControl.Infrastructure.Payroll.Sources;
+
+/// <summary>
+/// Batched read-only PowerFleet evidence for standby findings.
+/// Vehicle identity: ObjectId, then plate fallback; DriverId never chosen as person proof.
+/// </summary>
+internal sealed class PayrollStandbyGpsSource(
+    IDbContextFactory<TimeControlDbContext> contextFactory,
+    PilotPowerfleetReader powerfleetReader,
+    ILogger<PayrollStandbyGpsSource> logger) : IPayrollStandbyGpsSource
+{
+    public int LastApiCallCount { get; private set; }
+
+    public async Task<StandbyGpsBatchResult> ReadStandbyGpsAsync(
+        DateOnly fromDate,
+        DateOnly throughDate,
+        IReadOnlyCollection<(string ResourceId, DateOnly Date)> standbyResourceDates,
+        CancellationToken cancellationToken = default)
+    {
+        LastApiCallCount = 0;
+        var pairs = standbyResourceDates
+            .Where(item =>
+                !string.IsNullOrWhiteSpace(item.ResourceId)
+                && item.Date >= fromDate
+                && item.Date <= throughDate)
+            .Select(item => (ResourceId: item.ResourceId.Trim(), item.Date))
+            .Distinct()
+            .ToArray();
+        if (pairs.Length == 0)
+        {
+            return new StandbyGpsBatchResult([], 0, 0, 0, 0, 0, "No standby resource/dates.");
+        }
+
+        var resources = pairs.Select(item => item.ResourceId).Distinct(StringComparer.Ordinal).ToArray();
+        var dates = pairs.Select(item => item.Date).Distinct().OrderBy(date => date).ToArray();
+
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var assignments = await context.TechnicianVehicleAssignments.AsNoTracking()
+            .Where(item => resources.Contains(item.TechnicianExternalId))
+            .ToListAsync(cancellationToken);
+
+        var tripsByDate = new Dictionary<DateOnly, List<NormalizedPilotTrip>>();
+        foreach (var date in dates)
+        {
+            var daily = await powerfleetReader.ReadAsync(
+                new ReadOnlyPilotRequest(
+                    "payroll-standby-gps",
+                    date,
+                    date,
+                    DriverOnlyLinking: true,
+                    MaximumTrips: 1000),
+                cancellationToken);
+            LastApiCallCount++;
+            tripsByDate[date] = daily.NormalizedRecords
+                .DistinctBy(PowerfleetVehicleStreamIdentity.ObservationKey, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        var days = new List<StandbyGpsDayEvidence>();
+        var mappedResources = new HashSet<string>(StringComparer.Ordinal);
+        var resourcesWithGps = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var (resourceId, date) in pairs)
+        {
+            var at = new DateTimeOffset(date.ToDateTime(new TimeOnly(12, 0)), TimeSpan.Zero);
+            var resolution = ResolveAssignment(assignments, resourceId, at);
+            if (resolution.Status == VehicleAssignmentResolutionStatus.Resolved
+                && !string.IsNullOrWhiteSpace(resolution.ObjectId))
+            {
+                mappedResources.Add(resourceId);
+            }
+
+            var dayTrips = tripsByDate.GetValueOrDefault(date) ?? [];
+            var matched = FilterTrips(dayTrips, resolution);
+            if (matched.Count > 0)
+            {
+                resourcesWithGps.Add(resourceId);
+            }
+
+            days.Add(new StandbyGpsDayEvidence(
+                ResourceId: resourceId,
+                Date: date,
+                HasVehicleMapping: resolution.Status == VehicleAssignmentResolutionStatus.Resolved
+                    && !string.IsNullOrWhiteSpace(resolution.ObjectId),
+                MappingAmbiguous: resolution.Status == VehicleAssignmentResolutionStatus.AmbiguousVehicleAssignment,
+                ObjectId: resolution.ObjectId,
+                RegistrationPlate: resolution.Assignments.Count > 0
+                    ? resolution.Assignments[0].RegistrationPlateSnapshot
+                    : null,
+                MappingReason: resolution.Reason,
+                Trips: matched));
+        }
+
+        var unmapped = resources.Count(id => !mappedResources.Contains(id));
+        var withoutGps = resources.Count(id => !resourcesWithGps.Contains(id));
+        var notes =
+            $"Standby GPS batch dates={dates.Length}, pairs={pairs.Length}, apiCalls={LastApiCallCount}, "
+            + $"mappedResources={mappedResources.Count}, unmapped={unmapped}, "
+            + $"withGps={resourcesWithGps.Count}, withoutGps={withoutGps}. "
+            + "Identity: ObjectId then plate; DriverId never selected as person proof. "
+            + "Missing GPS is NoGpsData, never auto PhoneOnly.";
+        logger.LogInformation("Payroll standby GPS: {Notes}", notes);
+        return new StandbyGpsBatchResult(
+            days,
+            LastApiCallCount,
+            mappedResources.Count,
+            unmapped,
+            resourcesWithGps.Count,
+            withoutGps,
+            notes);
+    }
+
+    private static VehicleAssignmentResolution ResolveAssignment(
+        IReadOnlyList<TechnicianVehicleAssignment> all,
+        string technicianExternalId,
+        DateTimeOffset at)
+    {
+        var matches = all
+            .Where(item => string.Equals(item.TechnicianExternalId, technicianExternalId, StringComparison.Ordinal))
+            .ToArray();
+        var uncertainTransfer = matches
+            .Where(item => item.PreviousObservedAt is not null
+                && item.ValidFrom > item.PreviousObservedAt
+                && item.EvidenceReference is not null
+                && item.EvidenceReference.Contains("SyncMomentIsNotConfirmedTransferTime=true", StringComparison.Ordinal))
+            .FirstOrDefault(item => at > item.PreviousObservedAt!.Value && at < item.ValidFrom);
+        if (uncertainTransfer is not null)
+        {
+            var windowAssignments = matches.Where(item =>
+                    item.ObjectId == uncertainTransfer.ObjectId
+                    || item.ValidTo == uncertainTransfer.ValidFrom)
+                .OrderBy(item => item.ValidFrom)
+                .ToArray();
+            return new(
+                VehicleAssignmentResolutionStatus.AmbiguousVehicleAssignment,
+                at,
+                technicianExternalId,
+                null,
+                windowAssignments,
+                $"Voertuigtransfer alleen waargenomen tussen {uncertainTransfer.PreviousObservedAt:O} en {uncertainTransfer.ValidFrom:O}.");
+        }
+
+        matches = matches.Where(item => item.IsValidAt(at)).OrderBy(item => item.ValidFrom).ToArray();
+        return matches.Length switch
+        {
+            0 => new(
+                VehicleAssignmentResolutionStatus.InsufficientVehicleAssignment,
+                at,
+                technicianExternalId,
+                null,
+                matches,
+                "Geen tijdsgeldige voertuigtoewijzing; DriverId wordt niet als fallback gebruikt."),
+            1 => new(
+                VehicleAssignmentResolutionStatus.Resolved,
+                at,
+                technicianExternalId,
+                matches[0].ObjectId,
+                matches,
+                "Eén tijdsgeldige ObjectId-toewijzing."),
+            _ => new(
+                VehicleAssignmentResolutionStatus.AmbiguousVehicleAssignment,
+                at,
+                technicianExternalId,
+                null,
+                matches,
+                $"{matches.Length} overlappende tijdsgeldige voertuigtoewijzingen."),
+        };
+    }
+
+    private static List<StandbyGpsTripEvidence> FilterTrips(
+        IReadOnlyList<NormalizedPilotTrip> trips,
+        VehicleAssignmentResolution resolution)
+    {
+        if (resolution.Status != VehicleAssignmentResolutionStatus.Resolved
+            || string.IsNullOrWhiteSpace(resolution.ObjectId))
+        {
+            return [];
+        }
+
+        var plate = resolution.Assignments.Count == 1
+            ? resolution.Assignments[0].RegistrationPlateSnapshot
+            : null;
+        return trips
+            .Where(item =>
+                string.Equals(item.ObjectId, resolution.ObjectId, StringComparison.OrdinalIgnoreCase)
+                || (string.IsNullOrWhiteSpace(item.ObjectId)
+                    && !string.IsNullOrWhiteSpace(item.VehiclePlate)
+                    && !string.IsNullOrWhiteSpace(plate)
+                    && NormalizePlate(item.VehiclePlate) == NormalizePlate(plate!)))
+            .OrderBy(item => item.StartDateTime)
+            .Select(item => new StandbyGpsTripEvidence(
+                item.ExternalId,
+                item.StartDateTime,
+                item.EndDateTime,
+                item.DistanceKilometres,
+                item.DrivingMinutes,
+                item.StartAddress,
+                item.EndAddress,
+                item.ObjectId,
+                item.VehiclePlate))
+            .ToList();
+    }
+
+    private static string NormalizePlate(string value) =>
+        new(value.Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
+}

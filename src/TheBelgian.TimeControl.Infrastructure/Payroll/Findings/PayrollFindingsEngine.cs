@@ -17,18 +17,27 @@ public static class PayrollFindingsEngine
         IReadOnlyList<NormalizedPerformanceEntry> performances,
         IReadOnlyList<PayrollPlanningReservation> planning,
         IReadOnlyDictionary<string, decimal?> legacyDifferenceByResource,
-        int planningQueryCount)
+        int planningQueryCount,
+        IReadOnlyList<StandbyGpsDayEvidence>? standbyGps = null,
+        int gpsQueryCount = 0,
+        string? gpsSourceNotes = null)
     {
         var special = SpecialProjectTimeControl.Evaluate(performances, planning, legacyDifferenceByResource);
         var overlaps = OverlapControl.Evaluate(performances);
-        var findings = special.Concat(overlaps)
+        var standby = StandbyControl.Evaluate(performances, planning, standbyGps ?? []);
+        var findings = special.Concat(overlaps).Concat(standby)
             .OrderBy(item => item.ResourceId, StringComparer.Ordinal)
             .ThenByDescending(item => item.Severity)
             .ThenBy(item => item.Date)
             .ThenBy(item => item.FindingKey, StringComparer.Ordinal)
             .ToList();
 
-        return new PayrollFindingsRunResult(findings, planningQueryCount, PlanningSourceNotes);
+        return new PayrollFindingsRunResult(
+            findings,
+            planningQueryCount + gpsQueryCount,
+            PlanningSourceNotes,
+            gpsQueryCount,
+            gpsSourceNotes);
     }
 
     public static PayrollFindingRecord ToRecord(int shadowMonthId, PayrollFinding finding) =>
@@ -51,5 +60,11 @@ public static class PayrollFindingsEngine
             OverlapHours = finding.OverlapHours,
             SuggestedOvertimeAdjustmentHours = finding.SuggestedOvertimeAdjustmentHours,
             LegacyDifferenceHours = finding.LegacyDifferenceHours,
+            SuggestedPayableStart = finding.SuggestedPayableStart,
+            SuggestedPayableEnd = finding.SuggestedPayableEnd,
+            SuggestedPayableHours = finding.SuggestedPayableHours,
+            SuggestedProjectId = finding.SuggestedProjectId,
+            SuggestedBonNr = finding.SuggestedBonNr,
+            GpsClassification = finding.GpsClassification,
         };
 }

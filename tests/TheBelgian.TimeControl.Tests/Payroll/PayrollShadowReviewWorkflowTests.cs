@@ -116,6 +116,7 @@ public sealed class PayrollShadowReviewWorkflowTests
                 new TestPerformanceSource(),
                 new TestCalendarSource(),
                 new EmptyPayrollPlanningSource(),
+                new EmptyPayrollStandbyGpsSource(),
                 new PayrollShadowCalculationService(),
                 payrollOptions,
                 TimeProvider.System);

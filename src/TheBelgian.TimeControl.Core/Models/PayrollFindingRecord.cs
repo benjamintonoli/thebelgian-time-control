@@ -22,4 +22,10 @@ public sealed class PayrollFindingRecord
     public decimal? OverlapHours { get; set; }
     public decimal? SuggestedOvertimeAdjustmentHours { get; set; }
     public decimal? LegacyDifferenceHours { get; set; }
+    public DateTimeOffset? SuggestedPayableStart { get; set; }
+    public DateTimeOffset? SuggestedPayableEnd { get; set; }
+    public decimal? SuggestedPayableHours { get; set; }
+    public string? SuggestedProjectId { get; set; }
+    public string? SuggestedBonNr { get; set; }
+    public string? GpsClassification { get; set; }
 }

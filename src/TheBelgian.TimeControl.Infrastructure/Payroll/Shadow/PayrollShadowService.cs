@@ -23,6 +23,7 @@ internal sealed class PayrollShadowService(
     IPayrollPerformanceSource performanceSource,
     IPayrollCalendarSource calendarSource,
     IPayrollPlanningSource planningSource,
+    IPayrollStandbyGpsSource standbyGpsSource,
     PayrollShadowCalculationService calculationService,
     IOptions<PayrollShadowOptions> options,
     TimeProvider timeProvider) : IPayrollShadowService
@@ -1337,6 +1338,13 @@ internal sealed class PayrollShadowService(
                 or PayrollFindingType.Project200ExceedsPlanning,
             "PROJECT300" => type is PayrollFindingType.Project300WithoutPlanning,
             "OVERLAP" => type is PayrollFindingType.OverlappingPerformances,
+            "STANDBY" => type is PayrollFindingType.StandbyPhoneExceeds15Min
+                or PayrollFindingType.StandbyStartMismatch
+                or PayrollFindingType.StandbyEndMismatch
+                or PayrollFindingType.StandbyDurationMismatch
+                or PayrollFindingType.StandbyPossibleWrongDossier
+                or PayrollFindingType.StandbyAmbiguousEvidence
+                or PayrollFindingType.StandbyNoGpsData,
             _ => false,
         };
 
@@ -1379,6 +1387,18 @@ internal sealed class PayrollShadowService(
         var planningQueryCount = planningSource is PlenionPayrollPlanningReader planningReader
             ? planningReader.LastQueryCount
             : 1;
+        var standbyPairs = performances
+            .Where(item => !item.IsCalendarSynthetic && (item.IsStandby || item.HfdTaakId == 23))
+            .Select(item => (item.ResourceId, item.Date))
+            .Distinct()
+            .ToArray();
+        var standbyGps = standbyPairs.Length == 0
+            ? new StandbyGpsBatchResult([], 0, 0, 0, 0, 0, "No standby rows.")
+            : await standbyGpsSource.ReadStandbyGpsAsync(
+                period.PeriodStart,
+                period.PeriodEnd,
+                standbyPairs,
+                cancellationToken);
         var calendarRows = await calendarSource.ReadCalendarRowsAsync(
             period.PeriodStart,
             period.PeriodEnd,
@@ -1432,7 +1452,10 @@ internal sealed class PayrollShadowService(
             performances,
             planning,
             legacyDiff,
-            planningQueryCount);
+            planningQueryCount,
+            standbyGps.Days,
+            standbyGps.ApiCallCount,
+            standbyGps.Notes);
 
         return new SnapshotMaterial(configurationSnapshotJson, rows, findingsRun);
     }

@@ -18,7 +18,13 @@ public sealed record PayrollFinding(
     decimal? BookedHours = null,
     decimal? OverlapHours = null,
     decimal? SuggestedOvertimeAdjustmentHours = null,
-    decimal? LegacyDifferenceHours = null);
+    decimal? LegacyDifferenceHours = null,
+    DateTimeOffset? SuggestedPayableStart = null,
+    DateTimeOffset? SuggestedPayableEnd = null,
+    decimal? SuggestedPayableHours = null,
+    string? SuggestedProjectId = null,
+    string? SuggestedBonNr = null,
+    string? GpsClassification = null);
 
 public sealed record PayrollPlanningReservation(
     long IdCalendar,
@@ -48,7 +54,42 @@ public sealed record PayrollPlanningReservation(
     }
 }
 
+public sealed record StandbyGpsTripEvidence(
+    string TripId,
+    DateTimeOffset Start,
+    DateTimeOffset End,
+    decimal DistanceKilometres,
+    int DrivingMinutes,
+    string? StartAddress,
+    string? EndAddress,
+    string? ObjectId,
+    string? VehiclePlate);
+
+public sealed record StandbyGpsDayEvidence(
+    string ResourceId,
+    DateOnly Date,
+    bool HasVehicleMapping,
+    bool MappingAmbiguous,
+    string? ObjectId,
+    string? RegistrationPlate,
+    string MappingReason,
+    IReadOnlyList<StandbyGpsTripEvidence> Trips)
+{
+    public bool HasUsableTrips => Trips.Count > 0;
+}
+
+public sealed record StandbyGpsBatchResult(
+    IReadOnlyList<StandbyGpsDayEvidence> Days,
+    int ApiCallCount,
+    int MappedResources,
+    int UnmappedResources,
+    int ResourcesWithGps,
+    int ResourcesWithoutGps,
+    string Notes);
+
 public sealed record PayrollFindingsRunResult(
     IReadOnlyList<PayrollFinding> Findings,
     int QueryCount,
-    string PlanningSourceNotes);
+    string PlanningSourceNotes,
+    int GpsQueryCount = 0,
+    string? GpsSourceNotes = null);

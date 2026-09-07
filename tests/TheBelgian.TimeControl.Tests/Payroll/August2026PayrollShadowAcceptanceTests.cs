@@ -198,6 +198,7 @@ public sealed class PayrollShadowAcceptanceInvariantTests
                 new TestPerformanceSource(),
                 new TestCalendarSource(),
                 new EmptyPayrollPlanningSource(),
+                new EmptyPayrollStandbyGpsSource(),
                 new PayrollShadowCalculationService(),
                 Options.Create(new PayrollShadowOptions { Enabled = true, AdminUiEnabled = true }),
                 TimeProvider.System);
@@ -841,6 +842,7 @@ public sealed class August2026PayrollShadowAcceptanceTests(ITestOutputHelper out
                 performanceSource,
                 calendarSource,
                 new EmptyPayrollPlanningSource(),
+                new EmptyPayrollStandbyGpsSource(),
                 new PayrollShadowCalculationService(),
                 Options.Create(new PayrollShadowOptions { Enabled = true, AdminUiEnabled = true }),
                 TimeProvider.System);

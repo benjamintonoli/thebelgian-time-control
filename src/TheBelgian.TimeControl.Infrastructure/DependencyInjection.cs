@@ -246,12 +246,15 @@ public static class DependencyInjection
         services.AddScoped<PlenionPayrollReader>();
         services.AddScoped<PlenionPayrollCalendarReader>();
         services.AddScoped<PlenionPayrollPlanningReader>();
+        services.AddScoped<PayrollStandbyGpsSource>();
         services.AddScoped<IPayrollPerformanceSource>(provider =>
             provider.GetRequiredService<PlenionPayrollReader>());
         services.AddScoped<IPayrollCalendarSource>(provider =>
             provider.GetRequiredService<PlenionPayrollCalendarReader>());
         services.AddScoped<IPayrollPlanningSource>(provider =>
             provider.GetRequiredService<PlenionPayrollPlanningReader>());
+        services.AddScoped<IPayrollStandbyGpsSource>(provider =>
+            provider.GetRequiredService<PayrollStandbyGpsSource>());
         services.AddScoped<IPayrollShadowService, PayrollShadowService>();
         return services;
     }
@@ -587,6 +590,23 @@ public static class DependencyInjection
                 ON "PayrollFindingRecords" ("ShadowMonthId", "ResourceId");
             """,
             cancellationToken);
+        foreach (var column in new (string Name, string Definition)[]
+                 {
+                     ("SuggestedPayableStart", "TEXT NULL"),
+                     ("SuggestedPayableEnd", "TEXT NULL"),
+                     ("SuggestedPayableHours", "REAL NULL"),
+                     ("SuggestedProjectId", "TEXT NULL"),
+                     ("SuggestedBonNr", "TEXT NULL"),
+                     ("GpsClassification", "TEXT NULL"),
+                 })
+        {
+            await EnsureColumnAsync(
+                context,
+                "PayrollFindingRecords",
+                column.Name,
+                column.Definition,
+                cancellationToken);
+        }
         await EnsureColumnAsync(
             context,
             "TechnicianVehicleAssignments",

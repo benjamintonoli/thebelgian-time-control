@@ -53,6 +53,13 @@ public static class PayrollReviewLabels
             PayrollFindingType.Project100TrainingInOvertime => "Toolbox veroorzaakt overuren",
             PayrollFindingType.Project100ExceedsPlannedDuration => "Toolbox langer dan gepland",
             PayrollFindingType.OverlappingPerformances => "Dubbele uren",
+            PayrollFindingType.StandbyPhoneExceeds15Min => "Wachtdienst telefonisch langer dan 15 min",
+            PayrollFindingType.StandbyStartMismatch => "Wachtdienst start wijkt af van GPS",
+            PayrollFindingType.StandbyEndMismatch => "Wachtdienst einde wijkt af van GPS",
+            PayrollFindingType.StandbyDurationMismatch => "Wachtdienst duur wijkt af van GPS",
+            PayrollFindingType.StandbyPossibleWrongDossier => "Wachtdienst mogelijk op verkeerd dossier",
+            PayrollFindingType.StandbyAmbiguousEvidence => "Wachtdienst GPS-bewijs onduidelijk",
+            PayrollFindingType.StandbyNoGpsData => "Wachtdienst zonder GPS-bewijs",
             _ => type.ToString(),
         };
 
