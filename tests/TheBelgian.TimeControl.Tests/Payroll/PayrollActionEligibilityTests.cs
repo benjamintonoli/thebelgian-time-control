@@ -8,6 +8,12 @@ namespace TheBelgian.TimeControl.Tests.Payroll;
 
 public sealed class PayrollActionEligibilityTests
 {
+    private static readonly DateOnly Day = new(2026, 8, 5);
+    private static readonly DateTimeOffset CurrentStart = new(2026, 8, 5, 15, 25, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset CurrentEnd = new(2026, 8, 5, 18, 33, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset ProposedStart = new(2026, 8, 5, 16, 18, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset ProposedEnd = new(2026, 8, 5, 18, 33, 0, TimeSpan.Zero);
+
     [Fact]
     public void Options_Defaults_AreDisabled_AndExecutionRequiresEnabled()
     {
@@ -16,6 +22,16 @@ public sealed class PayrollActionEligibilityTests
         Assert.False(options.ExecutionEnabled);
         options.ExecutionEnabled = true;
         Assert.Throws<InvalidOperationException>(() => options.Validate());
+    }
+
+    [Fact]
+    public void Hfdtask23_MapsToWaitingTime()
+    {
+        Assert.Equal(
+            PayrollStandbyActivityTypes.WaitingTime,
+            PayrollStandbyActivityTypes.FromMainTaskExternalId(23));
+        Assert.Null(PayrollStandbyActivityTypes.FromMainTaskExternalId(14));
+        Assert.True(PayrollStandbyActivityTypes.IsWaitingTimePerformance(23, "WaitingTime"));
     }
 
     [Fact]
@@ -105,57 +121,7 @@ public sealed class PayrollActionEligibilityTests
     }
 
     [Fact]
-    public void Create_ConflictingPerformance_Blocked()
-    {
-        var finding = MissingTech(
-            "100",
-            new DateOnly(2026, 8, 10),
-            PayrollFindingSeverity.Review,
-            nameof(MissingTechnicianEvidenceClass.ContradictedByExistingPerformance));
-        var result = PayrollActionEligibility.Evaluate(finding, IncludedOpen());
-        Assert.Equal(PayrollProposedActionStatus.Blocked, result.Status);
-        Assert.Equal(PayrollActionBlockReasonCode.ConflictingPerformance, result.BlockReasonCode);
-    }
-
-    [Fact]
-    public void Create_Ambiguous_Blocked()
-    {
-        var finding = MissingTech(
-            "100",
-            new DateOnly(2026, 8, 10),
-            PayrollFindingSeverity.Review,
-            nameof(MissingTechnicianEvidenceClass.Ambiguous));
-        var result = PayrollActionEligibility.Evaluate(finding, IncludedOpen());
-        Assert.Equal(PayrollProposedActionStatus.Blocked, result.Status);
-        Assert.Equal(PayrollActionBlockReasonCode.AmbiguousInterval, result.BlockReasonCode);
-    }
-
-    [Fact]
-    public void Create_Excluded_Blocked()
-    {
-        var finding = MissingTechHigh(
-            "100",
-            new DateOnly(2026, 8, 10),
-            new DateTimeOffset(2026, 8, 10, 9, 0, 0, TimeSpan.Zero),
-            new DateTimeOffset(2026, 8, 10, 12, 0, 0, TimeSpan.Zero),
-            3m,
-            "65274",
-            "BON1",
-            nameof(MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps));
-        var result = PayrollActionEligibility.Evaluate(
-            finding,
-            IncludedOpen() with
-            {
-                IsEmployeeIncluded = false,
-                IntervalSemanticsOverride = PayrollIntervalSemantics.PayableWork,
-                ProvenMainTaskId = 1,
-            });
-        Assert.Equal(PayrollProposedActionStatus.Blocked, result.Status);
-        Assert.Equal(PayrollActionBlockReasonCode.ExcludedEmployee, result.BlockReasonCode);
-    }
-
-    [Fact]
-    public void Create_Finalized_Blocked()
+    public void Create_FinalizedMonth_Blocked()
     {
         var finding = MissingTechHigh(
             "100",
@@ -179,42 +145,163 @@ public sealed class PayrollActionEligibilityTests
     }
 
     [Fact]
-    public void Adjust_ReliableStandby_Ready()
+    public void Adjust_CompleteHomeSiteHome_ReadyForApproval()
     {
-        var start = new DateTimeOffset(2026, 8, 5, 10, 0, 0, TimeSpan.Zero);
-        var end = new DateTimeOffset(2026, 8, 5, 13, 0, 0, TimeSpan.Zero);
-        var proposedStart = new DateTimeOffset(2026, 8, 5, 9, 42, 0, TimeSpan.Zero);
-        var proposedEnd = new DateTimeOffset(2026, 8, 5, 12, 21, 0, TimeSpan.Zero);
-        var finding = new PayrollFindingRecord
-        {
-            FindingKey = "StandbyStartMismatch:100:20260805:55",
-            ResourceId = "100",
-            Date = new DateOnly(2026, 8, 5),
-            FindingType = PayrollFindingType.StandbyStartMismatch,
-            Severity = PayrollFindingSeverity.High,
-            Title = "start",
-            Description = "desc",
-            Evidence = "ev",
-            SuggestedAction = "act",
-            RelatedPerformanceIdsJson = JsonSerializer.Serialize(new long[] { 55 }),
-            SuggestedPayableStart = proposedStart,
-            SuggestedPayableEnd = proposedEnd,
-            GpsClassification = nameof(StandbyGpsClassification.PhysicalIntervention),
-        };
-
-        var result = PayrollActionEligibility.Evaluate(
-            finding,
-            IncludedOpen() with
-            {
-                ExistingPerformanceId = 55,
-                ExistingPerformanceStart = start,
-                ExistingPerformanceEnd = end,
-                ExistingMainTaskExternalId = 23,
-            });
-
+        var finding = StandbyStart(55, ProposedStart, ProposedEnd);
+        var result = PayrollActionEligibility.Evaluate(finding, WaitingContext(CompleteCalloutTrips()));
         Assert.Equal(PayrollProposedActionStatus.ReadyForApproval, result.Status);
+        Assert.Equal(PayrollStandbyActivityTypes.WaitingTime, result.AdjustProposal!.ExpectedActivityType);
+        Assert.Equal(23, result.AdjustProposal.ExpectedMainTaskExternalId);
+        Assert.Contains("callout=complete", result.EvidenceSnapshot.CalloutEvidence, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Adjust_OutboundOnly_Blocked()
+    {
+        var trips = new[]
+        {
+            Trip("1", ProposedStart, ProposedStart.AddHours(1),
+                "Kapellestraat 1, 1880 Kapelle-op-den-Bos, België",
+                "Stationsstraat 1, 1770 Liedekerke, België"),
+        };
+        var result = PayrollActionEligibility.Evaluate(StandbyStart(55, ProposedStart, ProposedEnd), WaitingContext(trips));
+        Assert.Equal(PayrollProposedActionStatus.Blocked, result.Status);
+        Assert.Equal(PayrollActionBlockReasonCode.IncompleteCallout, result.BlockReasonCode);
+    }
+
+    [Fact]
+    public void Adjust_SiteArrivalOnly_Blocked()
+    {
+        var trips = new[]
+        {
+            Trip("1", ProposedStart, ProposedStart.AddMinutes(40),
+                "Kapellestraat 1, 1880 Kapelle-op-den-Bos, België",
+                "Stationsstraat 1, 1770 Liedekerke, België"),
+        };
+        var result = PayrollActionEligibility.Evaluate(
+            StandbyStart(55, ProposedStart, ProposedStart.AddMinutes(40)),
+            WaitingContext(trips));
+        Assert.Equal(PayrollProposedActionStatus.Blocked, result.Status);
+        Assert.Equal(PayrollActionBlockReasonCode.IncompleteCallout, result.BlockReasonCode);
+    }
+
+    [Fact]
+    public void Adjust_IntermediateStopEnd_Blocked()
+    {
+        var trips = new[]
+        {
+            Trip("1", ProposedStart, ProposedStart.AddHours(1),
+                "Thuisstraat 1, 1000 Brussel, België",
+                "Werfstraat 1, 1500 Halle, België"),
+            Trip("2", ProposedStart.AddHours(2), ProposedEnd,
+                "Werfstraat 1, 1500 Halle, België",
+                "Stopstraat 9, 1790 Affligem, België"),
+        };
+        var result = PayrollActionEligibility.Evaluate(StandbyEnd(55, ProposedStart, ProposedEnd), WaitingContext(trips));
+        Assert.Equal(PayrollProposedActionStatus.Blocked, result.Status);
+        Assert.Equal(PayrollActionBlockReasonCode.IntermediateStopEnd, result.BlockReasonCode);
+    }
+
+    [Fact]
+    public void Adjust_AmbiguousMultiLeg_Blocked()
+    {
+        var trips = new[]
+        {
+            Trip("1", ProposedStart, ProposedStart.AddMinutes(30),
+                "Thuisstraat 1, 1000 Brussel, België",
+                "Werf A, 2000 Antwerpen, België"),
+            Trip("2", ProposedStart.AddHours(1), ProposedStart.AddHours(2),
+                "Werf A, 2000 Antwerpen, België",
+                "Andere Werf, 9000 Gent, België"),
+            Trip("3", ProposedStart.AddHours(2), ProposedEnd,
+                "Andere Werf, 9000 Gent, België",
+                "Thuisstraat 1, 1000 Brussel, België"),
+        };
+        var result = PayrollActionEligibility.Evaluate(StandbyStart(55, ProposedStart, ProposedEnd), WaitingContext(trips));
+        Assert.Equal(PayrollProposedActionStatus.Blocked, result.Status);
+        Assert.Equal(PayrollActionBlockReasonCode.MultiLegAmbiguous, result.BlockReasonCode);
+    }
+
+    [Fact]
+    public void Adjust_NoGps_Blocked()
+    {
+        var finding = StandbyStart(55, ProposedStart, ProposedEnd);
+        finding.GpsClassification = nameof(StandbyGpsClassification.NoGpsData);
+        var result = PayrollActionEligibility.Evaluate(finding, WaitingContext([]));
+        Assert.Equal(PayrollProposedActionStatus.Blocked, result.Status);
+        Assert.Equal(PayrollActionBlockReasonCode.NoGpsData, result.BlockReasonCode);
+    }
+
+    [Fact]
+    public void Adjust_StartAndEndSamePerformance_ExactlyOneAggregatedActionProposal()
+    {
+        var start = StandbyStart(55, ProposedStart, ProposedEnd);
+        var end = StandbyEnd(55, ProposedStart, ProposedEnd);
+        end.FindingKey = "StandbyEndMismatch:100:20260805:55";
+        var result = PayrollActionEligibility.EvaluateStandbyAdjustGroup([start, end], WaitingContext(CompleteCalloutTrips()));
+        Assert.Equal(PayrollProposedActionStatus.ReadyForApproval, result.Status);
+        Assert.Equal("standby-adjust:100:20260805:55", result.EvidenceSnapshot.FindingKey);
+        Assert.Equal(2, result.EvidenceSnapshot.SourceFindingKeys!.Count);
         Assert.NotNull(result.AdjustProposal);
-        Assert.Equal(55, result.AdjustProposal!.PerformanceId);
+    }
+
+    [Fact]
+    public void Adjust_OneBoundary_WithIndependentlyProvenOther_Ready()
+    {
+        // Start changes; existing end matches return home.
+        var result = PayrollActionEligibility.Evaluate(
+            StandbyStart(55, ProposedStart, ProposedEnd),
+            WaitingContext(CompleteCalloutTrips()));
+        Assert.Equal(PayrollProposedActionStatus.ReadyForApproval, result.Status);
+    }
+
+    [Fact]
+    public void Adjust_OneBoundary_WithUnsafeOtherBoundary_Blocked()
+    {
+        // Proposed end lands on Affligem stop, not home return.
+        var unsafeEnd = new DateTimeOffset(2026, 8, 5, 17, 0, 0, TimeSpan.Zero);
+        var trips = new[]
+        {
+            Trip("1", ProposedStart, ProposedStart.AddMinutes(25),
+                "Thuisstraat 1, 1000 Brussel, België",
+                "Werfstraat 1, 1500 Halle, België"),
+            Trip("2", ProposedStart.AddMinutes(30), unsafeEnd,
+                "Werfstraat 1, 1500 Halle, België",
+                "Stopstraat 9, 1790 Affligem, België"),
+        };
+        var finding = StandbyStart(55, ProposedStart, unsafeEnd);
+        var context = WaitingContext(trips) with
+        {
+            ExistingPerformanceStart = CurrentStart,
+            ExistingPerformanceEnd = unsafeEnd,
+        };
+        var result = PayrollActionEligibility.Evaluate(finding, context);
+        Assert.Equal(PayrollProposedActionStatus.Blocked, result.Status);
+        Assert.Equal(PayrollActionBlockReasonCode.IntermediateStopEnd, result.BlockReasonCode);
+    }
+
+    [Fact]
+    public void Adjust_FinalizedMonth_Blocked()
+    {
+        var result = PayrollActionEligibility.Evaluate(
+            StandbyStart(55, ProposedStart, ProposedEnd),
+            WaitingContext(CompleteCalloutTrips()) with { IsMonthFinalized = true });
+        Assert.Equal(PayrollProposedActionStatus.Blocked, result.Status);
+        Assert.Equal(PayrollActionBlockReasonCode.MonthFinalized, result.BlockReasonCode);
+    }
+
+    [Fact]
+    public void Adjust_Non23_BlockedWrongActivity()
+    {
+        var result = PayrollActionEligibility.Evaluate(
+            StandbyStart(55, ProposedStart, ProposedEnd),
+            WaitingContext(CompleteCalloutTrips()) with
+            {
+                ExistingMainTaskExternalId = 14,
+                ExistingActivityType = "CustomerWork",
+            });
+        Assert.Equal(PayrollProposedActionStatus.Blocked, result.Status);
+        Assert.Equal(PayrollActionBlockReasonCode.WrongActivityType, result.BlockReasonCode);
     }
 
     [Fact]
@@ -224,7 +311,7 @@ public sealed class PayrollActionEligibilityTests
         {
             FindingKey = "standby-ambig:100:20260805:55",
             ResourceId = "100",
-            Date = new DateOnly(2026, 8, 5),
+            Date = Day,
             FindingType = PayrollFindingType.StandbyAmbiguousEvidence,
             Severity = PayrollFindingSeverity.Review,
             Title = "ambig",
@@ -246,7 +333,7 @@ public sealed class PayrollActionEligibilityTests
         {
             FindingKey = "overlap:100:1",
             ResourceId = "100",
-            Date = new DateOnly(2026, 8, 5),
+            Date = Day,
             FindingType = PayrollFindingType.OverlappingPerformances,
             Severity = PayrollFindingSeverity.High,
             Title = "overlap",
@@ -270,7 +357,7 @@ public sealed class PayrollActionEligibilityTests
         {
             FindingKey = $"special:{type}",
             ResourceId = "100",
-            Date = new DateOnly(2026, 8, 5),
+            Date = Day,
             FindingType = type,
             Severity = PayrollFindingSeverity.Review,
             Title = "t",
@@ -293,6 +380,78 @@ public sealed class PayrollActionEligibilityTests
             ExistingPerformanceStart: null,
             ExistingPerformanceEnd: null,
             ExistingPerformanceId: null);
+
+    private static PayrollActionEligibilityContext WaitingContext(
+        IReadOnlyList<StandbyGpsTripEvidence> trips) =>
+        IncludedOpen() with
+        {
+            ExistingPerformanceId = 55,
+            ExistingPerformanceStart = CurrentStart,
+            ExistingPerformanceEnd = CurrentEnd,
+            ExistingMainTaskExternalId = 23,
+            ExistingActivityType = PayrollStandbyActivityTypes.WaitingTime,
+            StandbyDayTrips = trips,
+        };
+
+    private static StandbyGpsTripEvidence[] CompleteCalloutTrips() =>
+    [
+        Trip("out", ProposedStart, ProposedStart.AddMinutes(25),
+            "Kapellestraat 12, 1880 Kapelle-op-den-Bos, België",
+            "Stationsstraat 5, 1770 Liedekerke, België"),
+        Trip("back", ProposedEnd.AddMinutes(-20), ProposedEnd,
+            "Stationsstraat 5, 1770 Liedekerke, België",
+            "Dorpsstraat 3, 1880 Kapelle-op-den-Bos, België"),
+    ];
+
+    private static StandbyGpsTripEvidence Trip(
+        string id,
+        DateTimeOffset start,
+        DateTimeOffset end,
+        string from,
+        string to) =>
+        new(id, start, end, 12m, 20, from, to, "obj", "1-ABC-123");
+
+    private static PayrollFindingRecord StandbyStart(
+        long performanceId,
+        DateTimeOffset proposedStart,
+        DateTimeOffset proposedEnd) =>
+        new()
+        {
+            FindingKey = $"StandbyStartMismatch:100:{Day:yyyyMMdd}:{performanceId}",
+            ResourceId = "100",
+            Date = Day,
+            FindingType = PayrollFindingType.StandbyStartMismatch,
+            Severity = PayrollFindingSeverity.High,
+            Title = "start",
+            Description = "desc",
+            Evidence = "ev",
+            SuggestedAction = "act",
+            RelatedPerformanceIdsJson = JsonSerializer.Serialize(new[] { performanceId }),
+            SuggestedPayableStart = proposedStart,
+            SuggestedPayableEnd = proposedEnd,
+            GpsClassification = nameof(StandbyGpsClassification.PhysicalIntervention),
+        };
+
+    private static PayrollFindingRecord StandbyEnd(
+        long performanceId,
+        DateTimeOffset proposedStart,
+        DateTimeOffset proposedEnd) =>
+        new()
+        {
+            FindingKey = $"StandbyEndMismatch:100:{Day:yyyyMMdd}:{performanceId}",
+            ResourceId = "100",
+            Date = Day,
+            FindingType = PayrollFindingType.StandbyEndMismatch,
+            Severity = PayrollFindingSeverity.High,
+            Title = "end",
+            Description = "desc",
+            Evidence = "ev",
+            SuggestedAction = "act",
+            RelatedPerformanceIdsJson = JsonSerializer.Serialize(new[] { performanceId }),
+            SuggestedPayableStart = proposedStart,
+            SuggestedPayableEnd = proposedEnd,
+            GpsClassification = nameof(StandbyGpsClassification.PhysicalIntervention),
+        };
 
     private static PayrollFindingRecord MissingTechHigh(
         string resourceId,

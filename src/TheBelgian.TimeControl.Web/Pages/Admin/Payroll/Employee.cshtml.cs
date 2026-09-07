@@ -5,6 +5,7 @@ using TheBelgian.TimeControl.Core.Configuration;
 using TheBelgian.TimeControl.Core.Interfaces;
 using TheBelgian.TimeControl.Core.Models;
 using TheBelgian.TimeControl.Core.Payroll.Actions;
+using TheBelgian.TimeControl.Core.Payroll.Findings;
 using TheBelgian.TimeControl.Core.Payroll.Models;
 using TheBelgian.TimeControl.Infrastructure.Configuration;
 
@@ -199,9 +200,41 @@ public sealed class EmployeeModel(
                     ResourceId,
                     RequireActor().AuditIdentity,
                     cancellationToken);
-                ActionsByFindingKey = actions
+                var actionsByKey = actions
                     .GroupBy(item => item.FindingKey, StringComparer.Ordinal)
                     .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+
+                // Aggregated standby adjust actions use standby-adjust:{resource}:{date}:{perfId}.
+                foreach (var finding in Detail.Findings)
+                {
+                    if (finding.FindingType is not (PayrollFindingType.StandbyStartMismatch
+                        or PayrollFindingType.StandbyEndMismatch))
+                    {
+                        continue;
+                    }
+
+                    if (actionsByKey.ContainsKey(finding.FindingKey))
+                    {
+                        continue;
+                    }
+
+                    var related = PayrollActionEligibility.ParseRelatedIds(finding.RelatedPerformanceIdsJson);
+                    if (related.Count != 1)
+                    {
+                        continue;
+                    }
+
+                    var aggregateKey = PayrollStandbyActivityTypes.AdjustActionKey(
+                        finding.ResourceId,
+                        finding.Date,
+                        related[0]);
+                    if (actionsByKey.TryGetValue(aggregateKey, out var aggregateAction))
+                    {
+                        actionsByKey[finding.FindingKey] = aggregateAction;
+                    }
+                }
+
+                ActionsByFindingKey = actionsByKey;
             }
             catch (Exception exception)
             {

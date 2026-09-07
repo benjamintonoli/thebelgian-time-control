@@ -2,6 +2,8 @@ using TheBelgian.TimeControl.Core.Payroll.Findings;
 
 namespace TheBelgian.TimeControl.Core.Payroll.Actions;
 
+// Re-export trip evidence for eligibility callers without finding-layer coupling noise.
+
 public sealed record PayrollActionEligibilityContext(
     bool IsEmployeeIncluded,
     bool IsMonthFinalized,
@@ -15,7 +17,15 @@ public sealed record PayrollActionEligibilityContext(
     /// <summary>
     /// When set, overrides automatic GPS-travel classification. Only use when payable work is proven.
     /// </summary>
-    PayrollIntervalSemantics? IntervalSemanticsOverride = null);
+    PayrollIntervalSemantics? IntervalSemanticsOverride = null,
+    /// <summary>Day-level GPS trips for complete-callout assessment (standby adjust).</summary>
+    IReadOnlyList<StandbyGpsTripEvidence>? StandbyDayTrips = null,
+    /// <summary>Optional precomputed callout assessment (tests / overrides).</summary>
+    StandbyCalloutAssessment? CalloutAssessmentOverride = null,
+    /// <summary>True when a StandbyPossibleWrongDossier (or similar) finding exists for the same performance.</summary>
+    bool HasRelatedDossierAmbiguity = false,
+    /// <summary>True when another non-standby performance overlaps the proposed interval.</summary>
+    bool HasConflictingPerformance = false);
 
 public sealed record PayrollActionEligibilityResult(
     PayrollProposedActionType ActionType,
@@ -61,7 +71,10 @@ public sealed record PayrollActionEvidenceSnapshot(
     DateTimeOffset? SuggestedPayableEnd,
     decimal? SuggestedPayableHours,
     string? SuggestedProjectId,
-    string? SuggestedBonNr);
+    string? SuggestedBonNr,
+    IReadOnlyList<string>? SourceFindingKeys = null,
+    IReadOnlyList<int>? SourceFindingIds = null,
+    string? CalloutEvidence = null);
 
 public sealed record PayrollActionConfirmationView(
     Guid ActionId,
@@ -127,4 +140,7 @@ public sealed class PayrollActionEvidenceSnapshotDto
     public decimal? SuggestedPayableHours { get; set; }
     public string? SuggestedProjectId { get; set; }
     public string? SuggestedBonNr { get; set; }
+    public string[]? SourceFindingKeys { get; set; }
+    public int[]? SourceFindingIds { get; set; }
+    public string? CalloutEvidence { get; set; }
 }

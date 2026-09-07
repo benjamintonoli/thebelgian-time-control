@@ -225,6 +225,100 @@ public sealed class PayrollActionServiceTests
         Assert.Equal(2, calls);
     }
 
+    [Fact]
+    public async Task Propose_StartAndEndSamePerformance_CreatesExactlyOneAdjustAction()
+    {
+        await using var fx = await Fixture.CreateAsync();
+        var date = new DateOnly(2026, 8, 15);
+        var start = new DateTimeOffset(2026, 8, 15, 17, 30, 0, TimeSpan.Zero);
+        var end = new DateTimeOffset(2026, 8, 15, 19, 30, 0, TimeSpan.Zero);
+        var proposedStart = new DateTimeOffset(2026, 8, 15, 18, 17, 0, TimeSpan.Zero);
+        var proposedEnd = new DateTimeOffset(2026, 8, 15, 20, 7, 0, TimeSpan.Zero);
+        const long perfId = 281765;
+
+        fx.PerformanceSource.Rows =
+        [
+            new NormalizedPerformanceEntry(
+                perfId,
+                perfId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                "100",
+                date,
+                start,
+                end,
+                2m,
+                120m,
+                TimeSpan.FromHours(2),
+                new PauseNormalizationResult(PauseParseStatus.Missing, null, PauseSourceKind.Unspecified, null),
+                null,
+                23,
+                "300",
+                null,
+                null,
+                null,
+                null,
+                null,
+                perfId,
+                IsStandby: true),
+        ];
+
+        fx.GpsSource.Days =
+        [
+            new StandbyGpsDayEvidence(
+                "100",
+                date,
+                true,
+                false,
+                "obj",
+                "1-ABC",
+                "mapped",
+                [
+                    new StandbyGpsTripEvidence(
+                        "out",
+                        proposedStart,
+                        proposedStart.AddMinutes(30),
+                        15m,
+                        25,
+                        "Thuisstraat 1, 1000 Brussel, België",
+                        "Werf, 2000 Antwerpen, België",
+                        "obj",
+                        "1-ABC"),
+                    new StandbyGpsTripEvidence(
+                        "back",
+                        proposedEnd.AddMinutes(-25),
+                        proposedEnd,
+                        15m,
+                        25,
+                        "Werf, 2000 Antwerpen, België",
+                        "Thuisstraat 1, 1000 Brussel, België",
+                        "obj",
+                        "1-ABC"),
+                ]),
+        ];
+
+        await fx.SeedStandbyMismatchAsync(
+            "100",
+            date,
+            PayrollFindingType.StandbyStartMismatch,
+            perfId,
+            proposedStart,
+            proposedEnd);
+        await fx.SeedStandbyMismatchAsync(
+            "100",
+            date,
+            PayrollFindingType.StandbyEndMismatch,
+            perfId,
+            proposedStart,
+            proposedEnd);
+
+        var actions = await fx.Service.ProposeFromFindingsAsync(2026, 8, "100", "tester", default);
+        var adjust = Assert.Single(actions, item =>
+            item.ActionType == PayrollProposedActionType.AdjustExistingPerformanceTime
+            && item.Status != PayrollProposedActionStatus.Cancelled);
+        Assert.Equal($"standby-adjust:100:{date:yyyyMMdd}:{perfId}", adjust.FindingKey);
+        Assert.Equal(PayrollProposedActionStatus.ReadyForApproval, adjust.Status);
+        Assert.Contains("WaitingTime", adjust.ProposalSnapshotJson, StringComparison.Ordinal);
+    }
+
     private static NormalizedPerformanceEntry Perf(
         string resourceId,
         DateOnly date,
@@ -263,7 +357,8 @@ public sealed class PayrollActionServiceTests
             PayrollActionService service,
             FakeShadow shadow,
             FakePerformanceSource performances,
-            FakeCreateClient createClient)
+            FakeCreateClient createClient,
+            FakeStandbyGpsSource gpsSource)
         {
             _connection = connection;
             Factory = factory;
@@ -271,6 +366,7 @@ public sealed class PayrollActionServiceTests
             Shadow = shadow;
             PerformanceSource = performances;
             CreateClient = createClient;
+            GpsSource = gpsSource;
         }
 
         public IDbContextFactory<TimeControlDbContext> Factory { get; }
@@ -278,6 +374,7 @@ public sealed class PayrollActionServiceTests
         public FakeShadow Shadow { get; }
         public FakePerformanceSource PerformanceSource { get; }
         public FakeCreateClient CreateClient { get; }
+        public FakeStandbyGpsSource GpsSource { get; }
 
         public static async Task<Fixture> CreateAsync(
             bool executionEnabled = true,
@@ -343,10 +440,12 @@ public sealed class PayrollActionServiceTests
             var shadow = new FakeShadow();
             var performances = new FakePerformanceSource();
             var createClient = new FakeCreateClient();
+            var gpsSource = new FakeStandbyGpsSource();
             var service = new PayrollActionService(
                 factory,
                 shadow,
                 performances,
+                gpsSource,
                 new MockPlenionCorrectionClient(),
                 createClient,
                 Options.Create(new PayrollActionsOptions
@@ -362,7 +461,40 @@ public sealed class PayrollActionServiceTests
                     BaseUrl = "http://localhost",
                 }),
                 TimeProvider.System);
-            return new Fixture(connection, factory, service, shadow, performances, createClient);
+            return new Fixture(connection, factory, service, shadow, performances, createClient, gpsSource);
+        }
+
+        public async Task<PayrollFindingRecord> SeedStandbyMismatchAsync(
+            string resourceId,
+            DateOnly date,
+            PayrollFindingType type,
+            long performanceId,
+            DateTimeOffset proposedStart,
+            DateTimeOffset proposedEnd)
+        {
+            await using var context = await Factory.CreateDbContextAsync();
+            var monthId = await context.PayrollShadowMonths.Select(item => item.Id).SingleAsync();
+            var finding = new PayrollFindingRecord
+            {
+                ShadowMonthId = monthId,
+                FindingKey = $"{type}:{resourceId}:{date:yyyyMMdd}:{performanceId}",
+                ResourceId = resourceId,
+                Date = date,
+                FindingType = type,
+                Severity = PayrollFindingSeverity.High,
+                Status = PayrollFindingStatus.Open,
+                Title = type.ToString(),
+                Description = "desc",
+                Evidence = "evidence",
+                SuggestedAction = "act",
+                RelatedPerformanceIdsJson = JsonSerializer.Serialize(new[] { performanceId }),
+                SuggestedPayableStart = proposedStart,
+                SuggestedPayableEnd = proposedEnd,
+                GpsClassification = nameof(StandbyGpsClassification.PhysicalIntervention),
+            };
+            context.PayrollFindingRecords.Add(finding);
+            await context.SaveChangesAsync();
+            return finding;
         }
 
         public async Task<PayrollFindingRecord> SeedMissingTechFindingAsync(
@@ -501,6 +633,18 @@ public sealed class PayrollActionServiceTests
             CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<NormalizedPerformanceEntry>>(
                 Rows.Where(item => resourceIds.Contains(item.ResourceId)).ToList());
+    }
+
+    private sealed class FakeStandbyGpsSource : IPayrollStandbyGpsSource
+    {
+        public List<StandbyGpsDayEvidence> Days { get; set; } = [];
+
+        public Task<StandbyGpsBatchResult> ReadStandbyGpsAsync(
+            DateOnly fromDate,
+            DateOnly throughDate,
+            IReadOnlyCollection<(string ResourceId, string DisplayName, DateOnly Date)> standbyResourceDates,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new StandbyGpsBatchResult(Days, 0, 0, 0, Days.Count, 0, "test"));
     }
 
     private sealed class FakeCreateClient : IPlenionPerformanceCreateClient

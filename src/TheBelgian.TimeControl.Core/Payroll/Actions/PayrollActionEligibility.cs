@@ -75,10 +75,38 @@ public static class PayrollActionEligibility
             PayrollFindingType.MissingPlannedTechnicianPerformance =>
                 EvaluateCreate(finding, evidence, context),
             PayrollFindingType.StandbyStartMismatch or PayrollFindingType.StandbyEndMismatch =>
-                EvaluateAdjust(finding, evidence, context),
+                EvaluateAdjust([finding], evidence, context),
             _ => BlockUnsupported(finding, evidence),
         };
     }
+
+    /// <summary>
+    /// Evaluates one aggregated ADJUST action for all Start/End mismatch findings on the same performance.
+    /// </summary>
+    public static PayrollActionEligibilityResult EvaluateStandbyAdjustGroup(
+        IReadOnlyList<PayrollFindingRecord> findings,
+        PayrollActionEligibilityContext context)
+    {
+        if (findings.Count == 0)
+        {
+            throw new ArgumentException("At least one standby mismatch finding is required.", nameof(findings));
+        }
+
+        if (findings.Any(item =>
+                item.FindingType is not (PayrollFindingType.StandbyStartMismatch
+                    or PayrollFindingType.StandbyEndMismatch)))
+        {
+            throw new ArgumentException("Only StandbyStart/EndMismatch findings may be aggregated.", nameof(findings));
+        }
+
+        var primary = findings
+            .OrderBy(item => item.FindingType)
+            .ThenBy(item => item.FindingKey, StringComparer.Ordinal)
+            .First();
+        var evidence = BuildAggregatedEvidenceSnapshot(findings, primary);
+        return EvaluateAdjust(findings, evidence, context);
+    }
+
 
     public static string ComputeSourceRevision(
         PayrollActionEvidenceSnapshot evidence,
@@ -214,11 +242,12 @@ public static class PayrollActionEligibility
     }
 
     private static PayrollActionEligibilityResult EvaluateAdjust(
-        PayrollFindingRecord finding,
+        IReadOnlyList<PayrollFindingRecord> findings,
         PayrollActionEvidenceSnapshot evidence,
         PayrollActionEligibilityContext context)
     {
         const PayrollProposedActionType actionType = PayrollProposedActionType.AdjustExistingPerformanceTime;
+        var primary = findings[0];
 
         if (!context.IsEmployeeIncluded)
         {
@@ -234,24 +263,59 @@ public static class PayrollActionEligibility
                 "Payrollmaand is afgesloten; geen correctievoorstel.");
         }
 
-        if (finding.Severity != PayrollFindingSeverity.High)
+        if (findings.Any(item => item.Severity != PayrollFindingSeverity.High))
         {
             return Block(actionType, evidence, PayrollIntervalSemantics.PayableWork,
                 PayrollActionBlockReasonCode.SeverityInsufficient,
                 "Alleen betrouwbare High wachtdienst start/eind-mismatches kunnen een correctievoorstel worden.");
         }
 
-        if (!string.Equals(
-                finding.GpsClassification,
+        if (findings.Any(IsNoGps)
+            || findings.Any(item => string.Equals(
+                item.GpsClassification,
+                nameof(StandbyGpsClassification.NoGpsData),
+                StringComparison.Ordinal)))
+        {
+            return Block(actionType, evidence, PayrollIntervalSemantics.Ambiguous,
+                PayrollActionBlockReasonCode.NoGpsData,
+                "Geen bruikbare GPS-data; wachtdienstcorrectie is geblokkeerd.");
+        }
+
+        if (findings.Any(item => !string.Equals(
+                item.GpsClassification,
                 nameof(StandbyGpsClassification.PhysicalIntervention),
-                StringComparison.Ordinal))
+                StringComparison.Ordinal)))
         {
             return Block(actionType, evidence, PayrollIntervalSemantics.Ambiguous,
                 PayrollActionBlockReasonCode.AmbiguousStandbyEvidence,
                 "Wachtdienst-GPS is niet betrouwbaar genoeg voor een tijdsuggestie.");
         }
 
-        var related = ParseRelatedIds(finding.RelatedPerformanceIdsJson);
+        if (findings.Any(IsAmbiguousOrContradicted))
+        {
+            return Block(actionType, evidence, PayrollIntervalSemantics.Ambiguous,
+                PayrollActionBlockReasonCode.AmbiguousStandbyEvidence,
+                "Wachtdienst-GPS is ambigu; correctie is geblokkeerd.");
+        }
+
+        if (context.HasRelatedDossierAmbiguity)
+        {
+            return Block(actionType, evidence, PayrollIntervalSemantics.Ambiguous,
+                PayrollActionBlockReasonCode.ConflictingDossierAmbiguity,
+                "Tijdgerelateerde dossier-ambiguïteit; correctie is geblokkeerd.");
+        }
+
+        if (context.HasConflictingPerformance)
+        {
+            return Block(actionType, evidence, PayrollIntervalSemantics.PayableWork,
+                PayrollActionBlockReasonCode.ConflictingPerformance,
+                "Conflicterende prestatie overlapping het voorgestelde callout-venster.");
+        }
+
+        var related = findings
+            .SelectMany(item => ParseRelatedIds(item.RelatedPerformanceIdsJson))
+            .Distinct()
+            .ToList();
         if (related.Count != 1
             || context.ExistingPerformanceId is null
             || related[0] != context.ExistingPerformanceId.Value)
@@ -261,8 +325,32 @@ public static class PayrollActionEligibility
                 "Correctie vereist precies één gerelateerde prestatie met bekende huidige VAN/TOT.");
         }
 
-        if (finding.SuggestedPayableStart is null
-            || finding.SuggestedPayableEnd is null
+        var activityType = context.ExistingActivityType
+            ?? PayrollStandbyActivityTypes.FromMainTaskExternalId(context.ExistingMainTaskExternalId);
+        if (!PayrollStandbyActivityTypes.IsWaitingTimePerformance(
+                context.ExistingMainTaskExternalId,
+                activityType))
+        {
+            return Block(actionType, evidence, PayrollIntervalSemantics.PayableWork,
+                PayrollActionBlockReasonCode.WrongActivityType,
+                "Wachtdienstcorrectie vereist IDHFDTAAK=23 en activity WaitingTime; geen fake mapping toegestaan.");
+        }
+
+        var proposedStart = findings
+            .Select(item => item.SuggestedPayableStart)
+            .Where(item => item.HasValue)
+            .Select(item => item!.Value)
+            .DefaultIfEmpty()
+            .Min();
+        var proposedEnd = findings
+            .Select(item => item.SuggestedPayableEnd)
+            .Where(item => item.HasValue)
+            .Select(item => item!.Value)
+            .DefaultIfEmpty()
+            .Max();
+
+        if (proposedStart == default
+            || proposedEnd == default
             || context.ExistingPerformanceStart is null
             || context.ExistingPerformanceEnd is null)
         {
@@ -271,16 +359,55 @@ public static class PayrollActionEligibility
                 "Correctievereisten ontbreken (huidige of voorgestelde VAN/TOT).");
         }
 
+        if (proposedEnd <= proposedStart)
+        {
+            return Block(actionType, evidence, PayrollIntervalSemantics.PayableWork,
+                PayrollActionBlockReasonCode.NonPositiveDuration,
+                "Voorstelduur is niet positief; correctie is geblokkeerd.");
+        }
+
+        var callout = context.CalloutAssessmentOverride
+            ?? StandbyCalloutEvidence.Assess(
+                proposedStart,
+                proposedEnd,
+                context.ExistingPerformanceStart.Value,
+                context.ExistingPerformanceEnd.Value,
+                context.StandbyDayTrips ?? []);
+
+        if (!callout.IsComplete)
+        {
+            return Block(
+                actionType,
+                evidence with { CalloutEvidence = callout.EvidenceNote },
+                PayrollIntervalSemantics.Ambiguous,
+                callout.BlockReasonCode,
+                callout.BlockReason ?? "Incomplete fysieke callout; correctie is geblokkeerd.");
+        }
+
         var proposal = new PayrollActionAdjustProposal(
             context.ExistingPerformanceId.Value,
             context.ExistingPerformanceStart.Value,
             context.ExistingPerformanceEnd.Value,
-            finding.SuggestedPayableStart.Value,
-            finding.SuggestedPayableEnd.Value,
-            context.ExistingActivityType,
-            context.ExistingMainTaskExternalId);
+            proposedStart,
+            proposedEnd,
+            PayrollStandbyActivityTypes.WaitingTime,
+            PayrollStandbyActivityTypes.WaitingMainTaskExternalId);
 
-        var revision = ComputeSourceRevision(evidence, null, proposal);
+        var enrichedEvidence = evidence with
+        {
+            CalloutEvidence = callout.EvidenceNote,
+            Evidence = string.IsNullOrWhiteSpace(evidence.Evidence)
+                ? callout.EvidenceNote
+                : evidence.Evidence + " | " + callout.EvidenceNote,
+            SuggestedPayableStart = proposedStart,
+            SuggestedPayableEnd = proposedEnd,
+            SuggestedPayableHours = Math.Round(
+                (decimal)(proposedEnd - proposedStart).TotalHours,
+                2,
+                MidpointRounding.AwayFromZero),
+        };
+
+        var revision = ComputeSourceRevision(enrichedEvidence, null, proposal);
         return new PayrollActionEligibilityResult(
             actionType,
             PayrollProposedActionStatus.ReadyForApproval,
@@ -289,9 +416,54 @@ public static class PayrollActionEligibility
             null,
             null,
             proposal,
-            evidence,
+            enrichedEvidence,
             revision);
     }
+
+    private static PayrollActionEvidenceSnapshot BuildAggregatedEvidenceSnapshot(
+        IReadOnlyList<PayrollFindingRecord> findings,
+        PayrollFindingRecord primary)
+    {
+        var keys = findings
+            .Select(item => item.FindingKey)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(item => item, StringComparer.Ordinal)
+            .ToArray();
+        var ids = findings
+            .Where(item => item.Id > 0)
+            .Select(item => item.Id)
+            .Distinct()
+            .OrderBy(item => item)
+            .ToArray();
+        var related = findings
+            .SelectMany(item => ParseRelatedIds(item.RelatedPerformanceIdsJson))
+            .Distinct()
+            .ToArray();
+        var performanceId = related.Length == 1 ? related[0] : 0L;
+        var actionKey = performanceId > 0
+            ? PayrollStandbyActivityTypes.AdjustActionKey(primary.ResourceId, primary.Date, performanceId)
+            : primary.FindingKey;
+
+        return new PayrollActionEvidenceSnapshot(
+            actionKey,
+            primary.FindingType,
+            findings.Max(item => item.Severity),
+            primary.GpsClassification,
+            string.Join(" || ", findings.Select(item => item.Evidence).Where(item => !string.IsNullOrWhiteSpace(item))),
+            findings.Count == 1
+                ? primary.Title
+                : "Wachtdienst start/eind correctie (geaggregeerd)",
+            string.Join(" ", findings.Select(item => item.Description).Where(item => !string.IsNullOrWhiteSpace(item))),
+            related,
+            findings.Select(item => item.SuggestedPayableStart).Where(item => item.HasValue).Min(),
+            findings.Select(item => item.SuggestedPayableEnd).Where(item => item.HasValue).Max(),
+            null,
+            primary.SuggestedProjectId,
+            primary.SuggestedBonNr,
+            keys,
+            ids);
+    }
+
 
     private static PayrollActionEligibilityResult BlockUnsupported(
         PayrollFindingRecord finding,
@@ -407,7 +579,9 @@ public static class PayrollActionEligibility
             finding.SuggestedPayableEnd,
             finding.SuggestedPayableHours,
             finding.SuggestedProjectId,
-            finding.SuggestedBonNr);
+            finding.SuggestedBonNr,
+            SourceFindingKeys: [finding.FindingKey],
+            SourceFindingIds: finding.Id > 0 ? [finding.Id] : null);
 
     public static IReadOnlyList<long> ParseRelatedIds(string? json)
     {

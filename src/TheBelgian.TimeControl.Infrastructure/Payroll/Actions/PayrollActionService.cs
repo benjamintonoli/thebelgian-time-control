@@ -18,6 +18,7 @@ internal sealed class PayrollActionService(
     IDbContextFactory<TimeControlDbContext> contextFactory,
     IPayrollShadowService shadowService,
     IPayrollPerformanceSource performanceSource,
+    IPayrollStandbyGpsSource standbyGpsSource,
     IPlenionCorrectionClient correctionClient,
     IPlenionPerformanceCreateClient createClient,
     IOptions<PayrollActionsOptions> actionsOptions,
@@ -68,6 +69,12 @@ internal sealed class PayrollActionService(
             resourceIds,
             cancellationToken);
 
+        var gpsByResourceDate = await LoadStandbyGpsLookupAsync(
+            findings,
+            employeeByResource,
+            shadowMonth,
+            cancellationToken);
+
         var existingActions = await context.PayrollProposedActionRecords
             .Where(item => item.ShadowMonthId == shadowMonth.Id)
             .ToListAsync(cancellationToken);
@@ -77,14 +84,77 @@ internal sealed class PayrollActionService(
 
         var now = timeProvider.GetUtcNow();
         var results = new List<PayrollProposedActionRecord>();
-        foreach (var finding in findings.OrderBy(item => item.FindingKey, StringComparer.Ordinal))
+        var consumedFindingKeys = new HashSet<string>(StringComparer.Ordinal);
+
+        var standbyGroups = findings
+            .Where(item => item.FindingType is PayrollFindingType.StandbyStartMismatch
+                or PayrollFindingType.StandbyEndMismatch)
+            .Select(item => (Finding: item, PerfId: SingleRelatedPerformanceId(item)))
+            .Where(item => item.PerfId is not null)
+            .GroupBy(item => (item.Finding.ResourceId, item.Finding.Date, PerformanceId: item.PerfId!.Value))
+            .ToList();
+
+        foreach (var group in standbyGroups)
+        {
+            var groupFindings = group
+                .Select(item => item.Finding)
+                .OrderBy(item => item.FindingType)
+                .ThenBy(item => item.FindingKey, StringComparer.Ordinal)
+                .ToList();
+            foreach (var finding in groupFindings)
+            {
+                consumedFindingKeys.Add(finding.FindingKey);
+            }
+
+            employeeByResource.TryGetValue(group.Key.ResourceId, out var employee);
+            gpsByResourceDate.TryGetValue((group.Key.ResourceId, group.Key.Date), out var dayTrips);
+            var primary = groupFindings[0];
+            var eligibilityContext = BuildStandbyEligibilityContext(
+                primary,
+                groupFindings,
+                employee,
+                shadowMonth,
+                performances,
+                dayTrips ?? [],
+                findings);
+            var eligibility = PayrollActionEligibility.EvaluateStandbyAdjustGroup(groupFindings, eligibilityContext);
+            var actionKey = PayrollStandbyActivityTypes.AdjustActionKey(
+                group.Key.ResourceId,
+                group.Key.Date,
+                group.Key.PerformanceId);
+
+            CancelLegacyStandbyMemberActions(
+                byFindingKey,
+                groupFindings,
+                actionKey,
+                now,
+                results);
+
+            UpsertAction(
+                context,
+                byFindingKey,
+                results,
+                primary,
+                eligibility,
+                actionKey,
+                shadowMonth.Id,
+                actor,
+                now);
+        }
+
+        foreach (var finding in findings
+                     .Where(item => !consumedFindingKeys.Contains(item.FindingKey))
+                     .OrderBy(item => item.FindingKey, StringComparer.Ordinal))
         {
             employeeByResource.TryGetValue(finding.ResourceId, out var employee);
+            gpsByResourceDate.TryGetValue((finding.ResourceId, finding.Date), out var dayTrips);
             var contextForFinding = BuildEligibilityContext(
                 finding,
                 employee,
                 shadowMonth,
-                performances);
+                performances,
+                dayTrips,
+                findings);
             var eligibility = PayrollActionEligibility.Evaluate(finding, contextForFinding);
 
             if (byFindingKey.TryGetValue(finding.FindingKey, out var existing)
@@ -128,6 +198,8 @@ internal sealed class PayrollActionService(
 
         await context.SaveChangesAsync(cancellationToken);
         return results
+            .GroupBy(item => item.ActionId)
+            .Select(group => group.First())
             .OrderBy(item => item.ResourceId, StringComparer.Ordinal)
             .ThenBy(item => item.FindingKey, StringComparer.Ordinal)
             .ToList();
@@ -284,10 +356,7 @@ internal sealed class PayrollActionService(
                 action.ActionId, action.Status, action.BlockReason, null, null);
         }
 
-        var finding = await context.PayrollFindingRecords.AsNoTracking()
-            .SingleOrDefaultAsync(item =>
-                item.ShadowMonthId == action.ShadowMonthId && item.FindingKey == action.FindingKey,
-                cancellationToken);
+        var finding = await ResolvePrimaryFindingAsync(context, action, cancellationToken);
         var employee = await context.PayrollShadowEmployeeResults.AsNoTracking()
             .SingleOrDefaultAsync(item =>
                 item.ShadowMonthId == action.ShadowMonthId && item.ResourceId == action.ResourceId,
@@ -305,7 +374,28 @@ internal sealed class PayrollActionService(
             return FailResult(action, action.BlockReason!);
         }
 
-        var eligibilityContext = BuildEligibilityContext(finding, employee, month, performances);
+        var monthFindings = await context.PayrollFindingRecords.AsNoTracking()
+            .Where(item => item.ShadowMonthId == action.ShadowMonthId && item.ResourceId == action.ResourceId)
+            .ToListAsync(cancellationToken);
+        var gpsLookup = await LoadStandbyGpsLookupAsync(
+            monthFindings,
+            employee is null
+                ? new Dictionary<string, PayrollShadowEmployeeResult>(StringComparer.Ordinal)
+                : new Dictionary<string, PayrollShadowEmployeeResult>(StringComparer.Ordinal)
+                {
+                    [employee.ResourceId] = employee,
+                },
+            month,
+            cancellationToken);
+        gpsLookup.TryGetValue((finding.ResourceId, finding.Date), out var dayTrips);
+
+        var eligibilityContext = BuildEligibilityContext(
+            finding,
+            employee,
+            month,
+            performances,
+            dayTrips,
+            monthFindings);
         PayrollActionCreateProposal? storedCreate = null;
         PayrollActionAdjustProposal? storedAdjust = null;
         if (action.ActionType == PayrollProposedActionType.CreateMissingPerformance)
@@ -333,7 +423,25 @@ internal sealed class PayrollActionService(
             return FailResult(action, action.BlockReason!);
         }
 
-        var eligibility = PayrollActionEligibility.Evaluate(finding, eligibilityContext);
+        PayrollActionEligibilityResult eligibility;
+        if (action.ActionType == PayrollProposedActionType.AdjustExistingPerformanceTime
+            && storedAdjust is not null)
+        {
+            var groupFindings = monthFindings
+                .Where(item => item.FindingType is PayrollFindingType.StandbyStartMismatch
+                    or PayrollFindingType.StandbyEndMismatch)
+                .Where(item => SingleRelatedPerformanceId(item) == storedAdjust.PerformanceId)
+                .OrderBy(item => item.FindingType)
+                .ThenBy(item => item.FindingKey, StringComparer.Ordinal)
+                .ToList();
+            eligibility = groupFindings.Count > 0
+                ? PayrollActionEligibility.EvaluateStandbyAdjustGroup(groupFindings, eligibilityContext)
+                : PayrollActionEligibility.Evaluate(finding, eligibilityContext);
+        }
+        else
+        {
+            eligibility = PayrollActionEligibility.Evaluate(finding, eligibilityContext);
+        }
         if (eligibility.Status != PayrollProposedActionStatus.ReadyForApproval)
         {
             MarkStale(action, eligibility.BlockReason
@@ -631,9 +739,12 @@ internal sealed class PayrollActionService(
         PayrollActionEligibilityResult eligibility,
         string actor,
         DateTimeOffset now,
-        bool isNew)
+        bool isNew,
+        string? actionKeyOverride = null)
     {
-        record.FindingKey = finding.FindingKey;
+        record.FindingKey = actionKeyOverride
+            ?? eligibility.EvidenceSnapshot.FindingKey
+            ?? finding.FindingKey;
         record.FindingId = finding.Id;
         record.ResourceId = finding.ResourceId;
         record.ActionType = eligibility.ActionType;
@@ -654,11 +765,171 @@ internal sealed class PayrollActionService(
         }
     }
 
+    private void UpsertAction(
+        TimeControlDbContext context,
+        Dictionary<string, PayrollProposedActionRecord> byFindingKey,
+        List<PayrollProposedActionRecord> results,
+        PayrollFindingRecord primaryFinding,
+        PayrollActionEligibilityResult eligibility,
+        string actionKey,
+        int shadowMonthId,
+        string actor,
+        DateTimeOffset now)
+    {
+        if (byFindingKey.TryGetValue(actionKey, out var existing)
+            && !TerminalStatuses.Contains(existing.Status))
+        {
+            ApplyEligibility(existing, primaryFinding, eligibility, actor, now, isNew: false, actionKey);
+            results.Add(existing);
+            return;
+        }
+
+        if (byFindingKey.TryGetValue(actionKey, out var terminal)
+            && terminal.Status == PayrollProposedActionStatus.Applied)
+        {
+            results.Add(terminal);
+            return;
+        }
+
+        var created = new PayrollProposedActionRecord
+        {
+            ActionId = Guid.NewGuid(),
+            ShadowMonthId = shadowMonthId,
+            CreatedAtUtc = now,
+            CreatedBy = actor,
+        };
+        ApplyEligibility(created, primaryFinding, eligibility, actor, now, isNew: true, actionKey);
+        context.PayrollProposedActionRecords.Add(created);
+        byFindingKey[actionKey] = created;
+        results.Add(created);
+    }
+
+    private static void CancelLegacyStandbyMemberActions(
+        Dictionary<string, PayrollProposedActionRecord> byFindingKey,
+        IReadOnlyList<PayrollFindingRecord> groupFindings,
+        string actionKey,
+        DateTimeOffset now,
+        List<PayrollProposedActionRecord> results)
+    {
+        foreach (var finding in groupFindings)
+        {
+            if (string.Equals(finding.FindingKey, actionKey, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (!byFindingKey.TryGetValue(finding.FindingKey, out var legacy)
+                || TerminalStatuses.Contains(legacy.Status)
+                || legacy.Status == PayrollProposedActionStatus.Cancelled)
+            {
+                continue;
+            }
+
+            legacy.Status = PayrollProposedActionStatus.Cancelled;
+            legacy.BlockReason =
+                "Vervangen door geaggregeerde wachtdienstcorrectie voor dezelfde prestatie.";
+            legacy.UpdatedAtUtc = now;
+            results.Add(legacy);
+        }
+    }
+
+    private async Task<Dictionary<(string ResourceId, DateOnly Date), IReadOnlyList<StandbyGpsTripEvidence>>>
+        LoadStandbyGpsLookupAsync(
+            IReadOnlyList<PayrollFindingRecord> findings,
+            Dictionary<string, PayrollShadowEmployeeResult> employeeByResource,
+            PayrollShadowMonth month,
+            CancellationToken cancellationToken)
+    {
+        var standbyDates = findings
+            .Where(item => item.FindingType is PayrollFindingType.StandbyStartMismatch
+                or PayrollFindingType.StandbyEndMismatch)
+            .Select(item => (item.ResourceId, item.Date))
+            .Distinct()
+            .ToList();
+        if (standbyDates.Count == 0)
+        {
+            return new Dictionary<(string, DateOnly), IReadOnlyList<StandbyGpsTripEvidence>>();
+        }
+
+        var requests = standbyDates
+            .Select(item =>
+            {
+                employeeByResource.TryGetValue(item.ResourceId, out var employee);
+                var display = employee?.DisplayNameSnapshot ?? item.ResourceId;
+                return (item.ResourceId, display, item.Date);
+            })
+            .ToArray();
+
+        var batch = await standbyGpsSource.ReadStandbyGpsAsync(
+            month.PeriodStart,
+            month.PeriodEnd,
+            requests,
+            cancellationToken);
+
+        return batch.Days
+            .GroupBy(item => (item.ResourceId, item.Date))
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyList<StandbyGpsTripEvidence>)group.First().Trips);
+    }
+
+    private static long? SingleRelatedPerformanceId(PayrollFindingRecord finding)
+    {
+        var related = PayrollActionEligibility.ParseRelatedIds(finding.RelatedPerformanceIdsJson);
+        return related.Count == 1 ? related[0] : null;
+    }
+
+    private async Task<PayrollFindingRecord?> ResolvePrimaryFindingAsync(
+        TimeControlDbContext context,
+        PayrollProposedActionRecord action,
+        CancellationToken cancellationToken)
+    {
+        var byKey = await context.PayrollFindingRecords.AsNoTracking()
+            .SingleOrDefaultAsync(item =>
+                item.ShadowMonthId == action.ShadowMonthId && item.FindingKey == action.FindingKey,
+                cancellationToken);
+        if (byKey is not null)
+        {
+            return byKey;
+        }
+
+        if (action.FindingId is int findingId)
+        {
+            var byId = await context.PayrollFindingRecords.AsNoTracking()
+                .SingleOrDefaultAsync(item =>
+                    item.ShadowMonthId == action.ShadowMonthId && item.Id == findingId,
+                    cancellationToken);
+            if (byId is not null)
+            {
+                return byId;
+            }
+        }
+
+        var evidence = DeserializeEvidence(action.EvidenceSnapshotJson);
+        string? sourceKey = null;
+        if (evidence.SourceFindingKeys is { Count: > 0 })
+        {
+            sourceKey = evidence.SourceFindingKeys[0];
+        }
+
+        if (!string.IsNullOrWhiteSpace(sourceKey))
+        {
+            return await context.PayrollFindingRecords.AsNoTracking()
+                .SingleOrDefaultAsync(item =>
+                    item.ShadowMonthId == action.ShadowMonthId && item.FindingKey == sourceKey,
+                    cancellationToken);
+        }
+
+        return null;
+    }
+
     private static PayrollActionEligibilityContext BuildEligibilityContext(
         PayrollFindingRecord finding,
         PayrollShadowEmployeeResult? employee,
         PayrollShadowMonth month,
-        IReadOnlyList<NormalizedPerformanceEntry> performances)
+        IReadOnlyList<NormalizedPerformanceEntry> performances,
+        IReadOnlyList<StandbyGpsTripEvidence>? dayTrips = null,
+        IReadOnlyList<PayrollFindingRecord>? monthFindings = null)
     {
         var included = employee?.EligibilityStatus == PayrollEligibilityStatus.Included;
         var finalized = month.Status == PayrollShadowMonthStatus.Finalized;
@@ -681,22 +952,14 @@ internal sealed class PayrollActionService(
         if (finding.FindingType is PayrollFindingType.StandbyStartMismatch
             or PayrollFindingType.StandbyEndMismatch)
         {
-            NormalizedPerformanceEntry? target = null;
-            if (related.Count == 1)
-            {
-                target = performances.FirstOrDefault(item => item.SourceEntryId == related[0]);
-            }
-
-            return new PayrollActionEligibilityContext(
-                included,
-                finalized,
-                HasMatchingExistingPerformance: false,
-                ProvenMainTaskId: null,
-                target?.Start,
-                target?.End,
-                target?.SourceEntryId,
-                ExistingActivityType: null,
-                ExistingMainTaskExternalId: target?.HfdTaakId);
+            return BuildStandbyEligibilityContext(
+                finding,
+                [finding],
+                employee,
+                month,
+                performances,
+                dayTrips ?? [],
+                monthFindings ?? [finding]);
         }
 
         return new PayrollActionEligibilityContext(
@@ -707,6 +970,78 @@ internal sealed class PayrollActionService(
             null,
             null,
             null);
+    }
+
+    private static PayrollActionEligibilityContext BuildStandbyEligibilityContext(
+        PayrollFindingRecord primary,
+        IReadOnlyList<PayrollFindingRecord> groupFindings,
+        PayrollShadowEmployeeResult? employee,
+        PayrollShadowMonth month,
+        IReadOnlyList<NormalizedPerformanceEntry> performances,
+        IReadOnlyList<StandbyGpsTripEvidence> dayTrips,
+        IReadOnlyList<PayrollFindingRecord> monthFindings)
+    {
+        var included = employee?.EligibilityStatus == PayrollEligibilityStatus.Included;
+        var finalized = month.Status == PayrollShadowMonthStatus.Finalized;
+        var related = groupFindings
+            .SelectMany(item => PayrollActionEligibility.ParseRelatedIds(item.RelatedPerformanceIdsJson))
+            .Distinct()
+            .ToList();
+
+        NormalizedPerformanceEntry? target = null;
+        if (related.Count == 1)
+        {
+            target = performances.FirstOrDefault(item => item.SourceEntryId == related[0]);
+        }
+
+        var activityType = PayrollStandbyActivityTypes.FromMainTaskExternalId(target?.HfdTaakId);
+        var proposedStart = groupFindings
+            .Select(item => item.SuggestedPayableStart)
+            .Where(item => item.HasValue)
+            .Select(item => item!.Value)
+            .DefaultIfEmpty()
+            .Min();
+        var proposedEnd = groupFindings
+            .Select(item => item.SuggestedPayableEnd)
+            .Where(item => item.HasValue)
+            .Select(item => item!.Value)
+            .DefaultIfEmpty()
+            .Max();
+
+        var hasDossierAmbiguity = related.Count == 1
+            && monthFindings.Any(item =>
+                item.FindingType == PayrollFindingType.StandbyPossibleWrongDossier
+                && PayrollActionEligibility.ParseRelatedIds(item.RelatedPerformanceIdsJson)
+                    .Contains(related[0]));
+
+        var hasConflict = target is not null
+            && proposedStart != default
+            && proposedEnd != default
+            && performances.Any(item =>
+                item.SourceEntryId != target.SourceEntryId
+                && string.Equals(item.ResourceId, primary.ResourceId, StringComparison.Ordinal)
+                && item.Date == primary.Date
+                && !item.IsCalendarSynthetic
+                && !item.IsAbsence
+                && item.HfdTaakId != PayrollStandbyActivityTypes.WaitingMainTaskExternalId
+                && item.Start is not null
+                && item.End is not null
+                && item.Start < proposedEnd
+                && item.End > proposedStart);
+
+        return new PayrollActionEligibilityContext(
+            included,
+            finalized,
+            HasMatchingExistingPerformance: false,
+            ProvenMainTaskId: null,
+            target?.Start,
+            target?.End,
+            target?.SourceEntryId,
+            ExistingActivityType: activityType,
+            ExistingMainTaskExternalId: target?.HfdTaakId,
+            StandbyDayTrips: dayTrips,
+            HasRelatedDossierAmbiguity: hasDossierAmbiguity,
+            HasConflictingPerformance: hasConflict);
     }
 
     private static bool HasMatchingMissingTechPerformance(

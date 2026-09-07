@@ -54,4 +54,10 @@ public enum PayrollActionBlockReasonCode
     PeerMainTaskNotCopied = 16,
     RelatedPerformanceAmbiguous = 17,
     SourceChanged = 18,
+    IncompleteCallout = 19,
+    IntermediateStopEnd = 20,
+    MultiLegAmbiguous = 21,
+    WrongActivityType = 22,
+    NonPositiveDuration = 23,
+    ConflictingDossierAmbiguity = 24,
 }
