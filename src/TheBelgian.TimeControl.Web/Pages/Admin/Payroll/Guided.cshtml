@@ -62,7 +62,15 @@ else
                 <p class="fw-semibold mb-2">@current.KeyFact</p>
             }
             <div class="row g-2 small mb-3">
+                @if (!string.IsNullOrWhiteSpace(current.TimeIntervalSummary))
+                {
+                    <div class="col-md-4"><span class="text-muted">Tijd:</span> @current.TimeIntervalSummary</div>
+                }
                 <div class="col-md-4"><span class="text-muted">Geboekt:</span> @(current.BookedSummary ?? "—")</div>
+                @if (!string.IsNullOrWhiteSpace(current.PerformanceDescriptionSummary))
+                {
+                    <div class="col-md-4"><span class="text-muted">Omschrijving:</span> @current.PerformanceDescriptionSummary</div>
+                }
                 @if (!string.IsNullOrWhiteSpace(current.PlannedSummary))
                 {
                     <div class="col-md-4"><span class="text-muted">Planning:</span> @current.PlannedSummary</div>

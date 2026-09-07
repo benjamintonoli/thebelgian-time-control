@@ -197,11 +197,22 @@ public static class SpecialProjectTimeControl
             Title: title,
             Description:
                 $"Geboekt {FormatInterval(performance)} ({FormatHours(BookedHours(performance))}) zonder ondersteunende planning.",
-            Evidence:
-                $"PerformanceId={performance.SourceEntryId}; PROJNR={performance.ProjectNumber}; planning evidence = none.",
+            Evidence: BuildMissingPlanningEvidence(performance),
             SuggestedAction: action,
             RelatedPerformanceIds: [performance.SourceEntryId],
-            BookedHours: BookedHours(performance));
+            BookedHours: BookedHours(performance),
+            SuggestedProjectId: performance.ProjectId
+                ?? performance.ProjectNumber?.ToString(CultureInfo.InvariantCulture),
+            SuggestedBonNr: performance.BonNr);
+
+    private static string BuildMissingPlanningEvidence(NormalizedPerformanceEntry performance)
+    {
+        var sb = new StringBuilder();
+        sb.Append(CultureInfo.InvariantCulture, $"PerformanceId={performance.SourceEntryId}; PROJNR={performance.ProjectNumber}; ");
+        sb.Append(CultureInfo.InvariantCulture, $"desc={performance.Description ?? "—"}; memo={performance.Memo ?? "—"}; ");
+        sb.Append("planning evidence = none.");
+        return sb.ToString();
+    }
 
     private static PayrollFinding? CreateDurationOverrunFinding(
         NormalizedPerformanceEntry performance,

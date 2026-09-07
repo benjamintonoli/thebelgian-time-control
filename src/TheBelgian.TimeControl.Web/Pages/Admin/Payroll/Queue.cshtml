@@ -1,5 +1,6 @@
 @page "/Admin/Payroll/{year:int}/{month:int}/Queue"
 @model TheBelgian.TimeControl.Web.Pages.Admin.Payroll.QueueModel
+@using System.Globalization
 @using TheBelgian.TimeControl.Core.Payroll.Findings
 @using TheBelgian.TimeControl.Core.Payroll.Review
 @{
@@ -7,6 +8,9 @@
     var queue = Model.Queue;
     var admin = queue?.AdminSummary;
     var review = queue?.ReviewSummary;
+    var nl = CultureInfo.GetCultureInfo("nl-BE");
+    var isProject300Triage = Model.Category == PayrollReviewCategory.Project300
+        && (Model.ListMode || !string.IsNullOrWhiteSpace(Model.Search));
     string GuidedHref(PayrollReviewCategory category) =>
         Url.Page("./Guided", new { year = Model.Year, month = Model.Month, category })!;
     string CategoryHref(PayrollReviewCategory category) =>
@@ -46,7 +50,7 @@
     <div>
         <div class="text-uppercase small text-muted fw-semibold">Payroll shadow</div>
         <h1 class="h3 mb-1">Opvolging @Model.Month.ToString("00")/@Model.Year</h1>
-        <p class="text-muted mb-0">Begeleide categoriecontrole: begrijp → beslis → volgende.</p>
+        <p class="text-muted mb-0">@(isProject300Triage ? "Triage: bekijk evidence en beslis inline." : "Begeleide categoriecontrole: begrijp → beslis → volgende.")</p>
     </div>
     <a class="btn btn-sm btn-outline-secondary" asp-page="./Month" asp-route-year="@Model.Year" asp-route-month="@Model.Month">← Maand</a>
 </div>
@@ -73,52 +77,71 @@ else
         · raw findings zie technische samenvatting per categorie
     </p>
 
-    <div class="row g-2 mb-4">
-        @foreach (var cat in cards)
-        {
-            var adminTotal = admin.AdminCasesByCategory.GetValueOrDefault(cat);
-            var open = admin.UnresolvedAdminByCategory.GetValueOrDefault(cat);
-            var follow = admin.FollowUpAdminByCategory.GetValueOrDefault(cat);
-            var done = admin.CompletedAdminByCategory.GetValueOrDefault(cat);
-            var raw = admin.ReviewCasesByCategory.GetValueOrDefault(cat);
-            var active = Model.Category == cat ? "border-primary" : "";
-            <div class="col-12 col-md-6 col-xl-4">
-                <div class="card h-100 @active">
-                    <div class="card-body">
-                        <div class="d-flex justify-content-between align-items-start gap-2">
-                            <div>
-                                <div class="fw-semibold">@PayrollReviewCategories.DisplayName(cat)</div>
-                                <div class="small text-muted">@raw review cases · @adminTotal admin cases</div>
+    @if (!isProject300Triage)
+    {
+        <div class="row g-2 mb-4">
+            @foreach (var cat in cards)
+            {
+                var adminTotal = admin.AdminCasesByCategory.GetValueOrDefault(cat);
+                var open = admin.UnresolvedAdminByCategory.GetValueOrDefault(cat);
+                var follow = admin.FollowUpAdminByCategory.GetValueOrDefault(cat);
+                var done = admin.CompletedAdminByCategory.GetValueOrDefault(cat);
+                var raw = admin.ReviewCasesByCategory.GetValueOrDefault(cat);
+                var openHours = admin.OpenBookedHoursByCategory?.GetValueOrDefault(cat) ?? 0m;
+                var active = Model.Category == cat ? "border-primary" : "";
+                <div class="col-12 col-md-6 col-xl-4">
+                    <div class="card h-100 @active">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-start gap-2">
+                                <div>
+                                    <div class="fw-semibold">@PayrollReviewCategories.DisplayName(cat)</div>
+                                    <div class="small text-muted">@raw review cases · @adminTotal admin cases</div>
+                                </div>
                             </div>
-                        </div>
-                        <div class="small mt-2 mb-3">
-                            <span class="me-2">@open te beoordelen</span>
-                            <span class="me-2 text-warning">@follow opvolging</span>
-                            <span class="text-success">@done afgehandeld</span>
-                        </div>
-                        <div class="d-flex flex-wrap gap-2">
-                            @if (open + follow > 0)
-                            {
-                                <a class="btn btn-sm btn-primary" href="@GuidedHref(cat)">Start controle</a>
-                            }
-                            else
-                            {
-                                <button class="btn btn-sm btn-outline-secondary" type="button" disabled>Start controle</button>
-                            }
-                            <a class="btn btn-sm btn-outline-secondary" href="@CategoryHref(cat)">Lijst</a>
+                            <div class="small mt-2 mb-3">
+                                <span class="me-2">@open te beoordelen</span>
+                                <span class="me-2 text-warning">@follow opvolging</span>
+                                <span class="text-success">@done afgehandeld</span>
+                                @if (cat == PayrollReviewCategory.Project300 && openHours > 0)
+                                {
+                                    <div class="mt-1 text-muted">@openHours.ToString("0.##", nl) u te beoordelen</div>
+                                }
+                            </div>
+                            <div class="d-flex flex-wrap gap-2">
+                                @if (open + follow > 0)
+                                {
+                                    <a class="btn btn-sm btn-primary" href="@GuidedHref(cat)">Start controle</a>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-sm btn-outline-secondary" type="button" disabled>Start controle</button>
+                                }
+                                <a class="btn btn-sm btn-outline-secondary" href="@CategoryHref(cat)">@(cat == PayrollReviewCategory.Project300 ? "Triage-lijst" : "Lijst")</a>
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
-        }
-    </div>
+            }
+        </div>
+    }
 
     @if (Model.ListMode || Model.Category != PayrollReviewCategory.All || !string.IsNullOrWhiteSpace(Model.Search))
     {
-        <div class="btn-group btn-group-sm mb-3" role="group">
-            <a class="btn @(Model.Scope == PayrollReviewQueueScope.Open ? "btn-dark" : "btn-outline-secondary")" href="@ScopeHref(PayrollReviewQueueScope.Open)">Open</a>
-            <a class="btn @(Model.Scope == PayrollReviewQueueScope.Closed ? "btn-dark" : "btn-outline-secondary")" href="@ScopeHref(PayrollReviewQueueScope.Closed)">Afgehandeld</a>
-            <a class="btn @(Model.Scope == PayrollReviewQueueScope.All ? "btn-dark" : "btn-outline-secondary")" href="@ScopeHref(PayrollReviewQueueScope.All)">Alles</a>
+        var openHoursVisible = queue.AdminCases
+            .Where(item => item.WorkflowStatus == PayrollFindingStatus.Open)
+            .Sum(item => item.TotalBookedHours ?? 0m);
+
+        <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+            @if (isProject300Triage)
+            {
+                <a class="btn btn-sm btn-outline-secondary" asp-page="./Queue" asp-route-year="@Model.Year" asp-route-month="@Model.Month">← Categorieën</a>
+                <h2 class="h5 mb-0">300 zonder planning — triage</h2>
+            }
+            <div class="btn-group btn-group-sm ms-lg-auto" role="group">
+                <a class="btn @(Model.Scope == PayrollReviewQueueScope.Open ? "btn-dark" : "btn-outline-secondary")" href="@ScopeHref(PayrollReviewQueueScope.Open)">Open</a>
+                <a class="btn @(Model.Scope == PayrollReviewQueueScope.Closed ? "btn-dark" : "btn-outline-secondary")" href="@ScopeHref(PayrollReviewQueueScope.Closed)">Afgehandeld</a>
+                <a class="btn @(Model.Scope == PayrollReviewQueueScope.All ? "btn-dark" : "btn-outline-secondary")" href="@ScopeHref(PayrollReviewQueueScope.All)">Alles</a>
+            </div>
         </div>
 
         <form method="get" class="card mb-3">
@@ -135,7 +158,7 @@ else
                 <div class="col-6 col-md-3 col-lg-2">
                     <label class="form-label" asp-for="Sort">Sortering</label>
                     <select class="form-select form-select-sm" asp-for="Sort">
-                        <option value="default">Standaard</option>
+                        <option value="default">Ernst / datum</option>
                         <option value="datum">Datum</option>
                         <option value="medewerker">Medewerker A-Z</option>
                         <option value="categorie">Categorie</option>
@@ -146,114 +169,276 @@ else
             </div>
         </form>
 
-        <p class="small text-muted mb-2">Toont <strong>@queue.AdminCases.Count</strong> admin-cases. Bulk alleen voor veilige categorieën (niet wachtdienst / sterk missing).</p>
+        @if (isProject300Triage)
+        {
+            <div class="alert alert-light border py-2 mb-3 small">
+                <strong>@queue.AdminCases.Count</strong> admin-cases
+                · <strong>@openHoursVisible.ToString("0.##", nl) u</strong> open te beoordelen
+                · inline beslissen zonder apart Review-scherm
+                · <a href="@GuidedHref(PayrollReviewCategory.Project300)">begeleide modus</a> blijft beschikbaar
+            </div>
+        }
+        else
+        {
+            <p class="small text-muted mb-2">Toont <strong>@queue.AdminCases.Count</strong> admin-cases. Bulk alleen voor veilige categorieën (niet wachtdienst / sterk missing).</p>
+        }
 
-        <form method="post" asp-page-handler="Bulk" id="bulk-form" onsubmit="return confirmBulk();">
-            <input type="hidden" name="Category" value="@Model.Category" />
-            <input type="hidden" name="Search" value="@Model.Search" />
-            <input type="hidden" name="Sort" value="@Model.Sort" />
-            <input type="hidden" name="Scope" value="@Model.Scope" />
-            <input type="hidden" name="ListMode" value="true" />
-            <div class="card mb-3">
-                <div class="card-body d-flex flex-wrap gap-2 align-items-end">
-                    <button type="button" class="btn btn-sm btn-outline-secondary" id="select-visible">Selecteer zichtbare (bulk-toegelaten)</button>
-                    <div class="ms-auto d-flex flex-wrap gap-2 align-items-end">
-                        <input class="form-control form-control-sm" name="Comment" style="min-width:12rem" placeholder="Bulk-reden" />
-                        <select class="form-select form-select-sm" name="BulkDecisionCode" style="min-width:12rem">
-                            <option value="">— bulk-beslissing —</option>
-                            @if (Model.Category is PayrollReviewCategory.Project300 or PayrollReviewCategory.All)
-                            {
-                                <option value="@PayrollGuidedDecisionCodes.P300WorkValid">300: Werk was terecht</option>
-                                <option value="@PayrollGuidedDecisionCodes.P300PlanningMissing">300: Planning ontbreekt</option>
-                            }
-                            @if (Model.Category is PayrollReviewCategory.Project200 or PayrollReviewCategory.All)
-                            {
-                                <option value="@PayrollGuidedDecisionCodes.P200Valid">200: Correct</option>
-                                <option value="@PayrollGuidedDecisionCodes.P200PlanningMissing">200: Planning ontbreekt</option>
-                            }
-                        </select>
-                        <button class="btn btn-sm btn-warning" type="submit">Bulk toepassen</button>
+        @if (!isProject300Triage)
+        {
+            <form method="post" asp-page-handler="Bulk" id="bulk-form" onsubmit="return confirmBulk();">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="Category" value="@Model.Category" />
+                <input type="hidden" name="Search" value="@Model.Search" />
+                <input type="hidden" name="Sort" value="@Model.Sort" />
+                <input type="hidden" name="Scope" value="@Model.Scope" />
+                <input type="hidden" name="ListMode" value="true" />
+                <div class="card mb-3">
+                    <div class="card-body d-flex flex-wrap gap-2 align-items-end">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="select-visible">Selecteer zichtbare (bulk-toegelaten)</button>
+                        <div class="ms-auto d-flex flex-wrap gap-2 align-items-end">
+                            <input class="form-control form-control-sm" name="Comment" style="min-width:12rem" placeholder="Bulk-reden" />
+                            <select class="form-select form-select-sm" name="BulkDecisionCode" style="min-width:12rem">
+                                <option value="">— bulk-beslissing —</option>
+                                @if (Model.Category is PayrollReviewCategory.Project300 or PayrollReviewCategory.All)
+                                {
+                                    <option value="@PayrollGuidedDecisionCodes.P300WorkValid">300: Werk was terecht</option>
+                                    <option value="@PayrollGuidedDecisionCodes.P300PlanningMissing">300: Planning ontbreekt</option>
+                                }
+                                @if (Model.Category is PayrollReviewCategory.Project200 or PayrollReviewCategory.All)
+                                {
+                                    <option value="@PayrollGuidedDecisionCodes.P200Valid">200: Correct</option>
+                                    <option value="@PayrollGuidedDecisionCodes.P200PlanningMissing">200: Planning ontbreekt</option>
+                                }
+                            </select>
+                            <button class="btn btn-sm btn-warning" type="submit">Bulk toepassen</button>
+                        </div>
                     </div>
                 </div>
-            </div>
-        </form>
+            </form>
+        }
+        else
+        {
+            <form id="triage-af" class="d-none">@Html.AntiForgeryToken()</form>
+        }
 
-        <div class="d-none d-lg-block table-responsive card mb-3">
-            <table class="table table-sm align-middle mb-0">
-                <thead>
-                <tr>
-                    <th style="width:2rem"></th>
-                    <th>Datum</th>
-                    <th>Medewerker</th>
-                    <th>Issue</th>
-                    <th>Kern</th>
-                    <th></th>
-                </tr>
-                </thead>
-                <tbody>
-                @foreach (var item in queue.AdminCases)
-                {
+        @if (isProject300Triage)
+        {
+            <div class="table-responsive card mb-3 payroll-triage-table">
+                <table class="table table-sm align-middle mb-0">
+                    <thead class="table-light sticky-top">
                     <tr>
-                        <td>
-                            @if (item.AllowsBulkDisposition)
-                            {
-                                <input class="form-check-input case-check" type="checkbox" name="SelectedAdminCaseKeys" value="@item.AdminCaseKey" form="bulk-form" />
-                            }
-                        </td>
-                        <td>@item.Date.ToString("dd/MM")</td>
-                        <td>
-                            <div class="fw-semibold">@(item.DisplayName ?? item.ResourceId)</div>
-                            @if (!string.IsNullOrWhiteSpace(item.BonNr) || !string.IsNullOrWhiteSpace(item.ProjectId))
-                            {
-                                <div class="small text-muted">@(item.BonNr ?? item.ProjectId)</div>
-                            }
-                        </td>
-                        <td>
-                            <div>@item.IssueSummary</div>
-                            <div class="small text-muted">@PayrollGuidedDecisions.AdminStatusLabel(item.WorkflowStatus)</div>
-                        </td>
-                        <td class="small">@(item.KeyFact ?? item.BookedSummary)</td>
-                        <td class="text-nowrap">
-                            <a class="btn btn-sm btn-outline-primary"
-                               asp-page="./Guided"
-                               asp-route-year="@Model.Year"
-                               asp-route-month="@Model.Month"
-                               asp-route-category="@item.Category"
-                               asp-route-Focus="@item.AdminCaseKey">Review</a>
-                        </td>
+                        <th>Datum</th>
+                        <th>Medewerker</th>
+                        <th>Tijd</th>
+                        <th>Duur</th>
+                        <th>Project / BON</th>
+                        <th>Omschrijving</th>
+                        <th>Planning</th>
+                        <th>Evidence</th>
+                        <th>Status</th>
+                        <th style="min-width:16rem">Beslissing</th>
                     </tr>
-                }
-                </tbody>
-            </table>
-        </div>
-
-        <div class="d-lg-none vstack gap-2 mb-3">
-            @foreach (var item in queue.AdminCases)
-            {
-                <div class="card">
-                    <div class="card-body">
-                        <div class="d-flex gap-2">
-                            @if (item.AllowsBulkDisposition)
-                            {
-                                <input class="form-check-input case-check mt-1" type="checkbox" name="SelectedAdminCaseKeys" value="@item.AdminCaseKey" form="bulk-form" />
-                            }
-                            <div class="flex-grow-1">
+                    </thead>
+                    <tbody>
+                    @foreach (var item in queue.AdminCases)
+                    {
+                        var multi = item.Performances.Count > 1;
+                        var expandId = "perf-" + Math.Abs(item.AdminCaseKey.GetHashCode()).ToString("x", CultureInfo.InvariantCulture);
+                        <tr class="triage-row" data-admin-case-key="@item.AdminCaseKey" data-workflow="@item.WorkflowStatus">
+                            <td class="text-nowrap">@item.Date.ToString("dd/MM")</td>
+                            <td>
                                 <div class="fw-semibold">@(item.DisplayName ?? item.ResourceId)</div>
-                                <div class="small text-muted">@item.Date.ToString("dd/MM/yyyy")</div>
-                                <p class="mb-1 mt-1">@item.IssueSummary</p>
-                                <p class="small mb-2">@(item.KeyFact ?? item.BookedSummary)</p>
+                                @if (multi)
+                                {
+                                    <button class="btn btn-link btn-sm p-0" type="button" data-bs-toggle="collapse" data-bs-target="#@expandId" aria-expanded="false">
+                                        @item.UnderlyingPerformanceCount prestaties
+                                    </button>
+                                }
+                            </td>
+                            <td class="text-nowrap small">@(item.TimeIntervalSummary ?? "—")</td>
+                            <td class="text-nowrap">@PayrollTriageEvidence.FormatHours(item.TotalBookedHours)</td>
+                            <td class="small">
+                                @if (!string.IsNullOrWhiteSpace(item.ProjectId))
+                                {
+                                    <div>P @item.ProjectId</div>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(item.BonNr))
+                                {
+                                    <div>BON @item.BonNr</div>
+                                }
+                                @if (string.IsNullOrWhiteSpace(item.ProjectId) && string.IsNullOrWhiteSpace(item.BonNr))
+                                {
+                                    <span class="text-muted">intern</span>
+                                }
+                            </td>
+                            <td class="small" style="max-width:14rem">
+                                @if (!string.IsNullOrWhiteSpace(item.PerformanceDescriptionSummary))
+                                {
+                                    <div class="text-truncate" title="@item.PerformanceDescriptionSummary">@item.PerformanceDescriptionSummary</div>
+                                }
+                                else
+                                {
+                                    <span class="text-muted">geen omschrijving</span>
+                                }
+                                @if (multi)
+                                {
+                                    <div class="text-muted">@item.IssueSummary</div>
+                                }
+                            </td>
+                            <td class="small">@(item.FriendlyState ?? "Zonder reservatie")</td>
+                            <td class="small">
+                                @foreach (var chip in item.EvidenceChips ?? Array.Empty<string>())
+                                {
+                                    <span class="badge text-bg-light text-dark border me-1 mb-1">@chip</span>
+                                }
+                            </td>
+                            <td class="small triage-status">@PayrollGuidedDecisions.AdminStatusLabel(item.WorkflowStatus)</td>
+                            <td>
+                                @if (PayrollReviewCategories.IsUnresolved(item.WorkflowStatus))
+                                {
+                                    <div class="d-flex flex-wrap gap-1 triage-actions" data-admin-case-key="@item.AdminCaseKey">
+                                        @foreach (var choice in item.Choices)
+                                        {
+                                            <button type="button"
+                                                    class="btn btn-sm @(choice.RequiresComment ? "btn-outline-warning" : "btn-outline-primary") triage-decide"
+                                                    data-decision="@choice.DecisionCode"
+                                                    data-requires-comment="@(choice.RequiresComment ? "true" : "false")"
+                                                    data-label="@choice.Label">@choice.Label</button>
+                                        }
+                                    </div>
+                                    <input class="form-control form-control-sm mt-1 triage-comment d-none" placeholder="Korte toelichting" />
+                                    <div class="triage-error small text-danger mt-1 d-none"></div>
+                                }
+                                else
+                                {
+                                    <span class="small text-muted">@(item.DecisionLabel ?? "Beslist")</span>
+                                }
+                                <div class="mt-1">
+                                    <a class="small"
+                                       asp-page="./Guided"
+                                       asp-route-year="@Model.Year"
+                                       asp-route-month="@Model.Month"
+                                       asp-route-category="@item.Category"
+                                       asp-route-Focus="@item.AdminCaseKey">Details</a>
+                                </div>
+                            </td>
+                        </tr>
+                        @if (multi)
+                        {
+                            <tr class="collapse bg-light" id="@expandId">
+                                <td colspan="10" class="p-0">
+                                    <table class="table table-sm mb-0">
+                                        <thead>
+                                        <tr class="small text-muted">
+                                            <th>Prestatie</th>
+                                            <th>Tijd</th>
+                                            <th>Duur</th>
+                                            <th>Omschrijving</th>
+                                            <th>Memo</th>
+                                            <th>Planning</th>
+                                        </tr>
+                                        </thead>
+                                        <tbody>
+                                        @foreach (var perf in item.Performances)
+                                        {
+                                            <tr class="small">
+                                                <td>#@(perf.PerformanceId?.ToString(CultureInfo.InvariantCulture) ?? "—")</td>
+                                                <td>@(perf.TimeInterval ?? "—")</td>
+                                                <td>@PayrollTriageEvidence.FormatHours(perf.BookedHours)</td>
+                                                <td>@(perf.PerformanceDescription ?? "—")</td>
+                                                <td>@(perf.PerformanceMemo ?? "—")</td>
+                                                <td>@(perf.PlanningStatus ?? "—")</td>
+                                            </tr>
+                                        }
+                                        </tbody>
+                                    </table>
+                                </td>
+                            </tr>
+                        }
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+        else
+        {
+            <div class="d-none d-lg-block table-responsive card mb-3">
+                <table class="table table-sm align-middle mb-0">
+                    <thead>
+                    <tr>
+                        <th style="width:2rem"></th>
+                        <th>Datum</th>
+                        <th>Medewerker</th>
+                        <th>Issue</th>
+                        <th>Kern</th>
+                        <th></th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var item in queue.AdminCases)
+                    {
+                        <tr>
+                            <td>
+                                @if (item.AllowsBulkDisposition)
+                                {
+                                    <input class="form-check-input case-check" type="checkbox" name="SelectedAdminCaseKeys" value="@item.AdminCaseKey" form="bulk-form" />
+                                }
+                            </td>
+                            <td>@item.Date.ToString("dd/MM")</td>
+                            <td>
+                                <div class="fw-semibold">@(item.DisplayName ?? item.ResourceId)</div>
+                                @if (!string.IsNullOrWhiteSpace(item.BonNr) || !string.IsNullOrWhiteSpace(item.ProjectId))
+                                {
+                                    <div class="small text-muted">@(item.BonNr ?? item.ProjectId)</div>
+                                }
+                            </td>
+                            <td>
+                                <div>@item.IssueSummary</div>
+                                <div class="small text-muted">@PayrollGuidedDecisions.AdminStatusLabel(item.WorkflowStatus)</div>
+                            </td>
+                            <td class="small">@(item.KeyFact ?? item.BookedSummary)</td>
+                            <td class="text-nowrap">
                                 <a class="btn btn-sm btn-outline-primary"
                                    asp-page="./Guided"
                                    asp-route-year="@Model.Year"
                                    asp-route-month="@Model.Month"
                                    asp-route-category="@item.Category"
                                    asp-route-Focus="@item.AdminCaseKey">Review</a>
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="d-lg-none vstack gap-2 mb-3">
+                @foreach (var item in queue.AdminCases)
+                {
+                    <div class="card">
+                        <div class="card-body">
+                            <div class="d-flex gap-2">
+                                @if (item.AllowsBulkDisposition)
+                                {
+                                    <input class="form-check-input case-check mt-1" type="checkbox" name="SelectedAdminCaseKeys" value="@item.AdminCaseKey" form="bulk-form" />
+                                }
+                                <div class="flex-grow-1">
+                                    <div class="fw-semibold">@(item.DisplayName ?? item.ResourceId)</div>
+                                    <div class="small text-muted">@item.Date.ToString("dd/MM/yyyy")</div>
+                                    <p class="mb-1 mt-1">@item.IssueSummary</p>
+                                    <p class="small mb-2">@(item.KeyFact ?? item.BookedSummary)</p>
+                                    <a class="btn btn-sm btn-outline-primary"
+                                       asp-page="./Guided"
+                                       asp-route-year="@Model.Year"
+                                       asp-route-month="@Model.Month"
+                                       asp-route-category="@item.Category"
+                                       asp-route-Focus="@item.AdminCaseKey">Review</a>
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
-            }
-        </div>
+                }
+            </div>
+        }
 
         @if (queue.AdminCases.Count == 0)
         {
@@ -263,6 +448,11 @@ else
 }
 
 @section Scripts {
+<style>
+.payroll-triage-table { max-height: calc(100vh - 12rem); overflow: auto; }
+.payroll-triage-table thead.sticky-top th { box-shadow: inset 0 -1px 0 rgba(0,0,0,.08); }
+.triage-row.is-decided { opacity: .55; }
+</style>
 <script>
 function confirmBulk() {
   const checked = document.querySelectorAll('.case-check:checked');
@@ -272,5 +462,80 @@ function confirmBulk() {
 document.getElementById('select-visible')?.addEventListener('click', () => {
   document.querySelectorAll('.case-check').forEach(cb => { cb.checked = true; });
 });
+
+(function () {
+  const token = document.querySelector('#triage-af input[name="__RequestVerificationToken"]')?.value
+    || document.querySelector('#bulk-form input[name="__RequestVerificationToken"]')?.value;
+  const decideUrl = '@Url.Page("./Queue", new { year = Model.Year, month = Model.Month, handler = "Decide" })';
+
+  document.querySelectorAll('.triage-decide').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const actions = btn.closest('.triage-actions');
+      const row = btn.closest('tr.triage-row');
+      if (!actions || !row) return;
+      const adminCaseKey = actions.dataset.adminCaseKey;
+      const decisionCode = btn.dataset.decision;
+      const requiresComment = btn.dataset.requiresComment === 'true';
+      const commentInput = row.querySelector('.triage-comment');
+      const errorEl = row.querySelector('.triage-error');
+      if (errorEl) { errorEl.classList.add('d-none'); errorEl.textContent = ''; }
+
+      let comment = commentInput?.value?.trim() || '';
+      if (requiresComment) {
+        commentInput?.classList.remove('d-none');
+        if (!comment) {
+          comment = window.prompt(btn.dataset.label + ' — korte toelichting:') || '';
+          if (commentInput) commentInput.value = comment;
+        }
+        if (!comment.trim()) {
+          if (errorEl) { errorEl.textContent = 'Toelichting is verplicht.'; errorEl.classList.remove('d-none'); }
+          return;
+        }
+      }
+
+      btn.disabled = true;
+      try {
+        const body = new URLSearchParams();
+        body.set('AdminCaseKey', adminCaseKey);
+        body.set('DecisionCode', decisionCode);
+        body.set('Comment', comment);
+        if (token) body.set('__RequestVerificationToken', token);
+
+        const response = await fetch(decideUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+            'RequestVerificationToken': token || ''
+          },
+          body
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) {
+          throw new Error(payload.error || 'Beslissing mislukt.');
+        }
+
+        const statusEl = row.querySelector('.triage-status');
+        if (statusEl) statusEl.textContent = payload.statusLabel || 'Afgehandeld';
+        const actionsCell = row.querySelector('.triage-actions');
+        if (actionsCell) {
+          actionsCell.outerHTML = '<span class="small text-success">' + (payload.decisionLabel || 'Opgeslagen') + '</span>';
+        }
+        commentInput?.classList.add('d-none');
+        row.classList.add('is-decided');
+        if (payload.hideRow) {
+          row.classList.add('d-none');
+          const expand = row.nextElementSibling;
+          if (expand && expand.classList.contains('collapse')) expand.classList.add('d-none');
+        }
+      } catch (err) {
+        if (errorEl) {
+          errorEl.textContent = err.message || 'Fout';
+          errorEl.classList.remove('d-none');
+        }
+        btn.disabled = false;
+      }
+    });
+  });
+})();
 </script>
 }

@@ -69,7 +69,14 @@ public sealed record PayrollReviewCase(
     decimal? BookedHours = null,
     decimal? PlannedHours = null,
     string? DecisionCode = null,
-    string? DecisionLabel = null);
+    string? DecisionLabel = null,
+    string? TimeInterval = null,
+    string? FindingDescription = null,
+    string? FindingEvidence = null,
+    string? PerformanceDescription = null,
+    string? PerformanceMemo = null,
+    bool DescriptionPresent = false,
+    bool PlanningPresent = false);
 
 public sealed record PayrollReviewQueueFilter(
     PayrollReviewCategory Category = PayrollReviewCategory.All,

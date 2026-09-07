@@ -29,6 +29,8 @@ public sealed class QueueModel(
     [BindProperty] public List<string> SelectedAdminCaseKeys { get; set; } = [];
     [BindProperty] public string BulkDecisionCode { get; set; } = string.Empty;
     [BindProperty] public string? Comment { get; set; }
+    [BindProperty] public string AdminCaseKey { get; set; } = string.Empty;
+    [BindProperty] public string DecisionCode { get; set; } = string.Empty;
 
     public PayrollAdminQueuePage? Queue { get; private set; }
     public string? Message { get; private set; }
@@ -96,6 +98,57 @@ public sealed class QueueModel(
             Scope,
             ListMode = true,
         });
+    }
+
+    public async Task<IActionResult> OnPostDecideAsync(CancellationToken cancellationToken)
+    {
+        if (!EnsureUiEnabled())
+        {
+            return NotFound();
+        }
+
+        try
+        {
+            if (string.IsNullOrWhiteSpace(AdminCaseKey) || string.IsNullOrWhiteSpace(DecisionCode))
+            {
+                return new JsonResult(new { ok = false, error = "Ontbrekende case of beslissing." })
+                {
+                    StatusCode = StatusCodes.Status400BadRequest,
+                };
+            }
+
+            var result = await reviewQueueService.SetAdminDecisionAsync(
+                Year,
+                Month,
+                AdminCaseKey.Trim(),
+                DecisionCode.Trim(),
+                Comment,
+                RequireActor().AuditIdentity,
+                cancellationToken);
+
+            var hideRow = Scope == PayrollReviewQueueScope.Open
+                && !PayrollReviewCategories.IsUnresolved(result.Status);
+
+            return new JsonResult(new
+            {
+                ok = true,
+                adminCaseKey = result.AdminCaseKey,
+                decisionCode = result.DecisionCode,
+                decisionLabel = result.DecisionLabel,
+                status = result.Status.ToString(),
+                statusLabel = PayrollGuidedDecisions.AdminStatusLabel(result.Status),
+                findingsUpdated = result.FindingsUpdated,
+                hideRow,
+            });
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Inline triage decision failed for {AdminCaseKey}.", AdminCaseKey);
+            return new JsonResult(new { ok = false, error = exception.Message })
+            {
+                StatusCode = StatusCodes.Status400BadRequest,
+            };
+        }
     }
 
     private async Task LoadAsync(CancellationToken cancellationToken)

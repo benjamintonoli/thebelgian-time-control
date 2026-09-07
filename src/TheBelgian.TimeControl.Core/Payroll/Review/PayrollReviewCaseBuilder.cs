@@ -232,6 +232,13 @@ public static class PayrollReviewCaseBuilder
         var plannedHours = findings.Select(item => item.PlannedHours).FirstOrDefault(item => item.HasValue);
         var decisionCode = findings.Select(item => item.DecisionCode).FirstOrDefault(item => !string.IsNullOrWhiteSpace(item));
         var decisionLabel = findings.Select(item => item.DecisionLabel).FirstOrDefault(item => !string.IsNullOrWhiteSpace(item));
+        var findingDescription = primary.Description;
+        var findingEvidence = primary.Evidence;
+        var timeInterval = PayrollTriageEvidence.ParseTimeInterval(findingDescription);
+        var performanceDescription = PayrollTriageEvidence.ExtractEvidenceField(findingEvidence, "desc");
+        var performanceMemo = PayrollTriageEvidence.ExtractEvidenceField(findingEvidence, "memo");
+        var descriptionPresent = !string.IsNullOrWhiteSpace(performanceDescription);
+        var planningPresent = PayrollTriageEvidence.PlanningPresent(findingEvidence, friendlyState, ruleHint);
 
         return new PayrollReviewCase(
             caseKey,
@@ -244,7 +251,7 @@ public static class PayrollReviewCaseBuilder
             problemLabel,
             findings.Select(item => item.SuggestedBonNr).FirstOrDefault(item => !string.IsNullOrWhiteSpace(item)),
             findings.Select(item => item.SuggestedProjectId).FirstOrDefault(item => !string.IsNullOrWhiteSpace(item)),
-            BuildBookedSummary(findings, action),
+            BuildBookedSummary(findings, action, timeInterval),
             BuildEvidenceSummary(findings, action, hybridNote),
             proposalSummary,
             actionability,
@@ -265,7 +272,14 @@ public static class PayrollReviewCaseBuilder
             bookedHours,
             plannedHours,
             decisionCode,
-            decisionLabel);
+            decisionLabel,
+            timeInterval,
+            findingDescription,
+            findingEvidence,
+            performanceDescription,
+            performanceMemo,
+            descriptionPresent,
+            planningPresent);
     }
 
     private static (string? Planned, string? Difference, string? RuleHint, string? FriendlyState) BuildCategoryPresentation(
@@ -462,12 +476,21 @@ public static class PayrollReviewCaseBuilder
 
     private static string? BuildBookedSummary(
         List<PayrollFindingRecord> findings,
-        PayrollProposedActionRecord? action)
+        PayrollProposedActionRecord? action,
+        string? timeInterval = null)
     {
         var adjust = action is null ? null : TryReadAdjust(action.ProposalSnapshotJson);
         if (adjust is not null)
         {
             return $"{adjust.CurrentStart:HH:mm}–{adjust.CurrentEnd:HH:mm}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(timeInterval))
+        {
+            var booked = findings.Select(item => item.BookedHours).FirstOrDefault(item => item.HasValue);
+            return booked is null
+                ? timeInterval
+                : $"{timeInterval} · {booked:0.##} u";
         }
 
         var start = findings.Select(item => item.SuggestedPayableStart).FirstOrDefault(item => item.HasValue);
@@ -477,8 +500,8 @@ public static class PayrollReviewCaseBuilder
             return $"voorstel {start:HH:mm}–{end:HH:mm}";
         }
 
-        var booked = findings.Select(item => item.BookedHours).FirstOrDefault(item => item.HasValue);
-        return booked is null ? null : $"{booked:0.##} u geboekt";
+        var bookedOnly = findings.Select(item => item.BookedHours).FirstOrDefault(item => item.HasValue);
+        return bookedOnly is null ? null : $"{bookedOnly:0.##} u geboekt";
     }
 
     private static string? BuildEvidenceSummary(

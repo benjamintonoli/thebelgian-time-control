@@ -99,6 +99,14 @@ public static class PayrollAdminCaseBuilder
             .Where(item => item != PayrollReviewCategory.All)
             .ToArray();
 
+        var openHoursByCategory = categories.ToDictionary(
+            item => item,
+            item => adminCases
+                .Where(c =>
+                    c.Category == item
+                    && c.WorkflowStatus == PayrollFindingStatus.Open)
+                .Sum(c => c.TotalBookedHours ?? 0m));
+
         return new PayrollAdminQueueSummary(
             reviewCases.Count,
             adminCases.Count,
@@ -125,7 +133,9 @@ public static class PayrollAdminCaseBuilder
                     c.Category == item
                     && c.WorkflowStatus is PayrollFindingStatus.Reviewed
                         or PayrollFindingStatus.Resolved
-                        or PayrollFindingStatus.Dismissed)));
+                        or PayrollFindingStatus.Dismissed)),
+            openHoursByCategory.Values.Sum(),
+            openHoursByCategory);
     }
 
     public static string AdminGroupKey(PayrollReviewCase reviewCase)
@@ -205,6 +215,22 @@ public static class PayrollAdminCaseBuilder
 
         var issue = BuildIssueSummary(primary.Category, cases, bookedHours, perfCount);
         var keyFact = BuildKeyFact(primary, bookedHours, perfCount, hybrid);
+        var performances = cases.Select(ToPerformanceDetail).ToArray();
+        var timeSummary = BuildTimeIntervalSummary(performances);
+        var descriptionSummary = performances
+            .Select(item => item.PerformanceDescription)
+            .FirstOrDefault(item => !string.IsNullOrWhiteSpace(item))
+            ?? performances.Select(item => item.PerformanceMemo).FirstOrDefault(item => !string.IsNullOrWhiteSpace(item));
+        var chips = PayrollTriageEvidence.BuildChips(
+            performances.Any(item => item.DescriptionPresent),
+            performances.Any(item => item.PlanningPresent),
+            cases.Select(item => item.EvidenceSummary).FirstOrDefault(item =>
+                !string.IsNullOrWhiteSpace(item)
+                && !item.Contains(' ', StringComparison.Ordinal)
+                && item.Length < 40),
+            timeSummary,
+            bookedHours);
+
         var admin = new PayrollAdminCase(
             adminCaseKey,
             primary.Category,
@@ -240,9 +266,58 @@ public static class PayrollAdminCaseBuilder
             reviewed?.ReviewedAtUtc,
             reviewed?.ReviewedBy,
             AllowsBulkDisposition: false, // set below
-            PayrollGuidedDecisions.ChoicesFor(primary.Category));
+            PayrollGuidedDecisions.ChoicesFor(primary.Category),
+            performances,
+            timeSummary,
+            descriptionSummary,
+            chips);
 
         return admin with { AllowsBulkDisposition = AllowsBulkDisposition(admin) };
+    }
+
+    private static PayrollAdminPerformanceDetail ToPerformanceDetail(PayrollReviewCase reviewCase)
+    {
+        var chips = PayrollTriageEvidence.BuildChips(
+            reviewCase.DescriptionPresent,
+            reviewCase.PlanningPresent,
+            reviewCase.EvidenceSummary,
+            reviewCase.TimeInterval,
+            reviewCase.BookedHours);
+        return new PayrollAdminPerformanceDetail(
+            reviewCase.CaseKey,
+            reviewCase.PrimaryPerformanceId,
+            reviewCase.TimeInterval,
+            reviewCase.BookedHours,
+            reviewCase.BonNr,
+            reviewCase.ProjectId,
+            reviewCase.PerformanceDescription,
+            reviewCase.PerformanceMemo,
+            reviewCase.FindingDescription ?? reviewCase.ProblemLabel,
+            reviewCase.FriendlyState ?? reviewCase.RuleHint,
+            reviewCase.DescriptionPresent,
+            reviewCase.PlanningPresent,
+            reviewCase.FindingEvidence,
+            chips);
+    }
+
+    private static string? BuildTimeIntervalSummary(IReadOnlyList<PayrollAdminPerformanceDetail> performances)
+    {
+        var intervals = performances
+            .Select(item => item.TimeInterval)
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (intervals.Length == 0)
+        {
+            return null;
+        }
+
+        if (intervals.Length == 1)
+        {
+            return intervals[0];
+        }
+
+        return string.Join(" · ", intervals.Take(3));
     }
 
     private static string BuildIssueSummary(
@@ -376,6 +451,8 @@ public static class PayrollAdminCaseBuilder
         || item.UnderlyingCases.Any(c =>
             (c.BonNr?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
             || (c.ProjectId?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (c.PerformanceDescription?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (c.FindingDescription?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
             || c.FindingKeys.Any(key => key.Contains(term, StringComparison.OrdinalIgnoreCase)))
         || item.Date.ToString("dd/MM/yyyy", CultureInfo.GetCultureInfo("nl-BE")).Contains(term, StringComparison.OrdinalIgnoreCase)
         || item.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture).Contains(term, StringComparison.OrdinalIgnoreCase);

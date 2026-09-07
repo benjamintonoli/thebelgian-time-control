@@ -29,6 +29,8 @@ public sealed class PayrollFindingsControlTests
         var finding = Assert.Single(findings, item => item.FindingType == PayrollFindingType.Project300WithoutPlanning);
         Assert.Equal(PayrollFindingSeverity.Review, finding.Severity);
         Assert.Contains("planning evidence = none", finding.Evidence, StringComparison.Ordinal);
+        Assert.Contains("desc=", finding.Evidence, StringComparison.Ordinal);
+        Assert.Equal("P300", finding.SuggestedProjectId);
         Assert.Equal("Controleer waarom project 300 werd geboekt zonder planning/reservatie.", finding.SuggestedAction);
     }
 

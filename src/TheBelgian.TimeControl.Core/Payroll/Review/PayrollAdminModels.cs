@@ -40,7 +40,30 @@ public sealed record PayrollAdminCase(
     DateTimeOffset? ReviewedAtUtc,
     string? ReviewedBy,
     bool AllowsBulkDisposition,
-    IReadOnlyList<PayrollGuidedChoice> Choices);
+    IReadOnlyList<PayrollGuidedChoice> Choices,
+    IReadOnlyList<PayrollAdminPerformanceDetail> Performances,
+    string? TimeIntervalSummary = null,
+    string? PerformanceDescriptionSummary = null,
+    IReadOnlyList<string>? EvidenceChips = null);
+
+/// <summary>
+/// One underlying prestatie inside an AdminCase for dense triage UI.
+/// </summary>
+public sealed record PayrollAdminPerformanceDetail(
+    string CaseKey,
+    long? PerformanceId,
+    string? TimeInterval,
+    decimal? BookedHours,
+    string? BonNr,
+    string? ProjectId,
+    string? PerformanceDescription,
+    string? PerformanceMemo,
+    string? IssueText,
+    string? PlanningStatus,
+    bool DescriptionPresent,
+    bool PlanningPresent,
+    string? FindingEvidence,
+    IReadOnlyList<string> EvidenceChips);
 
 public sealed record PayrollGuidedChoice(
     string DecisionCode,
@@ -60,7 +83,9 @@ public sealed record PayrollAdminQueueSummary(
     IReadOnlyDictionary<PayrollReviewCategory, int> AdminCasesByCategory,
     IReadOnlyDictionary<PayrollReviewCategory, int> UnresolvedAdminByCategory,
     IReadOnlyDictionary<PayrollReviewCategory, int> FollowUpAdminByCategory,
-    IReadOnlyDictionary<PayrollReviewCategory, int> CompletedAdminByCategory);
+    IReadOnlyDictionary<PayrollReviewCategory, int> CompletedAdminByCategory,
+    decimal OpenBookedHours = 0m,
+    IReadOnlyDictionary<PayrollReviewCategory, decimal>? OpenBookedHoursByCategory = null);
 
 public sealed record PayrollAdminQueuePage(
     int Year,
