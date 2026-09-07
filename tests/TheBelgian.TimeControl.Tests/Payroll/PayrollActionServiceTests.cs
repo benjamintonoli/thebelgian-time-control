@@ -230,8 +230,8 @@ public sealed class PayrollActionServiceTests
     {
         await using var fx = await Fixture.CreateAsync();
         var date = new DateOnly(2026, 8, 15);
-        var start = new DateTimeOffset(2026, 8, 15, 17, 30, 0, TimeSpan.Zero);
-        var end = new DateTimeOffset(2026, 8, 15, 19, 30, 0, TimeSpan.Zero);
+        var start = new DateTimeOffset(2026, 8, 15, 18, 20, 0, TimeSpan.Zero);
+        var end = new DateTimeOffset(2026, 8, 15, 20, 0, 0, TimeSpan.Zero);
         var proposedStart = new DateTimeOffset(2026, 8, 15, 18, 17, 0, TimeSpan.Zero);
         var proposedEnd = new DateTimeOffset(2026, 8, 15, 20, 7, 0, TimeSpan.Zero);
         const long perfId = 281765;

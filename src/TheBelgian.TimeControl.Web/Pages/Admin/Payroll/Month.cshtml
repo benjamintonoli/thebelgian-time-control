@@ -1,15 +1,17 @@
 @page "/Admin/Payroll/{year:int}/{month:int}"
 @model TheBelgian.TimeControl.Web.Pages.Admin.Payroll.MonthModel
 @using TheBelgian.TimeControl.Core.Payroll.Models
+@using TheBelgian.TimeControl.Core.Payroll.Review
 @{
     ViewData["Title"] = $"Payroll shadow {Model.Month:00}/{Model.Year}";
     var detail = Model.Detail;
     var summary = detail?.Summary;
+    var queueSummary = Model.QueueSummary;
     var insight = Model.PeriodInsight;
     var blockers = Model.FinalizationBlockers;
 }
 
-<div class="d-flex justify-content-between align-items-start mb-3">
+<div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
     <div>
         <div class="text-uppercase small text-muted fw-semibold">Payroll shadow</div>
         <h1>@Model.Month.ToString("00")/@Model.Year</h1>
@@ -22,7 +24,13 @@
             </p>
         }
     </div>
-    <a class="btn btn-sm btn-outline-secondary" asp-page="./Index">← Overzicht</a>
+    <div class="d-flex flex-wrap gap-2">
+        @if (detail is not null)
+        {
+            <a class="btn btn-primary btn-lg" asp-page="./Queue" asp-route-year="@Model.Year" asp-route-month="@Model.Month">Opvolging</a>
+        }
+        <a class="btn btn-sm btn-outline-secondary align-self-center" asp-page="./Index">← Overzicht</a>
+    </div>
 </div>
 
 @if (!string.IsNullOrWhiteSpace(Model.Message)) { <div class="alert alert-success">@Model.Message</div> }
@@ -51,7 +59,61 @@ else
         </div>
     }
 
-    @if (summary is not null)
+    @if (queueSummary is not null)
+    {
+        <section class="card mb-3"><div class="card-body">
+            <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+                <h2 class="h5 mb-0">Opvolgingsoverzicht</h2>
+                <a class="btn btn-primary" asp-page="./Queue" asp-route-year="@Model.Year" asp-route-month="@Model.Month">Naar opvolging →</a>
+            </div>
+            <div class="row g-2 mb-3">
+                <div class="col-6 col-md-3"><div class="border rounded p-2 h-100">
+                    <div class="small text-muted">Open problemen</div>
+                    <div class="fs-4 fw-semibold">@queueSummary.Open</div>
+                </div></div>
+                <div class="col-6 col-md-3"><div class="border rounded p-2 h-100">
+                    <div class="small text-muted">High</div>
+                    <div class="fs-4 fw-semibold text-danger">@Model.HighOpenCases</div>
+                </div></div>
+                <div class="col-6 col-md-3"><div class="border rounded p-2 h-100">
+                    <div class="small text-muted">Opvolging</div>
+                    <div class="fs-4 fw-semibold">@queueSummary.NeedsFollowUp</div>
+                </div></div>
+                <div class="col-6 col-md-3"><div class="border rounded p-2 h-100">
+                    <div class="small text-muted">Gecontroleerd</div>
+                    <div class="fs-4 fw-semibold">@queueSummary.Reviewed</div>
+                </div></div>
+            </div>
+            <div class="row g-2 small">
+                @foreach (var category in new[]
+                {
+                    PayrollReviewCategory.Project300,
+                    PayrollReviewCategory.Project200,
+                    PayrollReviewCategory.Project100,
+                    PayrollReviewCategory.Standby,
+                    PayrollReviewCategory.Overlap,
+                    PayrollReviewCategory.MissingPerformance,
+                    PayrollReviewCategory.Other,
+                })
+                {
+                    <div class="col-6 col-md-4 col-lg">
+                        <a class="text-decoration-none" asp-page="./Queue" asp-route-year="@Model.Year" asp-route-month="@Model.Month" asp-route-Category="@category">
+                            <span class="text-muted">@PayrollReviewCategories.DisplayName(category)</span>
+                            <strong class="ms-1">@queueSummary.ByCategory.GetValueOrDefault(category)</strong>
+                        </a>
+                    </div>
+                }
+            </div>
+            <p class="mb-0 mt-3 small text-muted">
+                Included=@queueSummary.IncludedEmployees
+                · met open issues=@Model.EmployeesWithOpenIssues
+                · zonder open issues=@Model.EmployeesWithoutOpenIssues
+                · voorstellen klaar=@queueSummary.ReadyActions
+                · geblokkeerd=@queueSummary.BlockedActions
+            </p>
+        </div></section>
+    }
+    else if (summary is not null)
     {
         <section class="card mb-3"><div class="card-body">
             <h2 class="h5 mb-2">Payrollcontrole</h2>
@@ -59,8 +121,7 @@ else
             <p class="mb-1"><strong>@summary.PendingReview</strong> nog te controleren</p>
             <p class="mb-1"><strong>@summary.Accepted</strong> goedgekeurd</p>
             <p class="mb-1"><strong>@summary.NeedsFollowUp</strong> opvolging nodig</p>
-            <p class="mb-1"><strong>@detail.EmployeesWithFindings</strong> met bevindingen</p>
-            <p class="mb-0"><strong>@detail.EmployeesWithoutFindings</strong> zonder bevindingen</p>
+            <p class="mb-0"><strong>@detail.EmployeesWithFindings</strong> met bevindingen</p>
             <p class="mb-0 mt-1 text-muted small">Excluded=@summary.Excluded · NeedsDecision=@summary.NeedsDecision · Totaal kandidaten=@summary.TotalCandidates</p>
         </div></section>
     }
@@ -77,7 +138,11 @@ else
         {
             <div class="alert alert-info mb-3 py-2">
                 <strong>Review bezig</strong>
-                @if (summary is not null)
+                @if (queueSummary is not null)
+                {
+                    <span class="ms-2">@queueSummary.Open open · @queueSummary.Reviewed gecontroleerd · @queueSummary.NeedsFollowUp opvolging</span>
+                }
+                else if (summary is not null)
                 {
                     <span class="ms-2">@summary.PendingReview te controleren · @summary.Accepted goedgekeurd · @summary.NeedsFollowUp opvolging</span>
                 }
@@ -131,99 +196,110 @@ else
         }
     </div></section>
 
-    <form method="get" class="card mb-3"><div class="card-body row g-2 align-items-end">
-        <input type="hidden" name="year" value="@Model.Year" />
-        <input type="hidden" name="month" value="@Model.Month" />
-        <div class="col-auto">
-            <label class="form-label">Eligibility</label>
-            <select class="form-select form-select-sm" asp-for="Eligibility" asp-items="Html.GetEnumSelectList<PayrollEligibilityStatus>()">
-                <option value="">Actief (zonder Excluded)</option>
-            </select>
-        </div>
-        <div class="col-auto">
-            <label class="form-label">Review</label>
-            <select class="form-select form-select-sm" asp-for="Review" asp-items="Html.GetEnumSelectList<PayrollEmployeeReviewStatus>()">
-                <option value="">—</option>
-            </select>
-        </div>
-        <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="NeedsDecisionOnly" /><label class="form-check-label">NeedsDecision</label></div>
-        <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="NeedsFollowUpOnly" /><label class="form-check-label">Opvolging nodig</label></div>
-        <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="MissingAcertaIdentityOnly" /><label class="form-check-label">Missing Acerta ID</label></div>
-        <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="NegativeDifferenceOnly" /><label class="form-check-label">Neg. diff.</label></div>
-        <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="NonzeroStandbyOnly" /><label class="form-check-label">Standby ≠ 0</label></div>
-        <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="LargeAbsoluteDifferenceOnly" /><label class="form-check-label">|Diff| ≥ 8u</label></div>
-        <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="HasFindingsOnly" /><label class="form-check-label">Heeft bevindingen</label></div>
-        <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="HighFindingsOnly" /><label class="form-check-label">High</label></div>
-        <div class="col-auto">
-            <label class="form-label">Bevinding</label>
-            <select class="form-select form-select-sm" asp-for="FindingFilter">
-                <option value="">—</option>
-                <option value="Project100">Project 100</option>
-                <option value="Project200">Project 200</option>
-                <option value="Project300">Project 300</option>
-                <option value="Overlap">Overlap</option>
-                <option value="Standby">Standby</option>
-                <option value="Missing">Ontbrekende prestatie</option>
-            </select>
-        </div>
-        <div class="col-auto"><button class="btn btn-sm btn-outline-secondary" type="submit">Filter</button></div>
-    </div></form>
-    <p class="small text-muted mb-2">Standaardzicht verbergt Excluded en sorteert High-bevindingen eerst, daarna andere bevindingen, daarna schone rijen.</p>
-
-    <div class="table-responsive card"><div class="card-body p-0">
-        <table class="table table-sm align-middle mb-0">
-            <thead><tr>
-                <th>Resource</th><th>Eligibility</th><th>Suggestie</th><th>Review</th>
-                <th>Theo</th><th>Actual</th><th>Diff</th><th>Standby</th><th>City €</th><th>KM €</th><th>414 €</th><th>Acerta</th>
-                <th>Findings</th><th>Hoogste</th>
-            </tr></thead>
-            <tbody>
-            @foreach (var row in detail.Employees)
+    <details class="mb-3">
+        <summary class="h5">Medewerkers (alfabetisch)</summary>
+        <p class="small text-muted mt-2 mb-2">
+            Secundair overzicht · met open issues=@Model.EmployeesWithOpenIssues · zonder=@Model.EmployeesWithoutOpenIssues
+            @if (summary is not null)
             {
-                <tr>
-                    <td><a asp-page="./Employee" asp-route-year="@Model.Year" asp-route-month="@Model.Month" asp-route-resourceId="@row.ResourceId">@row.DisplayName</a></td>
-                    <td>@PayrollReviewLabels.Eligibility(row.EligibilityStatus)</td>
-                    <td class="small text-muted">@(row.SuggestedEligibility is null ? "—" : PayrollReviewLabels.Eligibility(row.SuggestedEligibility.Value))</td>
-                    <td>
-                        @if (row.ReviewStatus == PayrollEmployeeReviewStatus.NeedsFollowUp)
-                        {
-                            <span class="badge text-bg-warning">@PayrollReviewLabels.ReviewStatus(row.ReviewStatus)</span>
-                        }
-                        else if (row.ReviewStatus == PayrollEmployeeReviewStatus.Accepted)
-                        {
-                            <span class="badge text-bg-success">@PayrollReviewLabels.ReviewStatus(row.ReviewStatus)</span>
-                        }
-                        else if (row.ReviewStatus == PayrollEmployeeReviewStatus.Pending)
-                        {
-                            <span class="badge text-bg-secondary">@PayrollReviewLabels.ReviewStatus(row.ReviewStatus)</span>
-                        }
-                        else
-                        {
-                            @PayrollReviewLabels.ReviewStatus(row.ReviewStatus)
-                        }
-                    </td>
-                    <td>@PayrollDisplayFormatting.Hours(row.LegacyTheoreticalHours)</td>
-                    <td>@PayrollDisplayFormatting.Hours(row.LegacyActualOrdinaryHours)</td>
-                    <td>@PayrollDisplayFormatting.Hours(row.LegacyDifferenceHours)</td>
-                    <td>@PayrollDisplayFormatting.Hours(row.StandbyRoundedHours)</td>
-                    <td>@PayrollDisplayFormatting.Euro(row.CityAllowanceAmount)</td>
-                    <td>@PayrollDisplayFormatting.Euro(row.KmAmount)</td>
-                    <td>@PayrollDisplayFormatting.Euro(row.Code414Amount)</td>
-                    <td>@row.AcertaIdentityStatus</td>
-                    <td>@(row.FindingsCount == 0 ? "—" : row.FindingsCount.ToString())</td>
-                    <td>
-                        @if (row.HighestFindingSeverity is null)
-                        {
-                            <text>—</text>
-                        }
-                        else
-                        {
-                            <span class="badge @PayrollReviewLabels.SeverityBadgeClass(row.HighestFindingSeverity.Value)">@PayrollReviewLabels.FindingSeverity(row.HighestFindingSeverity.Value)</span>
-                        }
-                    </td>
-                </tr>
+                <text>· Included=@summary.Included · nog te controleren (employee-review)=@summary.PendingReview · goedgekeurd=@summary.Accepted · opvolging nodig=@summary.NeedsFollowUp</text>
             }
-            </tbody>
-        </table>
-    </div></div>
+        </p>
+
+        <form method="get" class="card mb-3"><div class="card-body row g-2 align-items-end">
+            <input type="hidden" name="year" value="@Model.Year" />
+            <input type="hidden" name="month" value="@Model.Month" />
+            <div class="col-auto">
+                <label class="form-label">Eligibility</label>
+                <select class="form-select form-select-sm" asp-for="Eligibility" asp-items="Html.GetEnumSelectList<PayrollEligibilityStatus>()">
+                    <option value="">Actief (zonder Excluded)</option>
+                </select>
+            </div>
+            <div class="col-auto">
+                <label class="form-label">Review</label>
+                <select class="form-select form-select-sm" asp-for="Review" asp-items="Html.GetEnumSelectList<PayrollEmployeeReviewStatus>()">
+                    <option value="">—</option>
+                </select>
+            </div>
+            <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="NeedsDecisionOnly" /><label class="form-check-label">NeedsDecision</label></div>
+            <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="NeedsFollowUpOnly" /><label class="form-check-label">Opvolging nodig</label></div>
+            <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="MissingAcertaIdentityOnly" /><label class="form-check-label">Missing Acerta ID</label></div>
+            <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="NegativeDifferenceOnly" /><label class="form-check-label">Neg. diff.</label></div>
+            <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="NonzeroStandbyOnly" /><label class="form-check-label">Standby ≠ 0</label></div>
+            <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="LargeAbsoluteDifferenceOnly" /><label class="form-check-label">|Diff| ≥ 8u</label></div>
+            <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="HasFindingsOnly" /><label class="form-check-label">Heeft bevindingen</label></div>
+            <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="HighFindingsOnly" /><label class="form-check-label">High</label></div>
+            <div class="col-auto">
+                <label class="form-label">Bevinding</label>
+                <select class="form-select form-select-sm" asp-for="FindingFilter">
+                    <option value="">—</option>
+                    <option value="Project100">Project 100</option>
+                    <option value="Project200">Project 200</option>
+                    <option value="Project300">Project 300</option>
+                    <option value="Overlap">Overlap</option>
+                    <option value="Standby">Standby</option>
+                    <option value="Missing">Ontbrekende prestatie</option>
+                </select>
+            </div>
+            <div class="col-auto"><button class="btn btn-sm btn-outline-secondary" type="submit">Filter</button></div>
+        </div></form>
+        <p class="small text-muted mb-2">Standaardzicht verbergt Excluded en sorteert High-bevindingen eerst, daarna andere bevindingen, daarna schone rijen. Gebruik <a asp-page="./Queue" asp-route-year="@Model.Year" asp-route-month="@Model.Month">Opvolging</a> voor case-first review.</p>
+
+        <div class="table-responsive card"><div class="card-body p-0">
+            <table class="table table-sm align-middle mb-0">
+                <thead><tr>
+                    <th>Resource</th><th>Eligibility</th><th>Suggestie</th><th>Review</th>
+                    <th>Theo</th><th>Actual</th><th>Diff</th><th>Standby</th><th>City €</th><th>KM €</th><th>414 €</th><th>Acerta</th>
+                    <th>Findings</th><th>Hoogste</th>
+                </tr></thead>
+                <tbody>
+                @foreach (var row in detail.Employees)
+                {
+                    <tr>
+                        <td><a asp-page="./Employee" asp-route-year="@Model.Year" asp-route-month="@Model.Month" asp-route-resourceId="@row.ResourceId">@row.DisplayName</a></td>
+                        <td>@PayrollReviewLabels.Eligibility(row.EligibilityStatus)</td>
+                        <td class="small text-muted">@(row.SuggestedEligibility is null ? "—" : PayrollReviewLabels.Eligibility(row.SuggestedEligibility.Value))</td>
+                        <td>
+                            @if (row.ReviewStatus == PayrollEmployeeReviewStatus.NeedsFollowUp)
+                            {
+                                <span class="badge text-bg-warning">@PayrollReviewLabels.ReviewStatus(row.ReviewStatus)</span>
+                            }
+                            else if (row.ReviewStatus == PayrollEmployeeReviewStatus.Accepted)
+                            {
+                                <span class="badge text-bg-success">@PayrollReviewLabels.ReviewStatus(row.ReviewStatus)</span>
+                            }
+                            else if (row.ReviewStatus == PayrollEmployeeReviewStatus.Pending)
+                            {
+                                <span class="badge text-bg-secondary">@PayrollReviewLabels.ReviewStatus(row.ReviewStatus)</span>
+                            }
+                            else
+                            {
+                                @PayrollReviewLabels.ReviewStatus(row.ReviewStatus)
+                            }
+                        </td>
+                        <td>@PayrollDisplayFormatting.Hours(row.LegacyTheoreticalHours)</td>
+                        <td>@PayrollDisplayFormatting.Hours(row.LegacyActualOrdinaryHours)</td>
+                        <td>@PayrollDisplayFormatting.Hours(row.LegacyDifferenceHours)</td>
+                        <td>@PayrollDisplayFormatting.Hours(row.StandbyRoundedHours)</td>
+                        <td>@PayrollDisplayFormatting.Euro(row.CityAllowanceAmount)</td>
+                        <td>@PayrollDisplayFormatting.Euro(row.KmAmount)</td>
+                        <td>@PayrollDisplayFormatting.Euro(row.Code414Amount)</td>
+                        <td>@row.AcertaIdentityStatus</td>
+                        <td>@(row.FindingsCount == 0 ? "—" : row.FindingsCount.ToString())</td>
+                        <td>
+                            @if (row.HighestFindingSeverity is null)
+                            {
+                                <text>—</text>
+                            }
+                            else
+                            {
+                                <span class="badge @PayrollReviewLabels.SeverityBadgeClass(row.HighestFindingSeverity.Value)">@PayrollReviewLabels.FindingSeverity(row.HighestFindingSeverity.Value)</span>
+                            }
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div></div>
+    </details>
 }

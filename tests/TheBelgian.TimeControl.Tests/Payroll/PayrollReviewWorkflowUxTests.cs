@@ -5,7 +5,9 @@ using Microsoft.Extensions.Options;
 using TheBelgian.TimeControl.Core.Configuration;
 using TheBelgian.TimeControl.Core.Interfaces;
 using TheBelgian.TimeControl.Core.Models;
+using TheBelgian.TimeControl.Core.Payroll.Findings;
 using TheBelgian.TimeControl.Core.Payroll.Models;
+using TheBelgian.TimeControl.Core.Payroll.Review;
 using TheBelgian.TimeControl.Infrastructure.Configuration;
 using TheBelgian.TimeControl.Web.Pages.Admin.Payroll;
 
@@ -51,12 +53,14 @@ public sealed class PayrollReviewWorkflowUxTests
         Assert.Contains("Payrolllijst toepassen op deze maand", markup);
         Assert.Contains("Review starten", markup);
         Assert.Contains("Review bezig", markup);
-        Assert.Contains("nog te controleren", markup);
+        Assert.Contains("Opvolging", markup);
         Assert.Contains("PayrollReviewLabels.ReviewStatus", markup);
         Assert.Contains("goedgekeurd", markup);
         Assert.Contains("opvolging nodig", markup);
         Assert.Contains("|Diff| ≥ 8u", markup);
         Assert.Contains("disabled", markup);
+        Assert.Contains("Medewerkers (alfabetisch)", markup);
+        Assert.Contains("./Queue", markup);
     }
 
     [Fact]
@@ -102,6 +106,7 @@ public sealed class PayrollReviewWorkflowUxTests
     private static MonthModel CreateMonthPage(RecordingService service) =>
         new(
             service,
+            new StubReviewQueueService(),
             new FakeUserContext(),
             Options.Create(new PayrollShadowOptions { Enabled = true, AdminUiEnabled = true }),
             Options.Create(new AdminReviewWorkflowOptions { DefaultReviewer = "Ada Admin" }),
@@ -154,6 +159,38 @@ public sealed class PayrollReviewWorkflowUxTests
 
         public AuthenticatedActor RequireActor(string developmentFallbackReviewer) =>
             new(developmentFallbackReviewer, "sub", developmentFallbackReviewer);
+    }
+
+    private sealed class StubReviewQueueService : IPayrollReviewQueueService
+    {
+        public Task<PayrollReviewQueuePage> GetQueueAsync(
+            int year,
+            int month,
+            PayrollReviewQueueFilter filter,
+            CancellationToken cancellationToken)
+        {
+            var emptyCategories = Enum.GetValues<PayrollReviewCategory>()
+                .Where(item => item != PayrollReviewCategory.All)
+                .ToDictionary(item => item, _ => 0);
+            return Task.FromResult(new PayrollReviewQueuePage(
+                year,
+                month,
+                new PayrollReviewQueueSummary(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, emptyCategories),
+                [],
+                [],
+                [],
+                []));
+        }
+
+        public Task SetCaseStatusAsync(
+            int year,
+            int month,
+            string caseKey,
+            PayrollFindingStatus status,
+            string? comment,
+            string actor,
+            CancellationToken cancellationToken) =>
+            Task.CompletedTask;
     }
 
     private sealed class RecordingService : IPayrollShadowService

@@ -5,6 +5,8 @@ using TheBelgian.TimeControl.Core.Configuration;
 using TheBelgian.TimeControl.Core.Interfaces;
 using TheBelgian.TimeControl.Core.Models;
 using TheBelgian.TimeControl.Core.Payroll.Actions;
+using TheBelgian.TimeControl.Core.Payroll.Findings;
+using TheBelgian.TimeControl.Core.Payroll.Review;
 using TheBelgian.TimeControl.Infrastructure.Configuration;
 using TheBelgian.TimeControl.Web.Pages.Admin.Payroll;
 
@@ -31,6 +33,7 @@ public sealed class PayrollShadowAdminUiGateTests
 
         var month = new MonthModel(
             service,
+            new FakeReviewQueueService(),
             user,
             options,
             review,
@@ -55,6 +58,38 @@ public sealed class PayrollShadowAdminUiGateTests
             ResourceId = "1",
         };
         Assert.IsType<NotFoundResult>(await employee.OnGetAsync(default));
+    }
+
+    private sealed class FakeReviewQueueService : IPayrollReviewQueueService
+    {
+        public Task<PayrollReviewQueuePage> GetQueueAsync(
+            int year,
+            int month,
+            PayrollReviewQueueFilter filter,
+            CancellationToken cancellationToken)
+        {
+            var emptyCategories = Enum.GetValues<PayrollReviewCategory>()
+                .Where(item => item != PayrollReviewCategory.All)
+                .ToDictionary(item => item, _ => 0);
+            return Task.FromResult(new PayrollReviewQueuePage(
+                year,
+                month,
+                new PayrollReviewQueueSummary(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, emptyCategories),
+                [],
+                [],
+                [],
+                []));
+        }
+
+        public Task SetCaseStatusAsync(
+            int year,
+            int month,
+            string caseKey,
+            PayrollFindingStatus status,
+            string? comment,
+            string actor,
+            CancellationToken cancellationToken) =>
+            Task.CompletedTask;
     }
 
     private sealed class FakePayrollActionService : IPayrollActionService

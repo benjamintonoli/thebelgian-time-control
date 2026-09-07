@@ -433,6 +433,10 @@ public sealed class PayrollRosterAndBoundedSnapshotTests
             detail!.Employees.Single(item => item.ResourceId == "10").EligibilityStatus);
         Assert.DoesNotContain(detail.Employees, item => item.ResourceId == "476");
 
+        var insightAfterBridge = await fixture.Service.GetPeriodEligibilityInsightAsync(2026, 8, default);
+        Assert.True(insightAfterBridge.HasRosterDecisionsAfterPeriod);
+        Assert.Null(insightAfterBridge.WarningMessage);
+
         var defaults = await fixture.Service.GetMonthDetailAsync(2026, 8, new PayrollShadowEmployeeFilter(), default);
         Assert.DoesNotContain(defaults!.Employees, item => item.ResourceId == "476");
         Assert.DoesNotContain(

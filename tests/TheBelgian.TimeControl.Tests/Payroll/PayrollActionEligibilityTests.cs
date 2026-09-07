@@ -9,7 +9,7 @@ namespace TheBelgian.TimeControl.Tests.Payroll;
 public sealed class PayrollActionEligibilityTests
 {
     private static readonly DateOnly Day = new(2026, 8, 5);
-    private static readonly DateTimeOffset CurrentStart = new(2026, 8, 5, 15, 25, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset CurrentStart = new(2026, 8, 5, 16, 18, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset CurrentEnd = new(2026, 8, 5, 18, 33, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset ProposedStart = new(2026, 8, 5, 16, 18, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset ProposedEnd = new(2026, 8, 5, 18, 33, 0, TimeSpan.Zero);
@@ -153,6 +153,43 @@ public sealed class PayrollActionEligibilityTests
         Assert.Equal(PayrollStandbyActivityTypes.WaitingTime, result.AdjustProposal!.ExpectedActivityType);
         Assert.Equal(23, result.AdjustProposal.ExpectedMainTaskExternalId);
         Assert.Contains("callout=complete", result.EvidenceSnapshot.CalloutEvidence, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Adjust_PossiblePhoneThenPhysical_BlocksSimpleCorrection()
+    {
+        var bookedStart = new DateTimeOffset(2026, 8, 5, 15, 25, 0, TimeSpan.Zero);
+        var finding = StandbyStart(55, ProposedStart, ProposedEnd);
+        var context = WaitingContext(CompleteCalloutTrips()) with
+        {
+            ExistingPerformanceStart = bookedStart,
+            ExistingPerformanceEnd = ProposedEnd,
+        };
+        var result = PayrollActionEligibility.Evaluate(finding, context);
+        Assert.Equal(PayrollProposedActionStatus.Blocked, result.Status);
+        Assert.Equal(PayrollActionBlockReasonCode.PossiblePhoneThenPhysical, result.BlockReasonCode);
+        Assert.Contains("telefonische", result.BlockReason!, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("hybrid=PossiblePhoneThenPhysical", result.EvidenceSnapshot.CalloutEvidence, StringComparison.Ordinal);
+        Assert.Null(result.AdjustProposal);
+    }
+
+    [Fact]
+    public void Hybrid_Assessment_ExposesPhoneAllowanceAndPhysicalInterval()
+    {
+        var bookedStart = new DateTimeOffset(2026, 8, 5, 15, 25, 0, TimeSpan.Zero);
+        var assessment = StandbyCalloutEvidence.Assess(
+            ProposedStart,
+            ProposedEnd,
+            bookedStart,
+            ProposedEnd,
+            CompleteCalloutTrips());
+        Assert.True(assessment.IsPossiblePhoneThenPhysical);
+        Assert.False(assessment.IsComplete);
+        Assert.Equal(15m, assessment.MaxTelephoneAllowanceMinutes);
+        Assert.Equal(ProposedStart, assessment.OutboundStart);
+        Assert.Equal(ProposedEnd, assessment.ReturnEnd);
+        Assert.DoesNotContain("definitely", assessment.EvidenceNote, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("indien telefonisch contact bevestigd", assessment.EvidenceNote, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

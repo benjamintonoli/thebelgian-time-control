@@ -4,13 +4,16 @@ using Microsoft.Extensions.Options;
 using TheBelgian.TimeControl.Core.Configuration;
 using TheBelgian.TimeControl.Core.Interfaces;
 using TheBelgian.TimeControl.Core.Models;
+using TheBelgian.TimeControl.Core.Payroll.Findings;
 using TheBelgian.TimeControl.Core.Payroll.Models;
+using TheBelgian.TimeControl.Core.Payroll.Review;
 using TheBelgian.TimeControl.Infrastructure.Configuration;
 
 namespace TheBelgian.TimeControl.Web.Pages.Admin.Payroll;
 
 public sealed class MonthModel(
     IPayrollShadowService payrollShadowService,
+    IPayrollReviewQueueService reviewQueueService,
     ICurrentUserContext currentUser,
     IOptions<PayrollShadowOptions> payrollOptions,
     IOptions<AdminReviewWorkflowOptions> reviewOptions,
@@ -31,6 +34,10 @@ public sealed class MonthModel(
     [BindProperty(SupportsGet = true)] public string? FindingFilter { get; set; }
 
     public PayrollShadowMonthDetail? Detail { get; private set; }
+    public PayrollReviewQueueSummary? QueueSummary { get; private set; }
+    public int HighOpenCases { get; private set; }
+    public int EmployeesWithOpenIssues { get; private set; }
+    public int EmployeesWithoutOpenIssues { get; private set; }
     public PayrollMonthPeriodEligibilityInsight? PeriodInsight { get; private set; }
     public PayrollMonthFinalizationBlockers? FinalizationBlockers { get; private set; }
     public string? Message { get; private set; }
@@ -182,11 +189,38 @@ public sealed class MonthModel(
         {
             PeriodInsight = null;
             FinalizationBlockers = null;
+            QueueSummary = null;
+            HighOpenCases = 0;
+            EmployeesWithOpenIssues = 0;
+            EmployeesWithoutOpenIssues = 0;
             return;
         }
 
         PeriodInsight = await payrollShadowService.GetPeriodEligibilityInsightAsync(Year, Month, cancellationToken);
         FinalizationBlockers = await payrollShadowService.GetFinalizationBlockersAsync(Year, Month, cancellationToken);
+
+        try
+        {
+            var queue = await reviewQueueService.GetQueueAsync(
+                Year,
+                Month,
+                new PayrollReviewQueueFilter(),
+                cancellationToken);
+            QueueSummary = queue.Summary;
+            HighOpenCases = queue.Cases.Count(item =>
+                item.Severity == PayrollFindingSeverity.High
+                && item.WorkflowStatus is PayrollFindingStatus.Open or PayrollFindingStatus.NeedsFollowUp);
+            EmployeesWithOpenIssues = queue.EmployeesWithOpenIssues.Count;
+            EmployeesWithoutOpenIssues = queue.EmployeesWithoutOpenIssues.Count;
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Payroll review queue summary failed for {Year}-{Month:00}.", Year, Month);
+            QueueSummary = null;
+            HighOpenCases = 0;
+            EmployeesWithOpenIssues = 0;
+            EmployeesWithoutOpenIssues = 0;
+        }
     }
 
     private bool EnsureUiEnabled() =>

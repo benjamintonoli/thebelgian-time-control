@@ -28,4 +28,7 @@ public sealed class PayrollFindingRecord
     public string? SuggestedProjectId { get; set; }
     public string? SuggestedBonNr { get; set; }
     public string? GpsClassification { get; set; }
+    public DateTimeOffset? ReviewedAtUtc { get; set; }
+    public string? ReviewedBy { get; set; }
+    public string? ReviewComment { get; set; }
 }

@@ -320,7 +320,16 @@ internal sealed class PayrollShadowService(
             : laterDecisions.Min(item => item.ValidFrom);
 
         string? warning = null;
-        if (earliestLater is not null)
+        var periodEffectiveDecisions = configurations
+            .Where(item =>
+                item.EligibilityStatus is PayrollEligibilityStatus.Included or PayrollEligibilityStatus.Excluded
+                && item.ValidFrom <= shadowMonth.PeriodEnd
+                && (item.ValidTo is null || item.ValidTo >= shadowMonth.PeriodStart))
+            .ToList();
+
+        // Warn only when later roster exists AND this payroll period has no effective coverage.
+        // After RosterAppliedToMonth (period ValidFrom bridge), do not show the misleading warning.
+        if (earliestLater is not null && periodEffectiveDecisions.Count == 0)
         {
             warning =
                 $"De payrollselectie is geldig vanaf {earliestLater.Value:dd/MM/yyyy} en is niet van toepassing op {shadowMonth.Month:00}/{shadowMonth.Year}.";

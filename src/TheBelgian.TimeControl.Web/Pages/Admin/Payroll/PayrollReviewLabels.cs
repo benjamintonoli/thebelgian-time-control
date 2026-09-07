@@ -1,5 +1,6 @@
 using TheBelgian.TimeControl.Core.Payroll.Findings;
 using TheBelgian.TimeControl.Core.Payroll.Models;
+using TheBelgian.TimeControl.Core.Payroll.Review;
 
 namespace TheBelgian.TimeControl.Web.Pages.Admin.Payroll;
 
@@ -43,6 +44,12 @@ public static class PayrollReviewLabels
             _ => severity.ToString(),
         };
 
+    public static string FindingStatus(PayrollFindingStatus status) =>
+        PayrollReviewCategories.WorkflowStatusLabel(status);
+
+    public static string Category(PayrollReviewCategory category) =>
+        PayrollReviewCategories.DisplayName(category);
+
     public static string FindingType(PayrollFindingType type) =>
         type switch
         {
@@ -82,6 +89,17 @@ public static class PayrollReviewLabels
         {
             PayrollFindingSeverity.High => "text-bg-danger",
             PayrollFindingSeverity.Review => "text-bg-warning",
+            _ => "text-bg-secondary",
+        };
+
+    public static string FindingStatusBadgeClass(PayrollFindingStatus status) =>
+        status switch
+        {
+            PayrollFindingStatus.Open => "text-bg-secondary",
+            PayrollFindingStatus.NeedsFollowUp => "text-bg-warning",
+            PayrollFindingStatus.Reviewed => "text-bg-success",
+            PayrollFindingStatus.Resolved => "text-bg-success",
+            PayrollFindingStatus.Dismissed => "text-bg-light text-dark",
             _ => "text-bg-secondary",
         };
 }

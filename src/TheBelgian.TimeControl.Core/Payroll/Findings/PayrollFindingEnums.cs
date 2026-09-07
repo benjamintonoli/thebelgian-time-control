@@ -29,9 +29,14 @@ public enum PayrollFindingSeverity
 public enum PayrollFindingStatus
 {
     Open = 0,
+    /// <summary>Gecontroleerd — geen correctie nodig.</summary>
     Reviewed = 1,
+    /// <summary>Niet van toepassing.</summary>
     Dismissed = 2,
+    /// <summary>Opgelost.</summary>
     Resolved = 3,
+    /// <summary>Opvolging nodig.</summary>
+    NeedsFollowUp = 4,
 }
 
 public enum PayrollPlanningClassification
@@ -48,6 +53,10 @@ public enum StandbyGpsClassification
     PhysicalIntervention = 1,
     Ambiguous = 2,
     NoGpsData = 3,
+    /// <summary>
+    /// Booked start precedes proven physical departure; telephone contact before travel is possible.
+    /// </summary>
+    PossiblePhoneThenPhysical = 4,
 }
 
 public enum MissingTechnicianEvidenceClass

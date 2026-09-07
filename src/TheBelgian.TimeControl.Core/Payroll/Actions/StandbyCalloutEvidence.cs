@@ -12,6 +12,14 @@ public static class StandbyCalloutEvidence
 {
     public static readonly TimeSpan BoundaryTolerance = TimeSpan.FromMinutes(5);
 
+    /// <summary>
+    /// Booked start before physical departure by more than this → possible phone-then-physical.
+    /// </summary>
+    public static readonly TimeSpan HybridLeadThreshold = TimeSpan.FromMinutes(10);
+
+    /// <summary>Maximum payable telephone standby allowance (standalone phone-only rule).</summary>
+    public static readonly TimeSpan MaxTelephoneAllowance = TimeSpan.FromMinutes(15);
+
     public static StandbyCalloutAssessment Assess(
         DateTimeOffset proposedStart,
         DateTimeOffset proposedEnd,
@@ -115,6 +123,31 @@ public static class StandbyCalloutEvidence
             $"homeLocality={ExtractLocality(first.StartAddress) ?? "—"}; " +
             $"siteLocality={ExtractLocality(first.EndAddress) ?? "—"}";
 
+        // Hybrid safety: booked start before proven physical departure may include telephone standby.
+        // Do not auto-cut VAN to GPS departure — that can remove valid phone time and cannot
+        // represent non-contiguous phone+physical in a single VAN/TOT without paying the gap.
+        if (IsPossiblePhoneThenPhysical(currentStart, first.Start, dayTrips))
+        {
+            var phoneLead = first.Start - currentStart;
+            var hybridNote =
+                $"{evidence} | hybrid=PossiblePhoneThenPhysical; " +
+                $"bookedStart={currentStart:HH:mm}; physicalDeparture={first.Start:HH:mm}; " +
+                $"phoneLead={phoneLead.TotalMinutes:0}min; maxPhoneAllowance={MaxTelephoneAllowance.TotalMinutes:0}min; " +
+                "scenario=indien telefonisch contact bevestigd wordt: max 0:15 + fysieke callout (niet-aaneengesloten; split vereist)";
+            return new StandbyCalloutAssessment(
+                IsComplete: false,
+                PayrollActionBlockReasonCode.PossiblePhoneThenPhysical,
+                "Mogelijke telefonische wachtdienst vóór fysiek vertrek. Eerst bevestigen hoe de interventie opgebouwd is. "
+                + "Eenvoudige VAN/TOT-correctie naar alleen GPS-vertrek is geblokkeerd (REQUIRES_SPLIT_OR_PROVEN_BOOKING_METHOD).",
+                hybridNote,
+                first.Start,
+                last.End,
+                IsPossiblePhoneThenPhysical: true,
+                MaxTelephoneAllowanceMinutes: (decimal)MaxTelephoneAllowance.TotalMinutes,
+                BookedStart: currentStart,
+                BookedEnd: currentEnd);
+        }
+
         return new StandbyCalloutAssessment(
             IsComplete: true,
             PayrollActionBlockReasonCode.None,
@@ -122,6 +155,34 @@ public static class StandbyCalloutEvidence
             evidence,
             first.Start,
             last.End);
+    }
+
+    /// <summary>
+    /// Deterministic hybrid candidate: booked start materially precedes physical departure and
+    /// pre-departure window has no meaningful GPS movement proving on-site/travel work.
+    /// Does not claim a phone call definitely occurred.
+    /// </summary>
+    public static bool IsPossiblePhoneThenPhysical(
+        DateTimeOffset bookedStart,
+        DateTimeOffset physicalDeparture,
+        IReadOnlyList<StandbyGpsTripEvidence> dayTrips)
+    {
+        if (physicalDeparture - bookedStart <= HybridLeadThreshold)
+        {
+            return false;
+        }
+
+        var preTrips = dayTrips
+            .Where(trip => trip.Start < physicalDeparture && trip.End > bookedStart)
+            .Where(trip =>
+                trip.DistanceKilometres >= StandbyControl.MeaningfulMovementKm
+                || trip.DrivingMinutes >= StandbyControl.MeaningfulDrivingMinutes)
+            .Where(trip => trip.End <= physicalDeparture + BoundaryTolerance)
+            .ToList();
+
+        // Any meaningful movement before the outbound departure disproves a quiet phone-only lead.
+        return preTrips.Count == 0
+            || preTrips.All(trip => Near(trip.Start, physicalDeparture) || trip.Start >= physicalDeparture - BoundaryTolerance);
     }
 
     public static List<StandbyGpsTripEvidence> SelectWindowTrips(
@@ -218,7 +279,11 @@ public sealed record StandbyCalloutAssessment(
     string? BlockReason,
     string EvidenceNote,
     DateTimeOffset? OutboundStart = null,
-    DateTimeOffset? ReturnEnd = null)
+    DateTimeOffset? ReturnEnd = null,
+    bool IsPossiblePhoneThenPhysical = false,
+    decimal? MaxTelephoneAllowanceMinutes = null,
+    DateTimeOffset? BookedStart = null,
+    DateTimeOffset? BookedEnd = null)
 {
     public static StandbyCalloutAssessment Blocked(
         PayrollActionBlockReasonCode code,

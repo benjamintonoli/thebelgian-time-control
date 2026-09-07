@@ -60,4 +60,6 @@ public enum PayrollActionBlockReasonCode
     WrongActivityType = 22,
     NonPositiveDuration = 23,
     ConflictingDossierAmbiguity = 24,
+    PossiblePhoneThenPhysical = 25,
+    RequiresSplitOrProvenBookingMethod = 26,
 }

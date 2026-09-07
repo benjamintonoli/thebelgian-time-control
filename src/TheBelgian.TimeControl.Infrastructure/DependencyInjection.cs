@@ -15,6 +15,7 @@ using TheBelgian.TimeControl.Infrastructure.Pilot;
 using TheBelgian.TimeControl.Infrastructure.Plenion;
 using TheBelgian.TimeControl.Infrastructure.Powerfleet;
 using TheBelgian.TimeControl.Infrastructure.Payroll.Actions;
+using TheBelgian.TimeControl.Infrastructure.Payroll.Review;
 using TheBelgian.TimeControl.Infrastructure.Payroll.Shadow;
 using TheBelgian.TimeControl.Infrastructure.Payroll.Sources;
 using TheBelgian.TimeControl.Infrastructure.Synchronization;
@@ -285,6 +286,7 @@ public static class DependencyInjection
             provider.GetRequiredService<PayrollStandbyGpsSource>());
         services.AddScoped<IPayrollShadowService, PayrollShadowService>();
         services.AddScoped<IPayrollActionService, PayrollActionService>();
+        services.AddScoped<IPayrollReviewQueueService, PayrollReviewQueueService>();
         return services;
     }
 
@@ -658,6 +660,9 @@ public static class DependencyInjection
                      ("SuggestedProjectId", "TEXT NULL"),
                      ("SuggestedBonNr", "TEXT NULL"),
                      ("GpsClassification", "TEXT NULL"),
+                     ("ReviewedAtUtc", "TEXT NULL"),
+                     ("ReviewedBy", "TEXT NULL"),
+                     ("ReviewComment", "TEXT NULL"),
                  })
         {
             await EnsureColumnAsync(
