@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using TheBelgian.TimeControl.Core.Configuration;
 using TheBelgian.TimeControl.Core.Interfaces;
 using TheBelgian.TimeControl.Core.Models;
+using TheBelgian.TimeControl.Core.Payroll.Actions;
 using TheBelgian.TimeControl.Infrastructure.Configuration;
 using TheBelgian.TimeControl.Web.Pages.Admin.Payroll;
 
@@ -42,8 +43,10 @@ public sealed class PayrollShadowAdminUiGateTests
 
         var employee = new EmployeeModel(
             service,
+            new FakePayrollActionService(),
             user,
             options,
+            Options.Create(new PayrollActionsOptions()),
             review,
             loggerFactory.CreateLogger<EmployeeModel>())
         {
@@ -52,6 +55,32 @@ public sealed class PayrollShadowAdminUiGateTests
             ResourceId = "1",
         };
         Assert.IsType<NotFoundResult>(await employee.OnGetAsync(default));
+    }
+
+    private sealed class FakePayrollActionService : IPayrollActionService
+    {
+        public Task CancelAsync(Guid actionId, string actor, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<PayrollActionExecutionResult> ExecuteAsync(
+            Guid actionId, string comment, string actor, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<PayrollProposedActionRecord?> GetActionAsync(
+            Guid actionId, CancellationToken cancellationToken) =>
+            Task.FromResult<PayrollProposedActionRecord?>(null);
+
+        public Task<IReadOnlyList<PayrollProposedActionRecord>> ListActionsAsync(
+            int year, int month, string? resourceId, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<PayrollProposedActionRecord>>([]);
+
+        public Task<PayrollActionConfirmationView?> PrepareConfirmationAsync(
+            Guid actionId, CancellationToken cancellationToken) =>
+            Task.FromResult<PayrollActionConfirmationView?>(null);
+
+        public Task<IReadOnlyList<PayrollProposedActionRecord>> ProposeFromFindingsAsync(
+            int year, int month, string? resourceId, string actor, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<PayrollProposedActionRecord>>([]);
     }
 
     private sealed class FakeUserContext : ICurrentUserContext

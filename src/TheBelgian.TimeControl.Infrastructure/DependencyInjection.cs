@@ -14,6 +14,7 @@ using TheBelgian.TimeControl.Infrastructure.Persistence;
 using TheBelgian.TimeControl.Infrastructure.Pilot;
 using TheBelgian.TimeControl.Infrastructure.Plenion;
 using TheBelgian.TimeControl.Infrastructure.Powerfleet;
+using TheBelgian.TimeControl.Infrastructure.Payroll.Actions;
 using TheBelgian.TimeControl.Infrastructure.Payroll.Shadow;
 using TheBelgian.TimeControl.Infrastructure.Payroll.Sources;
 using TheBelgian.TimeControl.Infrastructure.Synchronization;
@@ -71,6 +72,21 @@ public static class DependencyInjection
                     return false;
                 }
             }, "PayrollShadow-configuratie is ongeldig.")
+            .ValidateOnStart();
+        services.AddOptions<PayrollActionsOptions>()
+            .Bind(configuration.GetSection(PayrollActionsOptions.SectionName))
+            .Validate(options =>
+            {
+                try
+                {
+                    options.Validate();
+                    return true;
+                }
+                catch (InvalidOperationException)
+                {
+                    return false;
+                }
+            }, "PayrollActions-configuratie is ongeldig.")
             .ValidateOnStart();
         services.AddOptions<CloudflareAccessOptions>()
             .Bind(configuration.GetSection(CloudflareAccessOptions.SectionName))
@@ -240,6 +256,18 @@ public static class DependencyInjection
             provider.GetRequiredService<IOptions<TimeControlCorrectionWriteOptions>>().Value.UseMock
                 ? provider.GetRequiredService<MockPlenionCorrectionClient>()
                 : provider.GetRequiredService<HttpPlenionCorrectionClient>());
+        services.AddHttpClient<HttpPlenionPerformanceCreateClient>((provider, client) =>
+        {
+            var options = provider.GetRequiredService<IOptions<TimeControlCorrectionWriteOptions>>().Value;
+            if (Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out var baseAddress))
+                client.BaseAddress = baseAddress;
+            client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
+        });
+        services.AddScoped<MockPlenionPerformanceCreateClient>();
+        services.AddScoped<IPlenionPerformanceCreateClient>(provider =>
+            provider.GetRequiredService<IOptions<TimeControlCorrectionWriteOptions>>().Value.UseMock
+                ? provider.GetRequiredService<MockPlenionPerformanceCreateClient>()
+                : provider.GetRequiredService<HttpPlenionPerformanceCreateClient>());
         services.AddScoped<IMonthlyReviewService, MonthlyReviewService>();
         services.AddScoped<PayrollShadowCalculationService>();
         services.AddScoped<IPayrollResourceReader, PlenionPayrollResourceReader>();
@@ -256,6 +284,7 @@ public static class DependencyInjection
         services.AddScoped<IPayrollStandbyGpsSource>(provider =>
             provider.GetRequiredService<PayrollStandbyGpsSource>());
         services.AddScoped<IPayrollShadowService, PayrollShadowService>();
+        services.AddScoped<IPayrollActionService, PayrollActionService>();
         return services;
     }
 
@@ -588,6 +617,37 @@ public static class DependencyInjection
                 ON "PayrollFindingRecords" ("ShadowMonthId", "FindingKey");
             CREATE INDEX IF NOT EXISTS "IX_PayrollFindingRecords_Month_Resource"
                 ON "PayrollFindingRecords" ("ShadowMonthId", "ResourceId");
+            CREATE TABLE IF NOT EXISTS "PayrollProposedActionRecords" (
+                "Id" INTEGER NOT NULL CONSTRAINT "PK_PayrollProposedActionRecords" PRIMARY KEY AUTOINCREMENT,
+                "ActionId" TEXT NOT NULL,
+                "ShadowMonthId" INTEGER NOT NULL,
+                "FindingKey" TEXT NOT NULL,
+                "FindingId" INTEGER NULL,
+                "ResourceId" TEXT NOT NULL,
+                "ActionType" INTEGER NOT NULL,
+                "Status" INTEGER NOT NULL,
+                "BlockReason" TEXT NULL,
+                "EvidenceSnapshotJson" TEXT NOT NULL,
+                "ProposalSnapshotJson" TEXT NOT NULL,
+                "SourceRevision" TEXT NOT NULL,
+                "PwsReference" TEXT NULL,
+                "ResultPerformanceId" INTEGER NULL,
+                "Comment" TEXT NULL,
+                "CreatedAtUtc" TEXT NOT NULL,
+                "CreatedBy" TEXT NOT NULL,
+                "ApprovedAtUtc" TEXT NULL,
+                "ApprovedBy" TEXT NULL,
+                "ExecutedAtUtc" TEXT NULL,
+                "ExecutedBy" TEXT NULL,
+                "ExecutionResult" TEXT NULL,
+                "UpdatedAtUtc" TEXT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_PayrollProposedActionRecords_ActionId"
+                ON "PayrollProposedActionRecords" ("ActionId");
+            CREATE INDEX IF NOT EXISTS "IX_PayrollProposedActionRecords_Month_FindingKey"
+                ON "PayrollProposedActionRecords" ("ShadowMonthId", "FindingKey");
+            CREATE INDEX IF NOT EXISTS "IX_PayrollProposedActionRecords_Month_Resource"
+                ON "PayrollProposedActionRecords" ("ShadowMonthId", "ResourceId");
             """,
             cancellationToken);
         foreach (var column in new (string Name, string Definition)[]

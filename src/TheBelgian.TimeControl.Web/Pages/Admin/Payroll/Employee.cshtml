@@ -1,5 +1,6 @@
 @page "/Admin/Payroll/{year:int}/{month:int}/{resourceId}"
 @model TheBelgian.TimeControl.Web.Pages.Admin.Payroll.EmployeeModel
+@using TheBelgian.TimeControl.Core.Payroll.Actions
 @using TheBelgian.TimeControl.Core.Payroll.Findings
 @using TheBelgian.TimeControl.Core.Payroll.Models
 @{
@@ -169,6 +170,30 @@ else
                         <p class="mb-1 small text-muted">GPS-classificatie: @finding.GpsClassification</p>
                     }
                     <p class="mb-1 small"><em>@finding.SuggestedAction</em></p>
+                    @if (Model.ActionsEnabled)
+                    {
+                        Model.ActionsByFindingKey.TryGetValue(finding.FindingKey, out var action);
+                        if (action is not null)
+                        {
+                            <p class="mb-1 small">
+                                <strong>Actie:</strong> @PayrollActionEligibility.UiStatusLabel(action.Status)
+                                @if (!string.IsNullOrWhiteSpace(action.BlockReason))
+                                {
+                                    <span class="text-muted"> — @action.BlockReason</span>
+                                }
+                            </p>
+                            @if (action.Status is PayrollProposedActionStatus.ReadyForApproval
+                                or PayrollProposedActionStatus.Blocked
+                                or PayrollProposedActionStatus.Applied
+                                or PayrollProposedActionStatus.Failed
+                                or PayrollProposedActionStatus.Stale)
+                            {
+                                <p class="mb-1">
+                                    <a asp-page="./ActionConfirm" asp-route-actionId="@action.ActionId">[Voorstel controleren]</a>
+                                </p>
+                            }
+                        }
+                    }
                     <details>
                         <summary class="small text-muted">Technische evidence</summary>
                         <pre class="small mb-0 mt-1">@finding.Evidence</pre>

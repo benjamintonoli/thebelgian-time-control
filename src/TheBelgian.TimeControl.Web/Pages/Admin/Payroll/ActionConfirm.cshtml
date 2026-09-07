@@ -1,0 +1,122 @@
+@page "/Admin/Payroll/ActionConfirm"
+@model TheBelgian.TimeControl.Web.Pages.Admin.Payroll.ActionConfirmModel
+@using TheBelgian.TimeControl.Core.Payroll.Actions
+@{
+    ViewData["Title"] = "Payrollvoorstel controleren";
+    var view = Model.View;
+}
+
+@if (!string.IsNullOrWhiteSpace(Model.Error))
+{
+    <div class="alert alert-danger">@Model.Error</div>
+}
+@if (!string.IsNullOrWhiteSpace(Model.Message))
+{
+    <div class="alert alert-success">@Model.Message</div>
+}
+
+@if (view is null)
+{
+    <p>Voorstel niet gevonden.</p>
+}
+else
+{
+    <p class="mb-2">
+        <a asp-page="./Employee" asp-route-year="@view.Year" asp-route-month="@view.Month" asp-route-resourceId="@view.ResourceId">← Terug naar medewerker</a>
+    </p>
+
+    <h1 class="h4 mb-3">Voorstel controleren</h1>
+    <div class="alert alert-warning">
+        <strong>Deze actie wijzigt Plenion.</strong>
+        Geen automatische uitvoering — expliciete goedkeuring is verplicht.
+    </div>
+
+    <div class="mb-3">
+        <div><strong>Medewerker:</strong> @(view.DisplayName ?? view.ResourceId)</div>
+        <div><strong>Status:</strong> @PayrollActionEligibility.UiStatusLabel(view.Status)</div>
+        @if (!string.IsNullOrWhiteSpace(view.BlockReason))
+        {
+            <div class="text-danger"><strong>Reden:</strong> @view.BlockReason</div>
+        }
+        @if (!string.IsNullOrWhiteSpace(view.ExecutionGateMessage))
+        {
+            <div class="text-muted">@view.ExecutionGateMessage</div>
+        }
+    </div>
+
+    <div class="row g-3 mb-4">
+        <div class="col-md-6">
+            <section class="border rounded p-3 h-100">
+                <h2 class="h6">Huidig / bron</h2>
+                <p class="mb-1"><strong>@view.Evidence.Title</strong></p>
+                <p class="mb-1 small">@view.Evidence.Description</p>
+                <p class="mb-1 small text-muted">@view.Evidence.Evidence</p>
+                @if (view.AdjustProposal is not null)
+                {
+                    <p class="mb-0 small">
+                        Start: @view.AdjustProposal.CurrentStart.ToString("HH:mm") ·
+                        Einde: @view.AdjustProposal.CurrentEnd.ToString("HH:mm") ·
+                        Prestatie #@view.AdjustProposal.PerformanceId
+                    </p>
+                }
+                else
+                {
+                    <p class="mb-0 small text-muted">Geen bestaande prestatie (create).</p>
+                }
+            </section>
+        </div>
+        <div class="col-md-6">
+            <section class="border rounded p-3 h-100">
+                <h2 class="h6">Voorstel</h2>
+                @if (view.CreateProposal is not null)
+                {
+                    <p class="mb-1"><strong>Nieuwe prestatie aanmaken</strong></p>
+                    <ul class="small mb-0">
+                        <li>Medewerker: @view.CreateProposal.ResourceId</li>
+                        <li>Datum: @view.CreateProposal.Date.ToString("dd/MM/yyyy")</li>
+                        <li>Dossier/project: @view.CreateProposal.ProjectId</li>
+                        <li>Bon: @(view.CreateProposal.BonNr ?? "—")</li>
+                        <li>Start: @view.CreateProposal.Start.ToString("HH:mm")</li>
+                        <li>Einde: @view.CreateProposal.End.ToString("HH:mm")</li>
+                        <li>Uren: @view.CreateProposal.Hours.ToString("0.##")</li>
+                        <li>Taak/type: @view.CreateProposal.MainTaskId</li>
+                    </ul>
+                }
+                else if (view.AdjustProposal is not null)
+                {
+                    <p class="mb-1"><strong>Tijdscorrectie bestaande prestatie</strong></p>
+                    <p class="mb-0 small">
+                        Start: @view.AdjustProposal.CurrentStart.ToString("HH:mm") → @view.AdjustProposal.ProposedStart.ToString("HH:mm")<br />
+                        Einde: @view.AdjustProposal.CurrentEnd.ToString("HH:mm") → @view.AdjustProposal.ProposedEnd.ToString("HH:mm")
+                    </p>
+                }
+                else
+                {
+                    <p class="mb-0 text-muted">Geen uitvoerbaar voorstel.</p>
+                }
+            </section>
+        </div>
+    </div>
+
+    <form method="post" class="vstack gap-3" style="max-width: 40rem;">
+        <div>
+            <label class="form-label" asp-for="Comment">Reden / commentaar</label>
+            <textarea class="form-control" asp-for="Comment" rows="3" required></textarea>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+            <button type="submit" asp-page-handler="Execute"
+                    class="btn btn-primary"
+                    disabled="@(!view.CanExecute)"
+                    data-confirm="Deze actie wijzigt Plenion. Doorgaan?">
+                Uitvoeren
+            </button>
+            <button type="submit" asp-page-handler="Cancel" class="btn btn-outline-secondary" formnovalidate>
+                Annuleren
+            </button>
+        </div>
+        @if (!view.ExecutionEnabled)
+        {
+            <p class="small text-muted mb-0">Uitvoering staat uit. Je kunt het voorstel wel bekijken.</p>
+        }
+    </form>
+}

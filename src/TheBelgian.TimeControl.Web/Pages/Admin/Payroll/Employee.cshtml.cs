@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using TheBelgian.TimeControl.Core.Configuration;
 using TheBelgian.TimeControl.Core.Interfaces;
 using TheBelgian.TimeControl.Core.Models;
+using TheBelgian.TimeControl.Core.Payroll.Actions;
 using TheBelgian.TimeControl.Core.Payroll.Models;
 using TheBelgian.TimeControl.Infrastructure.Configuration;
 
@@ -11,8 +12,10 @@ namespace TheBelgian.TimeControl.Web.Pages.Admin.Payroll;
 
 public sealed class EmployeeModel(
     IPayrollShadowService payrollShadowService,
+    IPayrollActionService payrollActionService,
     ICurrentUserContext currentUser,
     IOptions<PayrollShadowOptions> payrollOptions,
+    IOptions<PayrollActionsOptions> actionsOptions,
     IOptions<AdminReviewWorkflowOptions> reviewOptions,
     ILogger<EmployeeModel> logger) : PageModel
 {
@@ -27,6 +30,9 @@ public sealed class EmployeeModel(
     [BindProperty] public string? ReviewComment { get; set; }
 
     public PayrollShadowEmployeeDetail? Detail { get; private set; }
+    public IReadOnlyDictionary<string, PayrollProposedActionRecord> ActionsByFindingKey { get; private set; } =
+        new Dictionary<string, PayrollProposedActionRecord>(StringComparer.Ordinal);
+    public bool ActionsEnabled => actionsOptions.Value.Enabled;
     public string? Message { get; private set; }
     public string? Error { get; private set; }
 
@@ -181,6 +187,26 @@ public sealed class EmployeeModel(
             ReviewComment = "Bevindingen: " + string.Join(
                 "; ",
                 Detail.Findings.Take(5).Select(item => item.Title));
+        }
+
+        if (ActionsEnabled && Detail is not null)
+        {
+            try
+            {
+                var actions = await payrollActionService.ProposeFromFindingsAsync(
+                    Year,
+                    Month,
+                    ResourceId,
+                    RequireActor().AuditIdentity,
+                    cancellationToken);
+                ActionsByFindingKey = actions
+                    .GroupBy(item => item.FindingKey, StringComparer.Ordinal)
+                    .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(exception, "Payroll actions propose failed for {ResourceId}.", ResourceId);
+            }
         }
     }
 
