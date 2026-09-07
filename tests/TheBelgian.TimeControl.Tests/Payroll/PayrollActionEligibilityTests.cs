@@ -170,7 +170,9 @@ public sealed class PayrollActionEligibilityTests
         Assert.Equal(PayrollActionBlockReasonCode.PossiblePhoneThenPhysical, result.BlockReasonCode);
         Assert.Contains("telefonische", result.BlockReason!, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("hybrid=PossiblePhoneThenPhysical", result.EvidenceSnapshot.CalloutEvidence, StringComparison.Ordinal);
-        Assert.Null(result.AdjustProposal);
+        Assert.NotNull(result.AdjustProposal);
+        Assert.Equal(bookedStart, result.AdjustProposal!.CurrentStart);
+        Assert.Equal(ProposedStart, result.AdjustProposal.ProposedStart);
     }
 
     [Fact]
