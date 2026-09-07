@@ -19,6 +19,24 @@ internal sealed class TechnicianVehicleAssignmentService(
             .AsNoTracking()
             .Where(item => item.TechnicianExternalId == technicianExternalId)
             .ToArrayAsync(cancellationToken);
+        return ResolveFromSnapshot(matches, technicianExternalId, at);
+    }
+
+    /// <summary>
+    /// Canonical technician→vehicle resolution used by Daily Boundary and payroll findings.
+    /// ObjectId is authoritative; DriverId is never a permanent primary identity.
+    /// </summary>
+    internal static VehicleAssignmentResolution ResolveFromSnapshot(
+        IReadOnlyList<TechnicianVehicleAssignment> allMatches,
+        string technicianExternalId,
+        DateTimeOffset at)
+    {
+        var matches = allMatches
+            .Where(item => string.Equals(
+                item.TechnicianExternalId,
+                technicianExternalId,
+                StringComparison.Ordinal))
+            .ToArray();
         var uncertainTransfer = matches
             .Where(item => item.PreviousObservedAt is not null &&
                            item.ValidFrom > item.PreviousObservedAt &&

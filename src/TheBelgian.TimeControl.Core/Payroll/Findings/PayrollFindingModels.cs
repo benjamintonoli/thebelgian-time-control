@@ -73,7 +73,9 @@ public sealed record StandbyGpsDayEvidence(
     string? ObjectId,
     string? RegistrationPlate,
     string MappingReason,
-    IReadOnlyList<StandbyGpsTripEvidence> Trips)
+    IReadOnlyList<StandbyGpsTripEvidence> Trips,
+    string MappingKind = "None",
+    string? UnmappedReasonCode = null)
 {
     public bool HasUsableTrips => Trips.Count > 0;
 }

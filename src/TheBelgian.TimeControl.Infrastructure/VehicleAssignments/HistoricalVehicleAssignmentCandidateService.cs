@@ -316,12 +316,10 @@ internal sealed class HistoricalVehicleAssignmentCandidateService(
         (value ?? string.Empty).Trim().ToUpperInvariant();
 
     private static bool ExactPersonName(string? left, string right) =>
-        string.Equals(NormalizePersonName(left), NormalizePersonName(right),
-            StringComparison.Ordinal);
+        PowerfleetPersonVehicleEvidence.ExactPersonName(left, right);
 
-    private static string NormalizePersonName(string? value) => string.Join(' ',
-        (value ?? string.Empty).Trim().ToUpperInvariant()
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries));
+    private static string NormalizePersonName(string? value) =>
+        PowerfleetPersonVehicleEvidence.NormalizePersonName(value);
 
     private static DateOnly TripDate(NormalizedPilotTrip trip) =>
         DateOnly.FromDateTime(trip.StartDateTime.DateTime);

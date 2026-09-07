@@ -1387,9 +1387,15 @@ internal sealed class PayrollShadowService(
         var planningQueryCount = planningSource is PlenionPayrollPlanningReader planningReader
             ? planningReader.LastQueryCount
             : 1;
+        var nameByResource = allResources
+            .GroupBy(item => item.ResourceId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First().DisplayName, StringComparer.Ordinal);
         var standbyPairs = performances
             .Where(item => !item.IsCalendarSynthetic && (item.IsStandby || item.HfdTaakId == 23))
-            .Select(item => (item.ResourceId, item.Date))
+            .Select(item => (
+                item.ResourceId,
+                nameByResource.GetValueOrDefault(item.ResourceId) ?? item.ResourceId,
+                item.Date))
             .Distinct()
             .ToArray();
         var standbyGps = standbyPairs.Length == 0

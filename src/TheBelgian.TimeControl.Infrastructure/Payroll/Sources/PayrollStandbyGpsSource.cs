@@ -11,7 +11,8 @@ namespace TheBelgian.TimeControl.Infrastructure.Payroll.Sources;
 
 /// <summary>
 /// Batched read-only PowerFleet evidence for standby findings.
-/// Vehicle identity: ObjectId, then plate fallback; DriverId never chosen as person proof.
+/// Canonical identity: <see cref="TechnicianVehicleAssignmentService.ResolveFromSnapshot"/>.
+/// Day-specific fallback: exact DriverName→ObjectId evidence (context only).
 /// </summary>
 internal sealed class PayrollStandbyGpsSource(
     IDbContextFactory<TimeControlDbContext> contextFactory,
@@ -23,7 +24,7 @@ internal sealed class PayrollStandbyGpsSource(
     public async Task<StandbyGpsBatchResult> ReadStandbyGpsAsync(
         DateOnly fromDate,
         DateOnly throughDate,
-        IReadOnlyCollection<(string ResourceId, DateOnly Date)> standbyResourceDates,
+        IReadOnlyCollection<(string ResourceId, string DisplayName, DateOnly Date)> standbyResourceDates,
         CancellationToken cancellationToken = default)
     {
         LastApiCallCount = 0;
@@ -32,7 +33,10 @@ internal sealed class PayrollStandbyGpsSource(
                 !string.IsNullOrWhiteSpace(item.ResourceId)
                 && item.Date >= fromDate
                 && item.Date <= throughDate)
-            .Select(item => (ResourceId: item.ResourceId.Trim(), item.Date))
+            .Select(item => (
+                ResourceId: item.ResourceId.Trim(),
+                DisplayName: string.IsNullOrWhiteSpace(item.DisplayName) ? item.ResourceId.Trim() : item.DisplayName.Trim(),
+                item.Date))
             .Distinct()
             .ToArray();
         if (pairs.Length == 0)
@@ -68,22 +72,100 @@ internal sealed class PayrollStandbyGpsSource(
         var days = new List<StandbyGpsDayEvidence>();
         var mappedResources = new HashSet<string>(StringComparer.Ordinal);
         var resourcesWithGps = new HashSet<string>(StringComparer.Ordinal);
+        var canonicalMapped = 0;
+        var daySpecificMapped = 0;
+        var ambiguousCount = 0;
 
-        foreach (var (resourceId, date) in pairs)
+        foreach (var (resourceId, displayName, date) in pairs)
         {
             var at = new DateTimeOffset(date.ToDateTime(new TimeOnly(12, 0)), TimeSpan.Zero);
-            var resolution = ResolveAssignment(assignments, resourceId, at);
+            var dayTrips = tripsByDate.GetValueOrDefault(date) ?? [];
+            var canonical = TechnicianVehicleAssignmentService.ResolveFromSnapshot(
+                assignments,
+                resourceId,
+                at);
+
+            VehicleAssignmentResolution resolution;
+            string mappingKind;
+            string? unmappedReason = null;
+
+            if (canonical.Status == VehicleAssignmentResolutionStatus.Resolved
+                && !string.IsNullOrWhiteSpace(canonical.ObjectId))
+            {
+                resolution = canonical;
+                mappingKind = "CanonicalAssignment";
+                canonicalMapped++;
+            }
+            else if (canonical.Status == VehicleAssignmentResolutionStatus.AmbiguousVehicleAssignment)
+            {
+                resolution = canonical;
+                mappingKind = "CanonicalAmbiguous";
+                unmappedReason = "MULTIPLE_VEHICLES";
+                ambiguousCount++;
+            }
+            else
+            {
+                var dayEvidence = PowerfleetPersonVehicleEvidence.ResolveFromDriverNameTrips(
+                    displayName,
+                    dayTrips);
+                if (dayEvidence.HasUniqueObjectId && !string.IsNullOrWhiteSpace(dayEvidence.ObjectId))
+                {
+                    resolution = new VehicleAssignmentResolution(
+                        VehicleAssignmentResolutionStatus.Resolved,
+                        at,
+                        resourceId,
+                        dayEvidence.ObjectId,
+                        [],
+                        dayEvidence.Reason);
+                    mappingKind = "DaySpecificDriverEvidence";
+                    daySpecificMapped++;
+                }
+                else if (dayEvidence.IsAmbiguous)
+                {
+                    resolution = new VehicleAssignmentResolution(
+                        VehicleAssignmentResolutionStatus.AmbiguousVehicleAssignment,
+                        at,
+                        resourceId,
+                        null,
+                        [],
+                        dayEvidence.Reason);
+                    mappingKind = "DaySpecificAmbiguous";
+                    unmappedReason = "MULTIPLE_VEHICLES";
+                    ambiguousCount++;
+                }
+                else
+                {
+                    resolution = canonical;
+                    mappingKind = "None";
+                    unmappedReason = dayTrips.Count == 0
+                        ? "NO_POWERFLEET_DATA"
+                        : "NO_RESOURCE_VEHICLE_ASSIGNMENT";
+                }
+            }
+
+            var matched = ToTripEvidence(
+                DailyHoursAuditService.TripsForAssignment(dayTrips, resolution));
             if (resolution.Status == VehicleAssignmentResolutionStatus.Resolved
                 && !string.IsNullOrWhiteSpace(resolution.ObjectId))
             {
                 mappedResources.Add(resourceId);
             }
 
-            var dayTrips = tripsByDate.GetValueOrDefault(date) ?? [];
-            var matched = FilterTrips(dayTrips, resolution);
             if (matched.Count > 0)
             {
                 resourcesWithGps.Add(resourceId);
+            }
+
+            string? plate = null;
+            if (resolution.Assignments.Count > 0)
+            {
+                plate = resolution.Assignments[0].RegistrationPlateSnapshot;
+            }
+            else if (mappingKind == "DaySpecificDriverEvidence")
+            {
+                plate = matched
+                    .Select(item => item.VehiclePlate)
+                    .FirstOrDefault(item => !string.IsNullOrWhiteSpace(item));
             }
 
             days.Add(new StandbyGpsDayEvidence(
@@ -93,21 +175,22 @@ internal sealed class PayrollStandbyGpsSource(
                     && !string.IsNullOrWhiteSpace(resolution.ObjectId),
                 MappingAmbiguous: resolution.Status == VehicleAssignmentResolutionStatus.AmbiguousVehicleAssignment,
                 ObjectId: resolution.ObjectId,
-                RegistrationPlate: resolution.Assignments.Count > 0
-                    ? resolution.Assignments[0].RegistrationPlateSnapshot
-                    : null,
+                RegistrationPlate: plate,
                 MappingReason: resolution.Reason,
-                Trips: matched));
+                Trips: matched,
+                MappingKind: mappingKind,
+                UnmappedReasonCode: unmappedReason));
         }
 
         var unmapped = resources.Count(id => !mappedResources.Contains(id));
         var withoutGps = resources.Count(id => !resourcesWithGps.Contains(id));
         var notes =
             $"Standby GPS batch dates={dates.Length}, pairs={pairs.Length}, apiCalls={LastApiCallCount}, "
-            + $"mappedResources={mappedResources.Count}, unmapped={unmapped}, "
+            + $"mappedResources={mappedResources.Count} (canonicalDays={canonicalMapped}, daySpecificDays={daySpecificMapped}), "
+            + $"unmapped={unmapped}, ambiguousDays={ambiguousCount}, "
             + $"withGps={resourcesWithGps.Count}, withoutGps={withoutGps}. "
-            + "Identity: ObjectId then plate; DriverId never selected as person proof. "
-            + "Missing GPS is NoGpsData, never auto PhoneOnly.";
+            + "Canonical=TechnicianVehicleAssignmentService.ResolveFromSnapshot; "
+            + "day-specific=exact DriverName→ObjectId context only; DriverId never permanent primary.";
         logger.LogInformation("Payroll standby GPS: {Notes}", notes);
         return new StandbyGpsBatchResult(
             days,
@@ -119,84 +202,8 @@ internal sealed class PayrollStandbyGpsSource(
             notes);
     }
 
-    private static VehicleAssignmentResolution ResolveAssignment(
-        IReadOnlyList<TechnicianVehicleAssignment> all,
-        string technicianExternalId,
-        DateTimeOffset at)
-    {
-        var matches = all
-            .Where(item => string.Equals(item.TechnicianExternalId, technicianExternalId, StringComparison.Ordinal))
-            .ToArray();
-        var uncertainTransfer = matches
-            .Where(item => item.PreviousObservedAt is not null
-                && item.ValidFrom > item.PreviousObservedAt
-                && item.EvidenceReference is not null
-                && item.EvidenceReference.Contains("SyncMomentIsNotConfirmedTransferTime=true", StringComparison.Ordinal))
-            .FirstOrDefault(item => at > item.PreviousObservedAt!.Value && at < item.ValidFrom);
-        if (uncertainTransfer is not null)
-        {
-            var windowAssignments = matches.Where(item =>
-                    item.ObjectId == uncertainTransfer.ObjectId
-                    || item.ValidTo == uncertainTransfer.ValidFrom)
-                .OrderBy(item => item.ValidFrom)
-                .ToArray();
-            return new(
-                VehicleAssignmentResolutionStatus.AmbiguousVehicleAssignment,
-                at,
-                technicianExternalId,
-                null,
-                windowAssignments,
-                $"Voertuigtransfer alleen waargenomen tussen {uncertainTransfer.PreviousObservedAt:O} en {uncertainTransfer.ValidFrom:O}.");
-        }
-
-        matches = matches.Where(item => item.IsValidAt(at)).OrderBy(item => item.ValidFrom).ToArray();
-        return matches.Length switch
-        {
-            0 => new(
-                VehicleAssignmentResolutionStatus.InsufficientVehicleAssignment,
-                at,
-                technicianExternalId,
-                null,
-                matches,
-                "Geen tijdsgeldige voertuigtoewijzing; DriverId wordt niet als fallback gebruikt."),
-            1 => new(
-                VehicleAssignmentResolutionStatus.Resolved,
-                at,
-                technicianExternalId,
-                matches[0].ObjectId,
-                matches,
-                "Eén tijdsgeldige ObjectId-toewijzing."),
-            _ => new(
-                VehicleAssignmentResolutionStatus.AmbiguousVehicleAssignment,
-                at,
-                technicianExternalId,
-                null,
-                matches,
-                $"{matches.Length} overlappende tijdsgeldige voertuigtoewijzingen."),
-        };
-    }
-
-    private static List<StandbyGpsTripEvidence> FilterTrips(
-        IReadOnlyList<NormalizedPilotTrip> trips,
-        VehicleAssignmentResolution resolution)
-    {
-        if (resolution.Status != VehicleAssignmentResolutionStatus.Resolved
-            || string.IsNullOrWhiteSpace(resolution.ObjectId))
-        {
-            return [];
-        }
-
-        var plate = resolution.Assignments.Count == 1
-            ? resolution.Assignments[0].RegistrationPlateSnapshot
-            : null;
-        return trips
-            .Where(item =>
-                string.Equals(item.ObjectId, resolution.ObjectId, StringComparison.OrdinalIgnoreCase)
-                || (string.IsNullOrWhiteSpace(item.ObjectId)
-                    && !string.IsNullOrWhiteSpace(item.VehiclePlate)
-                    && !string.IsNullOrWhiteSpace(plate)
-                    && NormalizePlate(item.VehiclePlate) == NormalizePlate(plate!)))
-            .OrderBy(item => item.StartDateTime)
+    private static List<StandbyGpsTripEvidence> ToTripEvidence(IReadOnlyList<NormalizedPilotTrip> trips) =>
+        trips
             .Select(item => new StandbyGpsTripEvidence(
                 item.ExternalId,
                 item.StartDateTime,
@@ -208,8 +215,4 @@ internal sealed class PayrollStandbyGpsSource(
                 item.ObjectId,
                 item.VehiclePlate))
             .ToList();
-    }
-
-    private static string NormalizePlate(string value) =>
-        new(value.Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
 }

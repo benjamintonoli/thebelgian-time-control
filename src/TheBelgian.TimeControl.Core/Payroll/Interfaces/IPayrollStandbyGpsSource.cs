@@ -7,6 +7,6 @@ public interface IPayrollStandbyGpsSource
     Task<StandbyGpsBatchResult> ReadStandbyGpsAsync(
         DateOnly fromDate,
         DateOnly throughDate,
-        IReadOnlyCollection<(string ResourceId, DateOnly Date)> standbyResourceDates,
+        IReadOnlyCollection<(string ResourceId, string DisplayName, DateOnly Date)> standbyResourceDates,
         CancellationToken cancellationToken = default);
 }
