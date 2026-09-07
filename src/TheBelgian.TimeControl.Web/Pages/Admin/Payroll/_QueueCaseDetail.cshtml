@@ -1,0 +1,96 @@
+@model TheBelgian.TimeControl.Core.Payroll.Review.PayrollReviewCase
+@using TheBelgian.TimeControl.Core.Payroll.Findings
+@using TheBelgian.TimeControl.Core.Payroll.Review
+@{
+    var item = Model;
+    var reasons = PayrollReviewCategories.SuggestedReasons(item.Category);
+}
+<div class="p-3">
+    <div class="row g-3">
+        <div class="col-lg-7">
+            <p class="mb-1"><strong>@item.ProblemLabel</strong></p>
+            @if (!string.IsNullOrWhiteSpace(item.RuleHint))
+            {
+                <p class="mb-1">@item.RuleHint</p>
+            }
+            <p class="small mb-1">Geboekt: @(item.BookedSummary ?? "—")</p>
+            @if (!string.IsNullOrWhiteSpace(item.PlannedSummary))
+            {
+                <p class="small mb-1">Planning: @item.PlannedSummary</p>
+            }
+            @if (!string.IsNullOrWhiteSpace(item.DifferenceSummary))
+            {
+                <p class="small fw-semibold mb-1">@item.DifferenceSummary</p>
+            }
+            @if (!string.IsNullOrWhiteSpace(item.HybridScenarioNote))
+            {
+                <div class="alert alert-warning py-2 small mb-2">@item.HybridScenarioNote</div>
+            }
+            else if (!string.IsNullOrWhiteSpace(item.EvidenceSummary))
+            {
+                <p class="small text-muted mb-1">@item.EvidenceSummary</p>
+            }
+            <p class="small mb-2">@item.ActionabilityLabel · @(item.ProposalSummary ?? "Geen voorstel")</p>
+            <details class="small mb-2">
+                <summary class="text-muted">Technische keys</summary>
+                <div class="text-muted">@string.Join(", ", item.FindingKeys)</div>
+            </details>
+            <div class="d-flex flex-wrap gap-2">
+                <a class="btn btn-sm btn-outline-secondary"
+                   asp-page="./Employee"
+                   asp-route-year="@ViewContext.RouteData.Values["year"]"
+                   asp-route-month="@ViewContext.RouteData.Values["month"]"
+                   asp-route-resourceId="@item.ResourceId">Medewerker bekijken</a>
+                @if (item.RelatedActionId is { } readyId && item.Actionability == PayrollReviewCaseActionability.ReadyProposal)
+                {
+                    <a class="btn btn-sm btn-outline-primary" asp-page="./ActionConfirm" asp-route-actionId="@readyId">Voorstel (geen auto-uitvoering)</a>
+                }
+            </div>
+        </div>
+        <div class="col-lg-5">
+            @if (item.WorkflowStatus is PayrollFindingStatus.Open or PayrollFindingStatus.NeedsFollowUp)
+            {
+                <form method="post" class="vstack gap-2" onclick="event.stopPropagation();">
+                    <input type="hidden" name="CaseKey" value="@item.CaseKey" />
+                    <input type="hidden" name="Category" value="@ViewContext.HttpContext.Request.Query["Category"]" />
+                    <input type="hidden" name="Search" value="@ViewContext.HttpContext.Request.Query["Search"]" />
+                    <input type="hidden" name="Severity" value="@ViewContext.HttpContext.Request.Query["Severity"]" />
+                    <input type="hidden" name="Sort" value="@ViewContext.HttpContext.Request.Query["Sort"]" />
+                    <input type="hidden" name="Scope" value="@ViewContext.HttpContext.Request.Query["Scope"]" />
+                    <label class="form-label small mb-0">Snelle reden (optioneel)</label>
+                    <select class="form-select form-select-sm" name="ReasonChoice">
+                        <option value="">— kies —</option>
+                        @foreach (var reason in reasons)
+                        {
+                            <option value="@reason">@reason</option>
+                        }
+                    </select>
+                    <input class="form-control form-control-sm" name="Comment" placeholder="Reden / commentaar" />
+                    <div class="d-flex flex-wrap gap-1">
+                        <button class="btn btn-sm btn-warning" type="submit" asp-page-handler="FollowUp">Opvolging nodig</button>
+                        <button class="btn btn-sm btn-success" type="submit" asp-page-handler="Reviewed">Geen correctie nodig</button>
+                        <button class="btn btn-sm btn-outline-secondary" type="submit" asp-page-handler="Dismissed">N.v.t.</button>
+                    </div>
+                    <div class="d-flex flex-wrap gap-1">
+                        <button class="btn btn-sm btn-outline-secondary" type="submit" asp-page-handler="Previous">← Vorige</button>
+                        <button class="btn btn-sm btn-primary" type="submit" asp-page-handler="ReviewedAndNext">Opslaan &amp; volgende</button>
+                        <button class="btn btn-sm btn-outline-secondary" type="submit" asp-page-handler="Next">Volgende →</button>
+                    </div>
+                </form>
+            }
+            else
+            {
+                <p class="small text-muted mb-2">Status: @PayrollReviewCategories.WorkflowStatusLabel(item.WorkflowStatus)</p>
+                @if (!string.IsNullOrWhiteSpace(item.ReviewComment))
+                {
+                    <p class="small mb-2">Reden: @item.ReviewComment</p>
+                }
+                <form method="post" class="d-flex gap-1">
+                    <input type="hidden" name="CaseKey" value="@item.CaseKey" />
+                    <button class="btn btn-sm btn-outline-secondary" type="submit" asp-page-handler="Previous">← Vorige</button>
+                    <button class="btn btn-sm btn-outline-secondary" type="submit" asp-page-handler="Next">Volgende →</button>
+                </form>
+            }
+        </div>
+    </div>
+</div>

@@ -25,10 +25,14 @@ public sealed class QueueModel(
     [BindProperty(SupportsGet = true)] public PayrollFindingSeverity? Severity { get; set; }
     [BindProperty(SupportsGet = true)] public PayrollReviewCaseActionability? Actionability { get; set; }
     [BindProperty(SupportsGet = true)] public string Sort { get; set; } = "default";
+    [BindProperty(SupportsGet = true)] public PayrollReviewQueueScope Scope { get; set; } = PayrollReviewQueueScope.Open;
     [BindProperty(SupportsGet = true)] public string? Focus { get; set; }
 
     [BindProperty] public string CaseKey { get; set; } = string.Empty;
     [BindProperty] public string? Comment { get; set; }
+    [BindProperty] public string? ReasonChoice { get; set; }
+    [BindProperty] public List<string> SelectedCaseKeys { get; set; } = [];
+    [BindProperty] public string BulkStatus { get; set; } = string.Empty;
 
     public PayrollReviewQueuePage? Queue { get; private set; }
     public string? Message { get; private set; }
@@ -45,11 +49,20 @@ public sealed class QueueModel(
         return Page();
     }
 
-    public async Task<IActionResult> OnPostReviewedAsync(CancellationToken cancellationToken) =>
-        await SetStatusAsync(PayrollFindingStatus.Reviewed, goNext: false, cancellationToken);
-
     public async Task<IActionResult> OnPostFollowUpAsync(CancellationToken cancellationToken) =>
-        await SetStatusAsync(PayrollFindingStatus.NeedsFollowUp, goNext: false, cancellationToken);
+        await SetStatusAsync(PayrollFindingStatus.NeedsFollowUp, goNext: false, requireReason: false, cancellationToken);
+
+    public async Task<IActionResult> OnPostReviewedAsync(CancellationToken cancellationToken) =>
+        await SetStatusAsync(PayrollFindingStatus.Reviewed, goNext: false, requireReason: true, cancellationToken);
+
+    public async Task<IActionResult> OnPostDismissedAsync(CancellationToken cancellationToken) =>
+        await SetStatusAsync(PayrollFindingStatus.Dismissed, goNext: false, requireReason: true, cancellationToken);
+
+    public async Task<IActionResult> OnPostReviewedAndNextAsync(CancellationToken cancellationToken) =>
+        await SetStatusAsync(PayrollFindingStatus.Reviewed, goNext: true, requireReason: true, cancellationToken);
+
+    public async Task<IActionResult> OnPostFollowUpAndNextAsync(CancellationToken cancellationToken) =>
+        await SetStatusAsync(PayrollFindingStatus.NeedsFollowUp, goNext: true, requireReason: false, cancellationToken);
 
     public async Task<IActionResult> OnPostNextAsync(CancellationToken cancellationToken)
     {
@@ -59,27 +72,75 @@ public sealed class QueueModel(
         }
 
         await LoadAsync(cancellationToken);
-        var next = FindNextCaseKey(CaseKey);
-        return RedirectToPage(new
-        {
-            year = Year,
-            month = Month,
-            Category,
-            Search,
-            Status,
-            Severity,
-            Actionability,
-            Sort,
-            Focus = next,
-        });
+        return RedirectToFilter(FindAdjacentCaseKey(CaseKey, forward: true));
     }
 
-    public async Task<IActionResult> OnPostReviewedAndNextAsync(CancellationToken cancellationToken) =>
-        await SetStatusAsync(PayrollFindingStatus.Reviewed, goNext: true, cancellationToken);
+    public async Task<IActionResult> OnPostPreviousAsync(CancellationToken cancellationToken)
+    {
+        if (!EnsureUiEnabled())
+        {
+            return NotFound();
+        }
+
+        await LoadAsync(cancellationToken);
+        return RedirectToFilter(FindAdjacentCaseKey(CaseKey, forward: false));
+    }
+
+    public async Task<IActionResult> OnPostBulkAsync(CancellationToken cancellationToken)
+    {
+        if (!EnsureUiEnabled())
+        {
+            return NotFound();
+        }
+
+        try
+        {
+            var status = BulkStatus switch
+            {
+                "followup" => PayrollFindingStatus.NeedsFollowUp,
+                "reviewed" => PayrollFindingStatus.Reviewed,
+                "dismissed" => PayrollFindingStatus.Dismissed,
+                _ => throw new InvalidOperationException("Kies een bulk-actie."),
+            };
+
+            // Only explicitly posted keys — never all month keys.
+            var keys = SelectedCaseKeys
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            if (keys.Length == 0)
+            {
+                throw new InvalidOperationException("Selecteer minstens één zichtbare case.");
+            }
+
+            var comment = ResolveComment(requireReason: status is PayrollFindingStatus.Reviewed or PayrollFindingStatus.Dismissed);
+            var result = await reviewQueueService.BulkSetCaseStatusAsync(
+                Year,
+                Month,
+                keys,
+                status,
+                comment ?? string.Empty,
+                RequireActor().AuditIdentity,
+                cancellationToken);
+
+            var label = PayrollReviewCategories.WorkflowStatusLabel(status);
+            Message = $"{result.Updated} controles worden als {label} gemarkeerd.";
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Bulk payroll review update failed.");
+            Error = exception.Message;
+            await LoadAsync(cancellationToken);
+            return Page();
+        }
+
+        return RedirectToFilter(focus: null);
+    }
 
     private async Task<IActionResult> SetStatusAsync(
         PayrollFindingStatus status,
         bool goNext,
+        bool requireReason,
         CancellationToken cancellationToken)
     {
         if (!EnsureUiEnabled())
@@ -89,17 +150,22 @@ public sealed class QueueModel(
 
         try
         {
+            var comment = ResolveComment(requireReason);
             await reviewQueueService.SetCaseStatusAsync(
                 Year,
                 Month,
                 CaseKey,
                 status,
-                Comment,
+                comment,
                 RequireActor().AuditIdentity,
                 cancellationToken);
-            Message = status == PayrollFindingStatus.Reviewed
-                ? "Gemarkeerd als gecontroleerd (geen correctie nodig)."
-                : "Gemarkeerd als opvolging nodig.";
+            Message = status switch
+            {
+                PayrollFindingStatus.Reviewed => "Gemarkeerd als gecontroleerd (geen correctie nodig).",
+                PayrollFindingStatus.NeedsFollowUp => "Gemarkeerd als opvolging nodig.",
+                PayrollFindingStatus.Dismissed => "Gemarkeerd als niet van toepassing.",
+                _ => "Status bijgewerkt.",
+            };
         }
         catch (Exception exception)
         {
@@ -112,22 +178,67 @@ public sealed class QueueModel(
         if (goNext)
         {
             await LoadAsync(cancellationToken);
-            var next = FindNextCaseKey(CaseKey);
-            return RedirectToPage(new
-            {
-                year = Year,
-                month = Month,
-                Category,
-                Search,
-                Status,
-                Severity,
-                Actionability,
-                Sort,
-                Focus = next,
-            });
+            return RedirectToFilter(FindAdjacentCaseKey(CaseKey, forward: true));
         }
 
-        return RedirectToPage(new
+        return RedirectToFilter(CaseKey);
+    }
+
+    private string? ResolveComment(bool requireReason)
+    {
+        var choice = ReasonChoice?.Trim();
+        var free = Comment?.Trim();
+        string? combined;
+        if (!string.IsNullOrWhiteSpace(choice) && !string.Equals(choice, "Andere reden", StringComparison.OrdinalIgnoreCase))
+        {
+            combined = string.IsNullOrWhiteSpace(free) ? choice : $"{choice} — {free}";
+        }
+        else
+        {
+            combined = free;
+        }
+
+        if (requireReason && string.IsNullOrWhiteSpace(combined))
+        {
+            throw new InvalidOperationException("Een reden/commentaar is verplicht.");
+        }
+
+        return combined;
+    }
+
+    private async Task LoadAsync(CancellationToken cancellationToken)
+    {
+        Queue = await reviewQueueService.GetQueueAsync(
+            Year,
+            Month,
+            new PayrollReviewQueueFilter(Category, Search, Status, Severity, Actionability, Sort, Scope),
+            cancellationToken);
+    }
+
+    private string? FindAdjacentCaseKey(string currentCaseKey, bool forward)
+    {
+        if (Queue is null || Queue.Cases.Count == 0)
+        {
+            return null;
+        }
+
+        var list = Queue.Cases.ToList();
+        var index = list.FindIndex(item => string.Equals(item.CaseKey, currentCaseKey, StringComparison.Ordinal));
+        if (index < 0)
+        {
+            return list[0].CaseKey;
+        }
+
+        if (forward)
+        {
+            return index + 1 < list.Count ? list[index + 1].CaseKey : list[0].CaseKey;
+        }
+
+        return index - 1 >= 0 ? list[index - 1].CaseKey : list[^1].CaseKey;
+    }
+
+    private RedirectToPageResult RedirectToFilter(string? focus) =>
+        RedirectToPage(new
         {
             year = Year,
             month = Month,
@@ -137,42 +248,9 @@ public sealed class QueueModel(
             Severity,
             Actionability,
             Sort,
-            Focus = CaseKey,
+            Scope,
+            Focus = focus,
         });
-    }
-
-    private async Task LoadAsync(CancellationToken cancellationToken)
-    {
-        Queue = await reviewQueueService.GetQueueAsync(
-            Year,
-            Month,
-            new PayrollReviewQueueFilter(Category, Search, Status, Severity, Actionability, Sort),
-            cancellationToken);
-    }
-
-    private string? FindNextCaseKey(string currentCaseKey)
-    {
-        if (Queue is null || Queue.Cases.Count == 0)
-        {
-            return null;
-        }
-
-        var open = Queue.Cases
-            .Where(item => item.WorkflowStatus is PayrollFindingStatus.Open or PayrollFindingStatus.NeedsFollowUp)
-            .ToList();
-        if (open.Count == 0)
-        {
-            return Queue.Cases.Count > 0 ? Queue.Cases[0].CaseKey : null;
-        }
-
-        var index = open.FindIndex(item => string.Equals(item.CaseKey, currentCaseKey, StringComparison.Ordinal));
-        if (index < 0)
-        {
-            return open[0].CaseKey;
-        }
-
-        return open[(index + 1) % open.Count].CaseKey;
-    }
 
     private bool EnsureUiEnabled() =>
         payrollOptions.Value.Enabled && payrollOptions.Value.AdminUiEnabled;

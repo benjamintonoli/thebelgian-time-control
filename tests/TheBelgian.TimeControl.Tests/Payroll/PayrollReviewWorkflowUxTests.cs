@@ -175,7 +175,7 @@ public sealed class PayrollReviewWorkflowUxTests
             return Task.FromResult(new PayrollReviewQueuePage(
                 year,
                 month,
-                new PayrollReviewQueueSummary(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, emptyCategories),
+                new PayrollReviewQueueSummary(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, emptyCategories, emptyCategories),
                 [],
                 [],
                 [],
@@ -191,6 +191,16 @@ public sealed class PayrollReviewWorkflowUxTests
             string actor,
             CancellationToken cancellationToken) =>
             Task.CompletedTask;
+
+        public Task<PayrollReviewBulkUpdateResult> BulkSetCaseStatusAsync(
+            int year,
+            int month,
+            IReadOnlyList<string> caseKeys,
+            PayrollFindingStatus status,
+            string comment,
+            string actor,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new PayrollReviewBulkUpdateResult(caseKeys.Count, 0, []));
     }
 
     private sealed class RecordingService : IPayrollShadowService

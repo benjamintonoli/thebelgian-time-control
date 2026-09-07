@@ -19,6 +19,19 @@
             Severity = Model.Severity,
             Actionability = Model.Actionability,
             Sort = Model.Sort,
+            Scope = Model.Scope,
+        })!;
+    string ScopeHref(PayrollReviewQueueScope scope) =>
+        Url.Page("./Queue", new
+        {
+            year = Model.Year,
+            month = Model.Month,
+            Category = Model.Category,
+            Search = Model.Search,
+            Severity = Model.Severity,
+            Actionability = Model.Actionability,
+            Sort = Model.Sort,
+            Scope = scope,
         })!;
 }
 
@@ -26,7 +39,7 @@
     <div>
         <div class="text-uppercase small text-muted fw-semibold">Payroll shadow</div>
         <h1 class="h3 mb-1">Opvolging @Model.Month.ToString("00")/@Model.Year</h1>
-        <p class="text-muted mb-0">Werkproblemen per case — niet per medewerker.</p>
+        <p class="text-muted mb-0">Snel triage: begrijp → beslis → volgende. Medewerkerdetail is optioneel.</p>
     </div>
     <a class="btn btn-sm btn-outline-secondary" asp-page="./Month" asp-route-year="@Model.Year" asp-route-month="@Model.Month">← Maand</a>
 </div>
@@ -41,31 +54,62 @@
 else
 {
     <div class="row g-2 mb-3">
+        <div class="col-6 col-md"><div class="border rounded p-2"><div class="small text-muted">Open controles</div><div class="fs-5 fw-semibold">@summary.Open</div></div></div>
+        <div class="col-6 col-md"><div class="border rounded p-2"><div class="small text-muted">Opvolging nodig</div><div class="fs-5 fw-semibold text-warning">@summary.NeedsFollowUp</div></div></div>
+        <div class="col-6 col-md"><div class="border rounded p-2"><div class="small text-muted">Gecontroleerd</div><div class="fs-5 fw-semibold text-success">@summary.Reviewed</div></div></div>
+        <div class="col-6 col-md"><div class="border rounded p-2"><div class="small text-muted">Opgelost</div><div class="fs-5 fw-semibold">@summary.Resolved</div></div></div>
+        <div class="col-6 col-md"><div class="border rounded p-2"><div class="small text-muted">High open</div><div class="fs-5 fw-semibold text-danger">@summary.HighOpen</div></div></div>
+    </div>
+    <p class="small text-muted mb-2">
+        Included @summary.IncludedEmployees
+        · met findings @summary.EmployeesWithFindings
+        · zonder findings @summary.EmployeesWithoutFindings
+        · N.v.t. @summary.Dismissed
+        · open werk @(summary.Open + summary.NeedsFollowUp)
+    </p>
+
+    <div class="row g-2 mb-3">
         @{
-            var categories = new (PayrollReviewCategory Cat, int Count)[]
+            var cards = new[]
             {
-                (PayrollReviewCategory.All, summary.ReviewCasesTotal),
-                (PayrollReviewCategory.Project300, summary.ByCategory.GetValueOrDefault(PayrollReviewCategory.Project300)),
-                (PayrollReviewCategory.Project200, summary.ByCategory.GetValueOrDefault(PayrollReviewCategory.Project200)),
-                (PayrollReviewCategory.Project100, summary.ByCategory.GetValueOrDefault(PayrollReviewCategory.Project100)),
-                (PayrollReviewCategory.Standby, summary.ByCategory.GetValueOrDefault(PayrollReviewCategory.Standby)),
-                (PayrollReviewCategory.Overlap, summary.ByCategory.GetValueOrDefault(PayrollReviewCategory.Overlap)),
-                (PayrollReviewCategory.MissingPerformance, summary.ByCategory.GetValueOrDefault(PayrollReviewCategory.MissingPerformance)),
-                (PayrollReviewCategory.Other, summary.ByCategory.GetValueOrDefault(PayrollReviewCategory.Other)),
+                PayrollReviewCategory.Project300,
+                PayrollReviewCategory.Project200,
+                PayrollReviewCategory.Project100,
+                PayrollReviewCategory.Standby,
+                PayrollReviewCategory.Overlap,
+                PayrollReviewCategory.MissingPerformance,
             };
         }
-        @foreach (var item in categories)
+        @foreach (var cat in cards)
         {
-            var active = Model.Category == item.Cat ? "border-primary" : "";
-            <div class="col-6 col-md-4 col-lg-3">
-                <a class="card text-decoration-none h-100 @active" href="@CategoryHref(item.Cat)">
+            var total = summary.ByCategory.GetValueOrDefault(cat);
+            var open = summary.UnresolvedByCategory.GetValueOrDefault(cat);
+            var active = Model.Category == cat ? "border-primary bg-primary-subtle" : "";
+            <div class="col-6 col-md-4 col-xl-2">
+                <a class="card text-decoration-none h-100 @active" href="@CategoryHref(cat)">
                     <div class="card-body py-2 px-3">
-                        <div class="small text-muted">@PayrollReviewCategories.DisplayName(item.Cat)</div>
-                        <div class="fs-4 fw-semibold">@item.Count</div>
+                        <div class="small text-muted">@PayrollReviewCategories.DisplayName(cat)</div>
+                        <div class="fs-4 fw-semibold">@total</div>
+                        <div class="small">Open: <strong>@open</strong></div>
                     </div>
                 </a>
             </div>
         }
+        <div class="col-6 col-md-4 col-xl-2">
+            <a class="card text-decoration-none h-100 @(Model.Category == PayrollReviewCategory.All ? "border-primary" : "")" href="@CategoryHref(PayrollReviewCategory.All)">
+                <div class="card-body py-2 px-3">
+                    <div class="small text-muted">Alles</div>
+                    <div class="fs-4 fw-semibold">@summary.ReviewCasesTotal</div>
+                    <div class="small">Open: <strong>@(summary.Open + summary.NeedsFollowUp)</strong></div>
+                </div>
+            </a>
+        </div>
+    </div>
+
+    <div class="btn-group btn-group-sm mb-3" role="group">
+        <a class="btn @(Model.Scope == PayrollReviewQueueScope.Open ? "btn-dark" : "btn-outline-secondary")" href="@ScopeHref(PayrollReviewQueueScope.Open)">Open</a>
+        <a class="btn @(Model.Scope == PayrollReviewQueueScope.Closed ? "btn-dark" : "btn-outline-secondary")" href="@ScopeHref(PayrollReviewQueueScope.Closed)">Afgehandeld</a>
+        <a class="btn @(Model.Scope == PayrollReviewQueueScope.All ? "btn-dark" : "btn-outline-secondary")" href="@ScopeHref(PayrollReviewQueueScope.All)">Alles</a>
     </div>
 
     <form method="get" class="card mb-3">
@@ -73,215 +117,207 @@ else
             <input type="hidden" name="year" value="@Model.Year" />
             <input type="hidden" name="month" value="@Model.Month" />
             <input type="hidden" asp-for="Category" />
-            <div class="col-12 col-md-4">
+            <input type="hidden" asp-for="Scope" />
+            <div class="col-12 col-lg-5">
                 <label class="form-label" asp-for="Search">Zoeken</label>
-                <input class="form-control form-control-sm" asp-for="Search" placeholder="Naam, bon, project, datum…" />
+                <input class="form-control" asp-for="Search" placeholder="Zoek medewerker, bon, project, datum..." autofocus="@(string.IsNullOrWhiteSpace(Model.Search))" />
             </div>
-            <div class="col-6 col-md-2">
-                <label class="form-label" asp-for="Status">Status</label>
-                <select class="form-select form-select-sm" asp-for="Status">
-                    <option value="">Alle</option>
-                    <option value="@((int)PayrollFindingStatus.Open)">@PayrollReviewCategories.WorkflowStatusLabel(PayrollFindingStatus.Open)</option>
-                    <option value="@((int)PayrollFindingStatus.NeedsFollowUp)">@PayrollReviewCategories.WorkflowStatusLabel(PayrollFindingStatus.NeedsFollowUp)</option>
-                    <option value="@((int)PayrollFindingStatus.Reviewed)">@PayrollReviewCategories.WorkflowStatusLabel(PayrollFindingStatus.Reviewed)</option>
-                    <option value="@((int)PayrollFindingStatus.Resolved)">@PayrollReviewCategories.WorkflowStatusLabel(PayrollFindingStatus.Resolved)</option>
-                    <option value="@((int)PayrollFindingStatus.Dismissed)">@PayrollReviewCategories.WorkflowStatusLabel(PayrollFindingStatus.Dismissed)</option>
-                </select>
-            </div>
-            <div class="col-6 col-md-2">
+            <div class="col-6 col-md-3 col-lg-2">
                 <label class="form-label" asp-for="Severity">Ernst</label>
                 <select class="form-select form-select-sm" asp-for="Severity">
                     <option value="">Alle</option>
-                    <option value="@((int)PayrollFindingSeverity.High)">@PayrollReviewLabels.FindingSeverity(PayrollFindingSeverity.High)</option>
-                    <option value="@((int)PayrollFindingSeverity.Review)">@PayrollReviewLabels.FindingSeverity(PayrollFindingSeverity.Review)</option>
-                    <option value="@((int)PayrollFindingSeverity.Info)">@PayrollReviewLabels.FindingSeverity(PayrollFindingSeverity.Info)</option>
+                    <option value="@((int)PayrollFindingSeverity.High)">High</option>
+                    <option value="@((int)PayrollFindingSeverity.Review)">Review</option>
+                    <option value="@((int)PayrollFindingSeverity.Info)">Info</option>
                 </select>
             </div>
-            <div class="col-6 col-md-2">
-                <label class="form-label" asp-for="Actionability">Actie</label>
-                <select class="form-select form-select-sm" asp-for="Actionability">
-                    <option value="">Alle</option>
-                    <option value="@((int)PayrollReviewCaseActionability.NeedsControl)">Controle nodig</option>
-                    <option value="@((int)PayrollReviewCaseActionability.ReadyProposal)">Voorstel klaar</option>
-                    <option value="@((int)PayrollReviewCaseActionability.Blocked)">Geblokkeerd</option>
-                </select>
-            </div>
-            <div class="col-6 col-md-2">
+            <div class="col-6 col-md-3 col-lg-2">
                 <label class="form-label" asp-for="Sort">Sortering</label>
                 <select class="form-select form-select-sm" asp-for="Sort">
-                    <option value="default">Standaard</option>
+                    <option value="default">Standaard (High eerst)</option>
                     <option value="datum">Datum</option>
-                    <option value="medewerker">Medewerker</option>
-                    <option value="ernst">Ernst</option>
+                    <option value="medewerker">Medewerker A-Z</option>
                     <option value="categorie">Categorie</option>
+                    <option value="ernst">Ernst</option>
                 </select>
             </div>
-            <div class="col-auto"><button class="btn btn-sm btn-outline-secondary" type="submit">Filter</button></div>
+            <div class="col-auto"><button class="btn btn-sm btn-outline-secondary" type="submit">Toepassen</button></div>
         </div>
     </form>
 
-    <p class="small text-muted mb-2">
-        @summary.Open open · @summary.NeedsFollowUp opvolging · @summary.Reviewed gecontroleerd
-        · @summary.ReadyActions voorstellen klaar · @summary.BlockedActions geblokkeerd
-        · Toont @queue.Cases.Count van @summary.ReviewCasesTotal cases
-    </p>
+    <p class="small text-muted mb-2">Toont <strong>@queue.Cases.Count</strong> zichtbare cases (filters actief). Bulk werkt alleen op expliciet aangevinkte rijen.</p>
 
-    @* Desktop table *@
-    <div class="d-none d-md-block table-responsive card mb-3">
-        <table class="table table-sm align-middle mb-0">
-            <thead>
-            <tr>
-                <th>Datum</th>
-                <th>Medewerker</th>
-                <th>Categorie</th>
-                <th>Bon/project</th>
-                <th>Probleem</th>
-                <th>Geboekt</th>
-                <th>Bewijs</th>
-                <th>Voorstel</th>
-                <th>Ernst</th>
-                <th>Status</th>
-                <th>Actie</th>
-            </tr>
-            </thead>
-            <tbody>
+    <form method="post" asp-page-handler="Bulk" id="bulk-form"
+          onsubmit="return confirmBulk(this);">
+        <input type="hidden" name="Category" value="@Model.Category" />
+        <input type="hidden" name="Search" value="@Model.Search" />
+        <input type="hidden" name="Severity" value="@Model.Severity" />
+        <input type="hidden" name="Sort" value="@Model.Sort" />
+        <input type="hidden" name="Scope" value="@Model.Scope" />
+        <div class="card mb-3">
+            <div class="card-body d-flex flex-wrap gap-2 align-items-end">
+                <div>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="select-visible">Selecteer zichtbare resultaten</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="clear-visible">Wis selectie</button>
+                </div>
+                <div class="ms-auto d-flex flex-wrap gap-2 align-items-end">
+                    <div>
+                        <label class="form-label small mb-0">Bulk-reden</label>
+                        <input class="form-control form-control-sm" name="Comment" style="min-width:14rem" placeholder="Gemeenschappelijke reden" />
+                    </div>
+                    <button class="btn btn-sm btn-warning" type="submit" name="BulkStatus" value="followup">Bulk: Opvolging nodig</button>
+                    <button class="btn btn-sm btn-success" type="submit" name="BulkStatus" value="reviewed">Bulk: Geen correctie nodig</button>
+                    <button class="btn btn-sm btn-outline-secondary" type="submit" name="BulkStatus" value="dismissed">Bulk: N.v.t.</button>
+                </div>
+            </div>
+        </div>
+    </form>
+
+        @* Desktop *@
+        <div class="d-none d-lg-block table-responsive card mb-3">
+            <table class="table table-sm align-middle mb-0">
+                <thead>
+                <tr>
+                    <th style="width:2rem"></th>
+                    <th>Datum</th>
+                    <th>Medewerker</th>
+                    <th>Probleem</th>
+                    <th>Kern</th>
+                    <th>Ernst</th>
+                    <th>Status</th>
+                    <th>Actie</th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var item in queue.Cases)
+                {
+                    var rowId = "case-" + Math.Abs(item.CaseKey.GetHashCode(StringComparison.Ordinal)).ToString("x");
+                    var expanded = string.Equals(focus, item.CaseKey, StringComparison.Ordinal);
+                    <tr class="@(expanded ? "table-active" : null)" id="@rowId">
+                        <td><input class="form-check-input case-check" type="checkbox" name="SelectedCaseKeys" value="@item.CaseKey" form="bulk-form" /></td>
+                        <td>@item.Date.ToString("dd/MM")</td>
+                        <td>
+                            <div class="fw-semibold">@(item.DisplayName ?? item.ResourceId)</div>
+                            <div class="small text-muted">@(item.BonNr ?? item.ProjectId ?? "—")</div>
+                        </td>
+                        <td>
+                            <div>@item.ProblemLabel</div>
+                            @if (!string.IsNullOrWhiteSpace(item.FriendlyState))
+                            {
+                                <div class="small text-muted">@item.FriendlyState</div>
+                            }
+                        </td>
+                        <td class="small">
+                            @if (!string.IsNullOrWhiteSpace(item.RuleHint))
+                            {
+                                <div>@item.RuleHint</div>
+                            }
+                            <div>Geboekt: @(item.BookedSummary ?? "—")</div>
+                            @if (!string.IsNullOrWhiteSpace(item.PlannedSummary))
+                            {
+                                <div>Planning: @item.PlannedSummary</div>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(item.DifferenceSummary))
+                            {
+                                <div class="fw-semibold">@item.DifferenceSummary</div>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(item.HybridScenarioNote))
+                            {
+                                <div class="text-warning">@item.HybridScenarioNote</div>
+                            }
+                            else if (!string.IsNullOrWhiteSpace(item.EvidenceSummary) && item.Category == PayrollReviewCategory.Standby)
+                            {
+                                <div class="text-muted">@item.EvidenceSummary</div>
+                            }
+                            <div class="text-muted">@item.ActionabilityLabel</div>
+                        </td>
+                        <td><span class="badge @PayrollReviewLabels.SeverityBadgeClass(item.Severity)">@PayrollReviewLabels.FindingSeverity(item.Severity)</span></td>
+                        <td><span class="badge @PayrollReviewLabels.FindingStatusBadgeClass(item.WorkflowStatus)">@PayrollReviewCategories.WorkflowStatusLabel(item.WorkflowStatus)</span></td>
+                        <td class="text-nowrap">
+                            <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#detail-@rowId">Bekijken</button>
+                        </td>
+                    </tr>
+                    <tr class="collapse @(expanded ? "show" : null)" id="detail-@rowId">
+                        <td colspan="8" class="bg-light">
+                            @await Html.PartialAsync("_QueueCaseDetail", item)
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+
+        @* Mobile / tablet cards *@
+        <div class="d-lg-none vstack gap-2 mb-3">
             @foreach (var item in queue.Cases)
             {
-                var rowId = "case-" + item.CaseKey.GetHashCode(StringComparison.Ordinal).ToString("x");
+                var cardId = "m-" + Math.Abs(item.CaseKey.GetHashCode(StringComparison.Ordinal)).ToString("x");
                 var expanded = string.Equals(focus, item.CaseKey, StringComparison.Ordinal);
-                <tr class="@(expanded ? "table-active" : null)" id="@rowId">
-                    <td>@item.Date.ToString("dd/MM")</td>
-                    <td>
-                        <a asp-page="./Employee" asp-route-year="@Model.Year" asp-route-month="@Model.Month" asp-route-resourceId="@item.ResourceId">
-                            @(item.DisplayName ?? item.ResourceId)
-                        </a>
-                    </td>
-                    <td class="small">@PayrollReviewCategories.DisplayName(item.Category)</td>
-                    <td class="small">@(item.BonNr ?? item.ProjectId ?? "—")</td>
-                    <td>@item.ProblemLabel</td>
-                    <td class="small">@(item.BookedSummary ?? "—")</td>
-                    <td class="small text-muted">@(item.EvidenceSummary is { Length: > 80 } e ? e[..80] + "…" : item.EvidenceSummary ?? "—")</td>
-                    <td class="small">@(item.ProposalSummary ?? "—")</td>
-                    <td><span class="badge @PayrollReviewLabels.SeverityBadgeClass(item.Severity)">@PayrollReviewLabels.FindingSeverity(item.Severity)</span></td>
-                    <td><span class="badge @PayrollReviewLabels.FindingStatusBadgeClass(item.WorkflowStatus)">@PayrollReviewCategories.WorkflowStatusLabel(item.WorkflowStatus)</span></td>
-                    <td class="text-nowrap">
-                        <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#detail-@rowId">Bekijken</button>
-                        @if (item.RelatedActionId is { } actionId && item.Actionability == PayrollReviewCaseActionability.ReadyProposal)
-                        {
-                            <a class="btn btn-sm btn-outline-primary" asp-page="./ActionConfirm" asp-route-actionId="@actionId">Voorstel</a>
-                        }
-                    </td>
-                </tr>
-                <tr class="collapse @(expanded ? "show" : null)" id="detail-@rowId">
-                    <td colspan="11" class="bg-light">
-                        <div class="p-3">
-                            <div class="row g-3">
-                                <div class="col-md-8">
-                                    <p class="mb-1"><strong>Probleem:</strong> @item.ProblemLabel</p>
-                                    <p class="mb-1 small"><strong>Bewijs:</strong> @(item.EvidenceSummary ?? "—")</p>
-                                    <p class="mb-1 small"><strong>Voorstel:</strong> @(item.ProposalSummary ?? "—") · @item.ActionabilityLabel</p>
-                                    @if (!string.IsNullOrWhiteSpace(item.HybridScenarioNote))
-                                    {
-                                        <div class="alert alert-warning py-2 small mb-2">@item.HybridScenarioNote</div>
-                                    }
-                                    <p class="mb-0 small text-muted">Findings: @string.Join(", ", item.FindingKeys)</p>
-                                    <div class="mt-2 d-flex flex-wrap gap-2">
-                                        <a class="btn btn-sm btn-outline-secondary" asp-page="./Employee" asp-route-year="@Model.Year" asp-route-month="@Model.Month" asp-route-resourceId="@item.ResourceId">Medewerker bekijken</a>
-                                        @if (item.RelatedActionId is { } readyId && item.Actionability == PayrollReviewCaseActionability.ReadyProposal)
-                                        {
-                                            <a class="btn btn-sm btn-primary" asp-page="./ActionConfirm" asp-route-actionId="@readyId">Actie bevestigen</a>
-                                        }
+                <div class="card">
+                    <div class="card-body">
+                        <div class="d-flex gap-2 align-items-start">
+                            <input class="form-check-input case-check mt-1" type="checkbox" name="SelectedCaseKeys" value="@item.CaseKey" form="bulk-form" />
+                            <div class="flex-grow-1">
+                                <div class="d-flex justify-content-between gap-2">
+                                    <div>
+                                        <div class="fw-semibold">@(item.DisplayName ?? item.ResourceId)</div>
+                                        <div class="small text-muted">@item.Date.ToString("dd/MM/yyyy") · @(item.BonNr ?? item.ProjectId ?? "—")</div>
                                     </div>
+                                    <span class="badge @PayrollReviewLabels.SeverityBadgeClass(item.Severity)">@PayrollReviewLabels.FindingSeverity(item.Severity)</span>
                                 </div>
-                                <div class="col-md-4">
-                                    @if (item.WorkflowStatus is PayrollFindingStatus.Open or PayrollFindingStatus.NeedsFollowUp)
+                                <p class="mb-1 mt-1">@item.ProblemLabel</p>
+                                @if (!string.IsNullOrWhiteSpace(item.RuleHint))
+                                {
+                                    <p class="small mb-1">@item.RuleHint</p>
+                                }
+                                <p class="small text-muted mb-1">Geboekt: @(item.BookedSummary ?? "—")</p>
+                                @if (!string.IsNullOrWhiteSpace(item.DifferenceSummary))
+                                {
+                                    <p class="small fw-semibold mb-1">@item.DifferenceSummary</p>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(item.HybridScenarioNote))
+                                {
+                                    <div class="alert alert-warning py-1 small mb-2">@item.HybridScenarioNote</div>
+                                }
+                                <div class="d-flex flex-wrap gap-1 mb-2">
+                                    <span class="badge @PayrollReviewLabels.FindingStatusBadgeClass(item.WorkflowStatus)">@PayrollReviewCategories.WorkflowStatusLabel(item.WorkflowStatus)</span>
+                                    @if (!string.IsNullOrWhiteSpace(item.FriendlyState))
                                     {
-                                        <form method="post" class="vstack gap-2">
-                                            <input type="hidden" name="CaseKey" value="@item.CaseKey" />
-                                            <input type="hidden" name="Category" value="@Model.Category" />
-                                            <input type="hidden" name="Search" value="@Model.Search" />
-                                            <input type="hidden" name="Status" value="@Model.Status" />
-                                            <input type="hidden" name="Severity" value="@Model.Severity" />
-                                            <input type="hidden" name="Actionability" value="@Model.Actionability" />
-                                            <input type="hidden" name="Sort" value="@Model.Sort" />
-                                            <input class="form-control form-control-sm" name="Comment" placeholder="Commentaar (optioneel)" />
-                                            <button class="btn btn-sm btn-success" type="submit" asp-page-handler="Reviewed">Geen correctie nodig</button>
-                                            <button class="btn btn-sm btn-warning" type="submit" asp-page-handler="FollowUp">Opvolging nodig</button>
-                                            <button class="btn btn-sm btn-outline-secondary" type="submit" asp-page-handler="Next">Volgende</button>
-                                        </form>
+                                        <span class="badge text-bg-light text-dark">@item.FriendlyState</span>
                                     }
-                                    else
-                                    {
-                                        <p class="small text-muted mb-2">Status: @PayrollReviewCategories.WorkflowStatusLabel(item.WorkflowStatus)</p>
-                                        <form method="post">
-                                            <input type="hidden" name="CaseKey" value="@item.CaseKey" />
-                                            <button class="btn btn-sm btn-outline-secondary" type="submit" asp-page-handler="Next">Volgende</button>
-                                        </form>
-                                    }
+                                </div>
+                                <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#@cardId">Bekijken</button>
+                                <div class="collapse mt-2 @(expanded ? "show" : null)" id="@cardId">
+                                    @await Html.PartialAsync("_QueueCaseDetail", item)
                                 </div>
                             </div>
                         </div>
-                    </td>
-                </tr>
-            }
-            </tbody>
-        </table>
-    </div>
-
-    @* Mobile card list *@
-    <div class="d-md-none vstack gap-2 mb-3">
-        @foreach (var item in queue.Cases)
-        {
-            var cardId = "m-case-" + item.CaseKey.GetHashCode(StringComparison.Ordinal).ToString("x");
-            var expanded = string.Equals(focus, item.CaseKey, StringComparison.Ordinal);
-            <div class="card">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between gap-2 mb-1">
-                        <div>
-                            <div class="fw-semibold">@(item.DisplayName ?? item.ResourceId)</div>
-                            <div class="small text-muted">@item.Date.ToString("dd/MM/yyyy") · @PayrollReviewCategories.DisplayName(item.Category)</div>
-                        </div>
-                        <span class="badge @PayrollReviewLabels.SeverityBadgeClass(item.Severity)">@PayrollReviewLabels.FindingSeverity(item.Severity)</span>
-                    </div>
-                    <p class="mb-1">@item.ProblemLabel</p>
-                    <p class="small text-muted mb-2">@(item.BonNr ?? item.ProjectId ?? "—") · @(item.BookedSummary ?? "—")</p>
-                    <div class="d-flex flex-wrap gap-1 mb-2">
-                        <span class="badge @PayrollReviewLabels.FindingStatusBadgeClass(item.WorkflowStatus)">@PayrollReviewCategories.WorkflowStatusLabel(item.WorkflowStatus)</span>
-                        <span class="badge text-bg-light text-dark">@item.ActionabilityLabel</span>
-                    </div>
-                    <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#@cardId">Bekijken</button>
-                    <div class="collapse mt-2 @(expanded ? "show" : null)" id="@cardId">
-                        <p class="small mb-1"><strong>Bewijs:</strong> @(item.EvidenceSummary ?? "—")</p>
-                        <p class="small mb-2"><strong>Voorstel:</strong> @(item.ProposalSummary ?? "—")</p>
-                        @if (!string.IsNullOrWhiteSpace(item.HybridScenarioNote))
-                        {
-                            <div class="alert alert-warning py-2 small">@item.HybridScenarioNote</div>
-                        }
-                        <div class="d-flex flex-wrap gap-2 mb-2">
-                            <a class="btn btn-sm btn-outline-secondary" asp-page="./Employee" asp-route-year="@Model.Year" asp-route-month="@Model.Month" asp-route-resourceId="@item.ResourceId">Medewerker bekijken</a>
-                            @if (item.RelatedActionId is { } readyId && item.Actionability == PayrollReviewCaseActionability.ReadyProposal)
-                            {
-                                <a class="btn btn-sm btn-primary" asp-page="./ActionConfirm" asp-route-actionId="@readyId">Actie bevestigen</a>
-                            }
-                        </div>
-                        @if (item.WorkflowStatus is PayrollFindingStatus.Open or PayrollFindingStatus.NeedsFollowUp)
-                        {
-                            <form method="post" class="vstack gap-2">
-                                <input type="hidden" name="CaseKey" value="@item.CaseKey" />
-                                <input class="form-control form-control-sm" name="Comment" placeholder="Commentaar (optioneel)" />
-                                <button class="btn btn-sm btn-success" type="submit" asp-page-handler="Reviewed">Geen correctie nodig</button>
-                                <button class="btn btn-sm btn-warning" type="submit" asp-page-handler="FollowUp">Opvolging nodig</button>
-                                <button class="btn btn-sm btn-outline-secondary" type="submit" asp-page-handler="Next">Volgende</button>
-                            </form>
-                        }
                     </div>
                 </div>
-            </div>
-        }
-    </div>
+            }
+        </div>
 
     @if (queue.Cases.Count == 0)
     {
         <div class="alert alert-secondary">Geen cases voor deze filters.</div>
     }
+}
+
+@section Scripts {
+<script>
+function confirmBulk(form) {
+  const checked = document.querySelectorAll('.case-check:checked');
+  if (!checked.length) { alert('Selecteer minstens één zichtbare case.'); return false; }
+  const btn = document.activeElement;
+  const action = (btn && btn.value) ? btn.value : 'update';
+  const label = action === 'followup' ? 'Opvolging nodig' : action === 'reviewed' ? 'Geen correctie nodig' : 'Niet van toepassing';
+  return confirm(checked.length + ' controles worden als ' + label + ' gemarkeerd.');
+}
+document.getElementById('select-visible')?.addEventListener('click', () => {
+  document.querySelectorAll('.case-check').forEach(cb => { cb.checked = true; });
+});
+document.getElementById('clear-visible')?.addEventListener('click', () => {
+  document.querySelectorAll('.case-check').forEach(cb => { cb.checked = false; });
+});
+</script>
 }

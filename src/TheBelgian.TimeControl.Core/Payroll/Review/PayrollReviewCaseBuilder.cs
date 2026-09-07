@@ -58,6 +58,13 @@ public static class PayrollReviewCaseBuilder
             query = query.Where(item => item.Actionability == actionability);
         }
 
+        query = filter.Scope switch
+        {
+            PayrollReviewQueueScope.Open => query.Where(item => PayrollReviewCategories.IsUnresolved(item.WorkflowStatus)),
+            PayrollReviewQueueScope.Closed => query.Where(item => PayrollReviewCategories.IsClosed(item.WorkflowStatus)),
+            _ => query,
+        };
+
         if (!string.IsNullOrWhiteSpace(filter.Search))
         {
             var term = filter.Search.Trim();
@@ -67,16 +74,21 @@ public static class PayrollReviewCaseBuilder
         query = filter.Sort?.ToLowerInvariant() switch
         {
             "datum" or "date" => query.OrderByDescending(item => item.Date)
-                .ThenBy(item => item.DisplayName ?? item.ResourceId, StringComparer.OrdinalIgnoreCase),
+                .ThenBy(item => item.DisplayName ?? item.ResourceId, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(item => item.CaseKey, StringComparer.Ordinal),
             "medewerker" or "employee" => query.OrderBy(item => item.DisplayName ?? item.ResourceId, StringComparer.OrdinalIgnoreCase)
-                .ThenByDescending(item => item.Date),
+                .ThenByDescending(item => item.Date)
+                .ThenBy(item => item.CaseKey, StringComparer.Ordinal),
             "ernst" or "severity" => query.OrderByDescending(item => item.Severity)
-                .ThenByDescending(item => item.Date),
+                .ThenByDescending(item => item.Date)
+                .ThenBy(item => item.CaseKey, StringComparer.Ordinal),
             "categorie" or "category" => query.OrderBy(item => item.Category)
                 .ThenByDescending(item => item.Severity)
-                .ThenByDescending(item => item.Date),
+                .ThenByDescending(item => item.Date)
+                .ThenBy(item => item.CaseKey, StringComparer.Ordinal),
             _ => query.OrderByDescending(item => item.Severity)
                 .ThenByDescending(item => item.Actionability == PayrollReviewCaseActionability.ReadyProposal)
+                .ThenByDescending(item => item.Actionability == PayrollReviewCaseActionability.NeedsControl)
                 .ThenByDescending(item => item.Date)
                 .ThenBy(item => item.DisplayName ?? item.ResourceId, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(item => item.CaseKey, StringComparer.Ordinal),
@@ -105,6 +117,12 @@ public static class PayrollReviewCaseBuilder
         var byCategory = Enum.GetValues<PayrollReviewCategory>()
             .Where(item => item != PayrollReviewCategory.All)
             .ToDictionary(item => item, item => allCases.Count(c => c.Category == item));
+        var unresolvedByCategory = Enum.GetValues<PayrollReviewCategory>()
+            .Where(item => item != PayrollReviewCategory.All)
+            .ToDictionary(
+                item => item,
+                item => allCases.Count(c =>
+                    c.Category == item && PayrollReviewCategories.IsUnresolved(c.WorkflowStatus)));
 
         return new PayrollReviewQueueSummary(
             includedEmployees.Count,
@@ -122,7 +140,11 @@ public static class PayrollReviewCaseBuilder
             actions.Count(item =>
                 item.Status == PayrollProposedActionStatus.Blocked
                 && item.ActionType == PayrollProposedActionType.AdjustExistingPerformanceTime),
-            byCategory);
+            byCategory,
+            unresolvedByCategory,
+            allCases.Count(item =>
+                item.Severity == PayrollFindingSeverity.High
+                && PayrollReviewCategories.IsUnresolved(item.WorkflowStatus)));
     }
 
     public static string GroupKey(PayrollFindingRecord finding)
@@ -197,6 +219,13 @@ public static class PayrollReviewCaseBuilder
             ? "Hybride telefoon + fysieke interventie"
             : PayrollReviewCategories.ProblemLabel(findings);
 
+        var (planned, difference, ruleHint, friendlyState) = BuildCategoryPresentation(
+            category,
+            findings,
+            action,
+            hybridNote,
+            actionability);
+
         return new PayrollReviewCase(
             caseKey,
             category,
@@ -221,7 +250,139 @@ public static class PayrollReviewCaseBuilder
             hybridNote,
             reviewed?.ReviewedAtUtc,
             reviewed?.ReviewedBy,
-            reviewed?.ReviewComment);
+            reviewed?.ReviewComment,
+            planned,
+            difference,
+            ruleHint,
+            friendlyState);
+    }
+
+    private static (string? Planned, string? Difference, string? RuleHint, string? FriendlyState) BuildCategoryPresentation(
+        PayrollReviewCategory category,
+        List<PayrollFindingRecord> findings,
+        PayrollProposedActionRecord? action,
+        string? hybridNote,
+        PayrollReviewCaseActionability actionability)
+    {
+        var primary = findings[0];
+        return category switch
+        {
+            PayrollReviewCategory.Project300 => (
+                null,
+                null,
+                "Geen reservatie in planning gevonden.",
+                "Zonder reservatie"),
+            PayrollReviewCategory.Project200 => (
+                primary.PlannedHours is { } ph ? $"{ph:0.##} u gepland" : null,
+                FormatDifference(primary),
+                primary.FindingType == PayrollFindingType.Project200WithoutPlanning
+                    ? "Geen planning gevonden."
+                    : "Geboekt wijkt af van gepland.",
+                primary.FindingType == PayrollFindingType.Project200WithoutPlanning
+                    ? "Zonder planning"
+                    : "Meer geboekt"),
+            PayrollReviewCategory.Project100 => (
+                primary.PlannedHours is { } ph ? $"{ph:0.##} u gepland" : null,
+                primary.SuggestedOvertimeAdjustmentHours is { } ot && ot > 0
+                    ? $"mogelijk +{ot:0.##} u overuren"
+                    : null,
+                "Toolbox / opleiding — controleer impact op overuren.",
+                "Toolbox / opleiding"),
+            PayrollReviewCategory.Standby => (
+                null,
+                null,
+                hybridNote is not null
+                    ? "Telefonisch gedeelte eerst bevestigen."
+                    : "GPS- of dossiercontrole vereist.",
+                StandbyFriendlyState(findings, hybridNote, actionability)),
+            PayrollReviewCategory.MissingPerformance => (
+                primary.PlannedHours is { } ph ? $"{ph:0.##} u gepland" : null,
+                null,
+                "Controleer of een prestatie ontbreekt.",
+                MissingFriendlyState(primary)),
+            _ => (null, null, null, null),
+        };
+    }
+
+    private static string? FormatDifference(PayrollFindingRecord finding)
+    {
+        if (finding.BookedHours is { } booked && finding.PlannedHours is { } planned)
+        {
+            return $"{booked:0.##} u geboekt vs {planned:0.##} u gepland (Δ {(booked - planned):0.##} u)";
+        }
+
+        return null;
+    }
+
+    private static string StandbyFriendlyState(
+        List<PayrollFindingRecord> findings,
+        string? hybridNote,
+        PayrollReviewCaseActionability actionability)
+    {
+        if (!string.IsNullOrWhiteSpace(hybridNote))
+        {
+            return "Mogelijk telefoon + fysieke interventie";
+        }
+
+        if (findings.Any(item => item.FindingType == PayrollFindingType.StandbyPhoneExceeds15Min))
+        {
+            return "Telefonisch >15 min";
+        }
+
+        if (findings.Any(item => item.FindingType == PayrollFindingType.StandbyPossibleWrongDossier))
+        {
+            return "Mogelijk verkeerd dossier";
+        }
+
+        if (findings.Any(item => item.FindingType == PayrollFindingType.StandbyNoGpsData)
+            || findings.Any(item => string.Equals(item.GpsClassification, nameof(StandbyGpsClassification.NoGpsData), StringComparison.Ordinal)))
+        {
+            return "Onvoldoende GPS";
+        }
+
+        if (findings.Any(item => item.FindingType == PayrollFindingType.StandbyAmbiguousEvidence))
+        {
+            return "Onvoldoende GPS";
+        }
+
+        if (actionability == PayrollReviewCaseActionability.ReadyProposal)
+        {
+            return "Volledige fysieke interventie";
+        }
+
+        if (actionability == PayrollReviewCaseActionability.Blocked)
+        {
+            return "Onvolledige ritketen";
+        }
+
+        return "Wachtdienst controle";
+    }
+
+    private static string MissingFriendlyState(PayrollFindingRecord finding)
+    {
+        var gps = finding.GpsClassification ?? string.Empty;
+        if (gps.Contains("PeerPlusGps", StringComparison.OrdinalIgnoreCase)
+            || gps.Equals(nameof(MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps), StringComparison.Ordinal))
+        {
+            return "Sterk bewijs";
+        }
+
+        if (gps.Equals(nameof(MissingTechnicianEvidenceClass.PlanningPlusPeer), StringComparison.Ordinal))
+        {
+            return "Planning + collega";
+        }
+
+        if (gps.Equals(nameof(MissingTechnicianEvidenceClass.NoGpsData), StringComparison.Ordinal))
+        {
+            return "Geen GPS";
+        }
+
+        if (gps.Contains("Contradict", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Tegenstrijdige prestatie";
+        }
+
+        return "Ambigu";
     }
 
     private static (PayrollReviewCaseActionability, string, string?, string?) ResolveActionability(
@@ -275,14 +436,12 @@ public static class PayrollReviewCaseBuilder
                 return "Scenario indien telefonisch contact bevestigd wordt: max 0:15 + fysieke callout (niet-aaneengesloten).";
             }
 
+            var nl = CultureInfo.GetCultureInfo("nl-BE");
             var physicalHours = (proposal.ProposedEnd - proposal.ProposedStart).TotalHours;
+            var scenarioHours = 0.25 + physicalHours;
             return string.Create(
-                CultureInfo.GetCultureInfo("nl-BE"),
-                $"Geboekt {proposal.CurrentStart:HH:mm}–{proposal.CurrentEnd:HH:mm}. "
-                + $"Fysiek GPS {proposal.ProposedStart:HH:mm}–{proposal.ProposedEnd:HH:mm}. "
-                + $"Mogelijke telefoon vanaf {proposal.CurrentStart:HH:mm} (max 0:15). "
-                + $"Scenario indien telefonisch contact bevestigd wordt: 0:15 + {physicalHours:0.##} u fysiek "
-                + $"(totaal illustratief; gap niet betaalbaar via één VAN/TOT).");
+                nl,
+                $"Geboekt: {proposal.CurrentStart:HH:mm}–{proposal.CurrentEnd:HH:mm}. Fysieke interventie: {proposal.ProposedStart:HH:mm}–{proposal.ProposedEnd:HH:mm}. Mogelijk telefonisch: max 0:15. Possible payable scenario: 0:15 + {physicalHours.ToString("0.##", nl)} u = {scenarioHours.ToString("0.##", nl)} u. Telefonisch gedeelte eerst bevestigen. (Niet bewezen waarheid; split vereist.)");
         }
         catch (JsonException)
         {

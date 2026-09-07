@@ -19,4 +19,17 @@ public interface IPayrollReviewQueueService
         string? comment,
         string actor,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Updates only the explicitly provided case keys (never an implicit full-month select).
+    /// Allowed statuses: NeedsFollowUp, Reviewed, Dismissed.
+    /// </summary>
+    Task<PayrollReviewBulkUpdateResult> BulkSetCaseStatusAsync(
+        int year,
+        int month,
+        IReadOnlyList<string> caseKeys,
+        PayrollFindingStatus status,
+        string comment,
+        string actor,
+        CancellationToken cancellationToken);
 }

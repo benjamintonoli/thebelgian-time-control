@@ -24,6 +24,15 @@ public enum PayrollReviewCaseActionability
     Blocked = 3,
 }
 
+public enum PayrollReviewQueueScope
+{
+    /// <summary>Open + NeedsFollowUp (default active work).</summary>
+    Open = 0,
+    /// <summary>Reviewed + Resolved + Dismissed.</summary>
+    Closed = 1,
+    All = 2,
+}
+
 /// <summary>
 /// Presentation/workflow grouping of related payroll findings for the admin queue.
 /// Does not replace persisted PayrollFindingRecords.
@@ -52,7 +61,11 @@ public sealed record PayrollReviewCase(
     string? HybridScenarioNote,
     DateTimeOffset? ReviewedAtUtc,
     string? ReviewedBy,
-    string? ReviewComment);
+    string? ReviewComment,
+    string? PlannedSummary = null,
+    string? DifferenceSummary = null,
+    string? RuleHint = null,
+    string? FriendlyState = null);
 
 public sealed record PayrollReviewQueueFilter(
     PayrollReviewCategory Category = PayrollReviewCategory.All,
@@ -60,7 +73,8 @@ public sealed record PayrollReviewQueueFilter(
     PayrollFindingStatus? WorkflowStatus = null,
     PayrollFindingSeverity? Severity = null,
     PayrollReviewCaseActionability? Actionability = null,
-    string Sort = "default");
+    string Sort = "default",
+    PayrollReviewQueueScope Scope = PayrollReviewQueueScope.Open);
 
 public sealed record PayrollReviewQueueSummary(
     int IncludedEmployees,
@@ -74,7 +88,9 @@ public sealed record PayrollReviewQueueSummary(
     int Dismissed,
     int ReadyActions,
     int BlockedActions,
-    IReadOnlyDictionary<PayrollReviewCategory, int> ByCategory);
+    IReadOnlyDictionary<PayrollReviewCategory, int> ByCategory,
+    IReadOnlyDictionary<PayrollReviewCategory, int> UnresolvedByCategory,
+    int HighOpen = 0);
 
 public sealed record PayrollReviewQueuePage(
     int Year,
@@ -84,6 +100,11 @@ public sealed record PayrollReviewQueuePage(
     IReadOnlyList<PayrollShadowEmployeeResult> EmployeesAlphabetical,
     IReadOnlyList<(string ResourceId, string? DisplayName)> EmployeesWithOpenIssues,
     IReadOnlyList<(string ResourceId, string? DisplayName)> EmployeesWithoutOpenIssues);
+
+public sealed record PayrollReviewBulkUpdateResult(
+    int Requested,
+    int Updated,
+    IReadOnlyList<string> UpdatedCaseKeys);
 
 public static class PayrollReviewCategories
 {
@@ -114,7 +135,7 @@ public static class PayrollReviewCategories
         PayrollReviewCategory.All => "Alles",
         PayrollReviewCategory.Project300 => "300 zonder planning",
         PayrollReviewCategory.Project200 => "200 controle",
-        PayrollReviewCategory.Project100 => "100 toolbox / opleiding",
+        PayrollReviewCategory.Project100 => "Toolbox / opleiding",
         PayrollReviewCategory.Standby => "Wachtdienst",
         PayrollReviewCategory.Overlap => "Dubbele uren",
         PayrollReviewCategory.MissingPerformance => "Ontbrekende prestatie",
@@ -135,13 +156,14 @@ public static class PayrollReviewCategories
             return "Start/einde/duur wijkt af van GPS";
         }
 
+        var primary = findings[0];
         return types[0] switch
         {
-            PayrollFindingType.Project300WithoutPlanning => "300 zonder planning",
-            PayrollFindingType.Project200WithoutPlanning => "200 zonder planning",
-            PayrollFindingType.Project200ExceedsPlanning => "200 meer geboekt dan gepland",
+            PayrollFindingType.Project300WithoutPlanning => "Project 300 zonder reservatie",
+            PayrollFindingType.Project200WithoutPlanning => "Project 200 zonder planning",
+            PayrollFindingType.Project200ExceedsPlanning => Format200Exceeds(primary),
             PayrollFindingType.Project100TrainingHours => "Toolbox / opleiding",
-            PayrollFindingType.Project100TrainingInOvertime => "Opleiding veroorzaakt mogelijk overuren",
+            PayrollFindingType.Project100TrainingInOvertime => Format100Overtime(primary),
             PayrollFindingType.Project100ExceedsPlannedDuration => "Meer geboekt dan gepland",
             PayrollFindingType.OverlappingPerformances => "Dubbele / overlappende uren",
             PayrollFindingType.MissingPlannedTechnicianPerformance => "Mogelijk ontbrekende prestatie",
@@ -152,7 +174,7 @@ public static class PayrollReviewCategories
             PayrollFindingType.StandbyPossibleWrongDossier => "Mogelijk verkeerd dossier",
             PayrollFindingType.StandbyAmbiguousEvidence => "Onvoldoende / ambigu GPS",
             PayrollFindingType.StandbyNoGpsData => "Onvoldoende GPS",
-            _ => findings[0].Title,
+            _ => primary.Title,
         };
     }
 
@@ -165,6 +187,73 @@ public static class PayrollReviewCategories
         PayrollFindingStatus.Dismissed => "Niet van toepassing",
         _ => status.ToString(),
     };
+
+    public static bool IsUnresolved(PayrollFindingStatus status) =>
+        status is PayrollFindingStatus.Open or PayrollFindingStatus.NeedsFollowUp;
+
+    public static bool IsClosed(PayrollFindingStatus status) =>
+        status is PayrollFindingStatus.Reviewed
+            or PayrollFindingStatus.Resolved
+            or PayrollFindingStatus.Dismissed;
+
+    public static IReadOnlyList<string> SuggestedReasons(PayrollReviewCategory category) => category switch
+    {
+        PayrollReviewCategory.Project300 =>
+        [
+            "Reservatie ontbreekt",
+            "Intern werk bevestigd",
+            "Planning nog aan te vullen",
+            "Andere reden",
+        ],
+        PayrollReviewCategory.Project200 =>
+        [
+            "Planning ontbreekt",
+            "Duur te controleren",
+            "Intern werk bevestigd",
+            "Andere reden",
+        ],
+        PayrollReviewCategory.Standby =>
+        [
+            "Telefonisch contact na te kijken",
+            "GPS-afwijking te controleren",
+            "Dossier na te kijken",
+            "Andere reden",
+        ],
+        PayrollReviewCategory.Project100 =>
+        [
+            "Opleiding bevestigd",
+            "Overuren te controleren",
+            "Andere reden",
+        ],
+        PayrollReviewCategory.MissingPerformance =>
+        [
+            "Collega-prestatie te controleren",
+            "GPS te controleren",
+            "Andere reden",
+        ],
+        _ => ["Andere reden"],
+    };
+
+    private static string Format200Exceeds(PayrollFindingRecord finding)
+    {
+        if (finding.BookedHours is { } booked && finding.PlannedHours is { } planned)
+        {
+            var diff = booked - planned;
+            return $"Project 200: {diff:0.##} u meer geboekt dan gepland";
+        }
+
+        return "Project 200 meer geboekt dan gepland";
+    }
+
+    private static string Format100Overtime(PayrollFindingRecord finding)
+    {
+        if (finding.SuggestedOvertimeAdjustmentHours is { } ot && ot > 0)
+        {
+            return $"Deze opleiding veroorzaakt mogelijk {ot:0.##} uur overuren.";
+        }
+
+        return "Opleiding veroorzaakt mogelijk overuren";
+    }
 
     private static bool IsStandbyTimeMismatch(PayrollFindingType type) =>
         type is PayrollFindingType.StandbyStartMismatch

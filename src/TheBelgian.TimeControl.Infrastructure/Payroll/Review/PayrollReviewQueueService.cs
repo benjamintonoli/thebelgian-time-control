@@ -19,8 +19,6 @@ internal sealed class PayrollReviewQueueService(
     TimeProvider timeProvider,
     ILogger<PayrollReviewQueueService> logger) : IPayrollReviewQueueService
 {
-    private const string ProposeActor = "payroll-review-queue";
-
     public async Task<PayrollReviewQueuePage> GetQueueAsync(
         int year,
         int month,
@@ -53,13 +51,14 @@ internal sealed class PayrollReviewQueueService(
             .Where(item => includedByResource.ContainsKey(item.ResourceId))
             .ToList();
 
+        // ListActions only — avoid Propose/GPS N+1 on every queue render.
         var actions = await LoadActionsAsync(year, month, cancellationToken);
         var allCases = PayrollReviewCaseBuilder.Build(findings, includedByResource, actions);
         var filtered = PayrollReviewCaseBuilder.ApplyFilter(allCases, filter);
         var summary = PayrollReviewCaseBuilder.Summarize(allCases, included, actions);
 
         var openResourceIds = allCases
-            .Where(item => item.WorkflowStatus is PayrollFindingStatus.Open or PayrollFindingStatus.NeedsFollowUp)
+            .Where(item => PayrollReviewCategories.IsUnresolved(item.WorkflowStatus))
             .Select(item => item.ResourceId)
             .ToHashSet(StringComparer.Ordinal);
 
@@ -91,10 +90,72 @@ internal sealed class PayrollReviewQueueService(
         string actor,
         CancellationToken cancellationToken)
     {
-        EnsureEnabled();
-        if (string.IsNullOrWhiteSpace(caseKey))
+        var result = await BulkSetCaseStatusAsync(
+            year,
+            month,
+            [caseKey],
+            status,
+            comment ?? string.Empty,
+            actor,
+            requireComment: status == PayrollFindingStatus.Reviewed || status == PayrollFindingStatus.Dismissed,
+            cancellationToken);
+        if (result.Updated == 0)
         {
-            throw new ArgumentException("CaseKey is verplicht.", nameof(caseKey));
+            throw new InvalidOperationException($"Case niet gevonden: {caseKey}");
+        }
+    }
+
+    public Task<PayrollReviewBulkUpdateResult> BulkSetCaseStatusAsync(
+        int year,
+        int month,
+        IReadOnlyList<string> caseKeys,
+        PayrollFindingStatus status,
+        string comment,
+        string actor,
+        CancellationToken cancellationToken) =>
+        BulkSetCaseStatusAsync(year, month, caseKeys, status, comment, actor, requireComment: true, cancellationToken);
+
+    private async Task<PayrollReviewBulkUpdateResult> BulkSetCaseStatusAsync(
+        int year,
+        int month,
+        IReadOnlyList<string> caseKeys,
+        PayrollFindingStatus status,
+        string comment,
+        string actor,
+        bool requireComment,
+        CancellationToken cancellationToken)
+    {
+        EnsureEnabled();
+        if (caseKeys is null || caseKeys.Count == 0)
+        {
+            throw new ArgumentException("Selecteer minstens één case.", nameof(caseKeys));
+        }
+
+        // Safety: only explicit keys — never expand to "all month".
+        var distinctKeys = caseKeys
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Select(item => item.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (distinctKeys.Length == 0)
+        {
+            throw new ArgumentException("Selecteer minstens één case.", nameof(caseKeys));
+        }
+
+        if (status is not (PayrollFindingStatus.NeedsFollowUp
+            or PayrollFindingStatus.Reviewed
+            or PayrollFindingStatus.Dismissed
+            or PayrollFindingStatus.Open
+            or PayrollFindingStatus.Resolved))
+        {
+            throw new ArgumentOutOfRangeException(nameof(status), "Status niet toegelaten voor queue-update.");
+        }
+
+        // Bulk may never execute writes / resolve executable proposals — only disposition statuses.
+        if (status is PayrollFindingStatus.Resolved)
+        {
+            throw new InvalidOperationException(
+                "Bulk mag geen 'Opgelost' zetten via de triage-queue (geen write-resolutie).");
         }
 
         if (string.IsNullOrWhiteSpace(actor))
@@ -102,13 +163,11 @@ internal sealed class PayrollReviewQueueService(
             throw new InvalidOperationException("Actor is verplicht.");
         }
 
-        if (status is not (PayrollFindingStatus.Open
-            or PayrollFindingStatus.Reviewed
-            or PayrollFindingStatus.NeedsFollowUp
-            or PayrollFindingStatus.Dismissed
-            or PayrollFindingStatus.Resolved))
+        if (requireComment
+            && status is PayrollFindingStatus.Reviewed or PayrollFindingStatus.Dismissed
+            && string.IsNullOrWhiteSpace(comment))
         {
-            throw new ArgumentOutOfRangeException(nameof(status), status, "Ongeldige finding-status.");
+            throw new InvalidOperationException("Een reden/commentaar is verplicht.");
         }
 
         await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
@@ -123,49 +182,64 @@ internal sealed class PayrollReviewQueueService(
         var findings = await context.PayrollFindingRecords
             .Where(item => item.ShadowMonthId == shadowMonth.Id)
             .ToListAsync(cancellationToken);
-        var matches = findings
-            .Where(item => string.Equals(
-                PayrollReviewCaseBuilder.GroupKey(item),
-                caseKey.Trim(),
-                StringComparison.Ordinal))
-            .ToList();
-        if (matches.Count == 0)
-        {
-            throw new InvalidOperationException($"Case niet gevonden: {caseKey}");
-        }
 
         var now = timeProvider.GetUtcNow();
         var trimmedActor = actor.Trim();
         var trimmedComment = string.IsNullOrWhiteSpace(comment) ? null : comment.Trim();
-        foreach (var finding in matches)
+        var updatedKeys = new List<string>();
+
+        foreach (var caseKey in distinctKeys)
         {
-            finding.Status = status;
-            finding.ReviewedAtUtc = now;
-            finding.ReviewedBy = trimmedActor;
-            finding.ReviewComment = trimmedComment;
+            var matches = findings
+                .Where(item => string.Equals(
+                    PayrollReviewCaseBuilder.GroupKey(item),
+                    caseKey,
+                    StringComparison.Ordinal))
+                .ToList();
+            if (matches.Count == 0)
+            {
+                continue;
+            }
+
+            foreach (var finding in matches)
+            {
+                finding.Status = status;
+                finding.ReviewedAtUtc = now;
+                finding.ReviewedBy = trimmedActor;
+                finding.ReviewComment = trimmedComment;
+            }
+
+            var auditAction = status switch
+            {
+                PayrollFindingStatus.Reviewed => PayrollShadowAuditAction.ReviewAccepted,
+                PayrollFindingStatus.NeedsFollowUp => PayrollShadowAuditAction.ReviewNeedsFollowUp,
+                PayrollFindingStatus.Dismissed => PayrollShadowAuditAction.ReviewReset,
+                _ => PayrollShadowAuditAction.ReviewReset,
+            };
+            context.PayrollShadowReviewAudits.Add(new PayrollShadowReviewAudit
+            {
+                ShadowMonthId = shadowMonth.Id,
+                ResourceId = matches[0].ResourceId,
+                Action = auditAction,
+                Actor = trimmedActor,
+                TimestampUtc = now,
+                ReasonCode = caseKey,
+                Comment = trimmedComment is null
+                    ? $"queue-case:{caseKey}"
+                    : $"queue-case:{caseKey} | {trimmedComment}",
+            });
+            updatedKeys.Add(caseKey);
         }
 
-        var auditAction = status switch
+        if (updatedKeys.Count == 0)
         {
-            PayrollFindingStatus.Reviewed => PayrollShadowAuditAction.ReviewAccepted,
-            PayrollFindingStatus.NeedsFollowUp => PayrollShadowAuditAction.ReviewNeedsFollowUp,
-            PayrollFindingStatus.Open => PayrollShadowAuditAction.ReviewReset,
-            _ => PayrollShadowAuditAction.ReviewReset,
-        };
-        context.PayrollShadowReviewAudits.Add(new PayrollShadowReviewAudit
-        {
-            ShadowMonthId = shadowMonth.Id,
-            ResourceId = matches[0].ResourceId,
-            Action = auditAction,
-            Actor = trimmedActor,
-            TimestampUtc = now,
-            ReasonCode = caseKey.Trim(),
-            Comment = trimmedComment,
-        });
+            return new PayrollReviewBulkUpdateResult(distinctKeys.Length, 0, []);
+        }
 
         shadowMonth.LastReviewedAtUtc = now;
         shadowMonth.LastReviewedBy = trimmedActor;
         await context.SaveChangesAsync(cancellationToken);
+        return new PayrollReviewBulkUpdateResult(distinctKeys.Length, updatedKeys.Count, updatedKeys);
     }
 
     private async Task<IReadOnlyList<PayrollProposedActionRecord>> LoadActionsAsync(
@@ -180,34 +254,16 @@ internal sealed class PayrollReviewQueueService(
 
         try
         {
-            // Refresh eligibility / hybrid standby blocks while building the queue.
-            return await actionService.ProposeFromFindingsAsync(
-                year,
-                month,
-                resourceId: null,
-                ProposeActor,
-                cancellationToken);
+            return await actionService.ListActionsAsync(year, month, resourceId: null, cancellationToken);
         }
         catch (Exception exception)
         {
             logger.LogWarning(
                 exception,
-                "ProposeFromFindings failed for payroll review queue {Year}-{Month:00}; falling back to ListActions.",
+                "ListActions failed for payroll review queue {Year}-{Month:00}.",
                 year,
                 month);
-            try
-            {
-                return await actionService.ListActionsAsync(year, month, resourceId: null, cancellationToken);
-            }
-            catch (Exception listException)
-            {
-                logger.LogWarning(
-                    listException,
-                    "ListActions also failed for payroll review queue {Year}-{Month:00}.",
-                    year,
-                    month);
-                return [];
-            }
+            return [];
         }
     }
 
@@ -236,6 +292,9 @@ internal sealed class PayrollReviewQueueService(
                 0,
                 0,
                 0,
+                Enum.GetValues<PayrollReviewCategory>()
+                    .Where(item => item != PayrollReviewCategory.All)
+                    .ToDictionary(item => item, _ => 0),
                 Enum.GetValues<PayrollReviewCategory>()
                     .Where(item => item != PayrollReviewCategory.All)
                     .ToDictionary(item => item, _ => 0)),
