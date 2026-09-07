@@ -5,10 +5,12 @@ using TheBelgian.TimeControl.Core.Configuration;
 using TheBelgian.TimeControl.Core.Interfaces;
 using TheBelgian.TimeControl.Core.Models;
 using TheBelgian.TimeControl.Core.Payroll.Configuration;
+using TheBelgian.TimeControl.Core.Payroll.Finalization;
 using TheBelgian.TimeControl.Core.Payroll.Findings;
 using TheBelgian.TimeControl.Core.Payroll.Interfaces;
 using TheBelgian.TimeControl.Core.Payroll.Legacy;
 using TheBelgian.TimeControl.Core.Payroll.Models;
+using TheBelgian.TimeControl.Core.Payroll.Review;
 using TheBelgian.TimeControl.Infrastructure.Payroll.Eligibility;
 using TheBelgian.TimeControl.Infrastructure.Payroll.Findings;
 using TheBelgian.TimeControl.Infrastructure.Payroll.Legacy;
@@ -361,55 +363,18 @@ internal sealed class PayrollShadowService(
         var employees = await context.PayrollShadowEmployeeResults.AsNoTracking()
             .Where(item => item.ShadowMonthId == shadowMonth.Id)
             .ToListAsync(cancellationToken);
+        var findings = await context.PayrollFindingRecords.AsNoTracking()
+            .Where(item => item.ShadowMonthId == shadowMonth.Id)
+            .ToListAsync(cancellationToken);
 
-        var included = employees
+        var includedByResource = employees
             .Where(item => item.EligibilityStatus == PayrollEligibilityStatus.Included)
+            .ToDictionary(item => item.ResourceId, StringComparer.Ordinal);
+        var findingsForIncluded = findings
+            .Where(item => includedByResource.ContainsKey(item.ResourceId))
             .ToList();
-        var pending = included.Count(item => item.ReviewStatus == PayrollEmployeeReviewStatus.Pending);
-        var followUp = included.Count(item => item.ReviewStatus == PayrollEmployeeReviewStatus.NeedsFollowUp);
-        var needsDecision = employees.Count(item => item.EligibilityStatus == PayrollEligibilityStatus.NeedsDecision);
-        var missingAcerta = included.Count(item => item.AcertaIdentityStatus == AcertaIdentityStatus.Missing);
-        var lines = new List<string>();
-        if (included.Count == 0)
-        {
-            lines.Add("Geen Included medewerkers.");
-        }
-
-        if (pending > 0)
-        {
-            lines.Add($"{pending} Pending (te controleren)");
-        }
-
-        if (followUp > 0)
-        {
-            lines.Add($"{followUp} NeedsFollowUp (opvolging nodig)");
-        }
-
-        if (needsDecision > 0)
-        {
-            lines.Add($"{needsDecision} NeedsDecision");
-        }
-
-        if (missingAcerta > 0)
-        {
-            lines.Add($"{missingAcerta} Missing Acerta ID");
-        }
-
-        if (shadowMonth.Status == PayrollShadowMonthStatus.Finalized)
-        {
-            lines.Add("Maand is al afgesloten.");
-        }
-
-        var canFinalize = lines.Count == 0
-            && shadowMonth.Status is PayrollShadowMonthStatus.ReadyForReview or PayrollShadowMonthStatus.InReview;
-        return new PayrollMonthFinalizationBlockers(
-            canFinalize,
-            pending,
-            followUp,
-            needsDecision,
-            missingAcerta,
-            included.Count,
-            lines);
+        var reviewCases = PayrollReviewCaseBuilder.Build(findingsForIncluded, includedByResource, []);
+        return PayrollFinalizationEvaluator.Evaluate(shadowMonth, employees, reviewCases);
     }
 
     public async Task<ApplyConfirmedRosterToMonthResult> ApplyConfirmedRosterToMonthAsync(
@@ -601,6 +566,7 @@ internal sealed class PayrollShadowService(
         int year,
         int month,
         string actor,
+        string? comment,
         CancellationToken cancellationToken)
     {
         EnsureEnabled();
@@ -610,21 +576,40 @@ internal sealed class PayrollShadowService(
         var employees = await context.PayrollShadowEmployeeResults
             .Where(item => item.ShadowMonthId == shadowMonth.Id)
             .ToListAsync(cancellationToken);
-        ValidateFinalization(shadowMonth, employees);
+        var findings = await context.PayrollFindingRecords
+            .Where(item => item.ShadowMonthId == shadowMonth.Id)
+            .ToListAsync(cancellationToken);
 
+        var includedByResource = employees
+            .Where(item => item.EligibilityStatus == PayrollEligibilityStatus.Included)
+            .ToDictionary(item => item.ResourceId, StringComparer.Ordinal);
+        var findingsForIncluded = findings
+            .Where(item => includedByResource.ContainsKey(item.ResourceId))
+            .ToList();
+        var reviewCases = PayrollReviewCaseBuilder.Build(findingsForIncluded, includedByResource, []);
+        var blockers = PayrollFinalizationEvaluator.Evaluate(shadowMonth, employees, reviewCases);
+        if (!blockers.CanFinalize)
+        {
+            throw new InvalidOperationException(
+                "Afsluiten geblokkeerd: " + string.Join(" · ", blockers.SummaryLines));
+        }
+
+        var now = timeProvider.GetUtcNow();
         shadowMonth.Status = PayrollShadowMonthStatus.Finalized;
-        shadowMonth.FinalizedAtUtc = timeProvider.GetUtcNow();
+        shadowMonth.FinalizedAtUtc = now;
         shadowMonth.FinalizedBy = actor.Trim();
-        shadowMonth.LastReviewedAtUtc = shadowMonth.FinalizedAtUtc;
+        shadowMonth.LastReviewedAtUtc = now;
         shadowMonth.LastReviewedBy = actor.Trim();
+
+        var auditJson = PayrollFinalizationEvaluator.BuildAuditSnapshotJson(shadowMonth, blockers, comment);
         await AppendAuditAsync(
             context,
             shadowMonth.Id,
             null,
             PayrollShadowAuditAction.MonthFinalized,
             actor,
-            null,
-            null);
+            reasonCode: "exception-based-v2",
+            comment: auditJson);
         await context.SaveChangesAsync(cancellationToken);
         return shadowMonth;
     }
@@ -1125,66 +1110,6 @@ internal sealed class PayrollShadowService(
                 throw new InvalidOperationException(
                     "Eligibility-wijziging overlapt een afgesloten shadow-maand.");
             }
-        }
-    }
-
-    private static void ValidateFinalization(
-        PayrollShadowMonth shadowMonth,
-        IReadOnlyList<PayrollShadowEmployeeResult> employees)
-    {
-        if (shadowMonth.Status != PayrollShadowMonthStatus.InReview
-            && shadowMonth.Status != PayrollShadowMonthStatus.ReadyForReview)
-        {
-            throw new InvalidOperationException("Shadow-maand is niet klaar om af te sluiten.");
-        }
-
-        var included = employees
-            .Where(item => item.EligibilityStatus == PayrollEligibilityStatus.Included)
-            .ToList();
-        if (included.Count == 0)
-        {
-            throw new InvalidOperationException(
-                "Afsluiten vereist minstens één Included medewerker.");
-        }
-
-        foreach (var employee in included)
-        {
-            if (employee.EligibilityStatus == PayrollEligibilityStatus.NeedsDecision)
-            {
-                throw new InvalidOperationException(
-                    $"Included medewerker {employee.ResourceId} heeft nog NeedsDecision eligibility.");
-            }
-
-            if (employee.ReviewStatus is PayrollEmployeeReviewStatus.Pending
-                or PayrollEmployeeReviewStatus.NeedsFollowUp)
-            {
-                throw new InvalidOperationException(
-                    $"Included medewerker {employee.DisplayNameSnapshot} heeft open reviewstatus.");
-            }
-
-            if (employee.AcertaIdentityStatus == AcertaIdentityStatus.Missing)
-            {
-                throw new InvalidOperationException(
-                    $"Included medewerker {employee.DisplayNameSnapshot} mist Acerta-identiteit.");
-            }
-
-            EnsureCalculated(employee.OrdinaryStatus, "ordinary", employee.DisplayNameSnapshot);
-            EnsureCalculated(employee.StandbyStatus, "standby", employee.DisplayNameSnapshot);
-            EnsureCalculated(employee.CityStatus, "city", employee.DisplayNameSnapshot);
-            EnsureCalculated(employee.KmStatus, "KM", employee.DisplayNameSnapshot);
-            EnsureCalculated(employee.Code414Status, "code414", employee.DisplayNameSnapshot);
-        }
-    }
-
-    private static void EnsureCalculated(
-        PayrollMonthCalculationStatus status,
-        string component,
-        string displayName)
-    {
-        if (status != PayrollMonthCalculationStatus.Calculated)
-        {
-            throw new InvalidOperationException(
-                $"Included medewerker {displayName} heeft incomplete berekening ({component}).");
         }
     }
 

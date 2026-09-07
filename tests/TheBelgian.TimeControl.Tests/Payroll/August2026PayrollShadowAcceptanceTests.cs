@@ -107,8 +107,8 @@ public sealed class PayrollShadowAcceptanceInvariantTests
         await fixture.Service.StartReviewAsync(2026, 8, "Ada Admin", default);
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            fixture.Service.FinalizeAsync(2026, 8, "Ada Admin", default));
-        Assert.Contains("minstens één Included", exception.Message, StringComparison.OrdinalIgnoreCase);
+            fixture.Service.FinalizeAsync(2026, 8, "Ada Admin", null, default));
+        Assert.Contains("Included", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -140,7 +140,7 @@ public sealed class PayrollShadowAcceptanceInvariantTests
         await fixture.Service.StartReviewAsync(2026, 8, "Ada Admin", default);
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            fixture.Service.FinalizeAsync(2026, 8, "Ada Admin", default));
+            fixture.Service.FinalizeAsync(2026, 8, "Ada Admin", null, default));
         Assert.Contains("Acerta", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -223,7 +223,7 @@ public sealed class PayrollShadowAcceptanceInvariantTests
                 "Ada Admin",
                 default);
             await Service.StartReviewAsync(2026, 8, "Ada Admin", default);
-            await Service.FinalizeAsync(2026, 8, "Ada Admin", default);
+            await Service.FinalizeAsync(2026, 8, "Ada Admin", null, default);
         }
 
         public ValueTask DisposeAsync() => _connection.DisposeAsync();
@@ -457,7 +457,7 @@ public sealed class August2026PayrollShadowAcceptanceTests(ITestOutputHelper out
         Assert.Equal(PayrollShadowMonthStatus.InReview, started.Status);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            harness.Service.FinalizeAsync(2026, 8, "Acceptance Admin", default));
+            harness.Service.FinalizeAsync(2026, 8, "Acceptance Admin", null, default));
 
         await harness.Service.SetEligibilityAsync(
             new SetPayrollEligibilityRequest(
@@ -495,7 +495,7 @@ public sealed class August2026PayrollShadowAcceptanceTests(ITestOutputHelper out
                 default);
         }
 
-        var finalized = await harness.Service.FinalizeAsync(2026, 8, "Acceptance Admin", default);
+        var finalized = await harness.Service.FinalizeAsync(2026, 8, "Acceptance Admin", null, default);
         Assert.Equal(PayrollShadowMonthStatus.Finalized, finalized.Status);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>

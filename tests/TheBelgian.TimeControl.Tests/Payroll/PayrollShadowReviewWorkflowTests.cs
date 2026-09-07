@@ -22,18 +22,19 @@ public sealed class PayrollShadowReviewWorkflowTests
         var started = await fixture.Service.StartReviewAsync(2026, 7, "Ada Admin", default);
         Assert.Equal(PayrollShadowMonthStatus.InReview, started.Status);
 
-        var finalized = await fixture.Service.FinalizeAsync(2026, 7, "Ada Admin", default);
+        var finalized = await fixture.Service.FinalizeAsync(2026, 7, "Ada Admin", null, default);
         Assert.Equal(PayrollShadowMonthStatus.Finalized, finalized.Status);
     }
 
     [Fact]
-    public async Task Finalize_BlocksNeedsDecisionPendingNeedsFollowUpAndMissingAcerta()
+    public async Task Finalize_BlocksNeedsDecision_ButPendingEmployeesDoNotBlock()
     {
         await using var fixture = await Fixture.CreateAsync();
         await fixture.Service.CreateSnapshotAsync(2026, 7, new DateOnly(2026, 8, 1), "Ada Admin", default);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            fixture.Service.FinalizeAsync(2026, 7, "Ada Admin", default));
+        var before = await fixture.Service.GetFinalizationBlockersAsync(2026, 7, default);
+        Assert.False(before.CanFinalize);
+        Assert.Contains(before.Blockers, item => item.Code == "ELIGIBILITY_NEEDS_DECISION" || item.Code == "NO_INCLUDED_EMPLOYEES");
 
         await fixture.Service.SetEligibilityAsync(
             new SetPayrollEligibilityRequest(
@@ -45,16 +46,25 @@ public sealed class PayrollShadowReviewWorkflowTests
                 null),
             "Ada Admin",
             default);
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            fixture.Service.FinalizeAsync(2026, 7, "Ada Admin", default));
 
-        await fixture.Service.SetReviewStatusAsync(
-            new SetPayrollReviewStatusRequest(2026, 7, "1", PayrollEmployeeReviewStatus.Accepted, null),
-            "Ada Admin",
-            default);
+        // Rebuild so snapshot reflects Included + Calculated with Pending review status.
+        await fixture.Service.RebuildSnapshotAsync(2026, 7, new DateOnly(2026, 8, 1), "Ada Admin", default);
         await fixture.Service.StartReviewAsync(2026, 7, "Ada Admin", default);
-        var finalized = await fixture.Service.FinalizeAsync(2026, 7, "Ada Admin", default);
+
+        var blockers = await fixture.Service.GetFinalizationBlockersAsync(2026, 7, default);
+        Assert.True(blockers.PendingIncluded >= 1);
+        Assert.DoesNotContain(blockers.Blockers, item => item.FriendlyMessage.Contains("Pending", StringComparison.OrdinalIgnoreCase));
+        Assert.True(blockers.CanFinalize, string.Join(" · ", blockers.SummaryLines));
+
+        var finalized = await fixture.Service.FinalizeAsync(2026, 7, "Ada Admin", "exception-based sign-off", default);
         Assert.Equal(PayrollShadowMonthStatus.Finalized, finalized.Status);
+
+        await using var context = await fixture.Factory.CreateDbContextAsync();
+        var audit = await context.PayrollShadowReviewAudits.AsNoTracking()
+            .SingleAsync(item => item.Action == PayrollShadowAuditAction.MonthFinalized);
+        Assert.Equal("Ada Admin", audit.Actor);
+        Assert.Contains("exception-based", audit.Comment, StringComparison.Ordinal);
+        Assert.DoesNotContain("national", audit.Comment ?? "", StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

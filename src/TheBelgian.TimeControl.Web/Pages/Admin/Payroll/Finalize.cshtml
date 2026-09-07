@@ -1,0 +1,101 @@
+@page "/Admin/Payroll/{year:int}/{month:int}/Finalize"
+@model TheBelgian.TimeControl.Web.Pages.Admin.Payroll.FinalizeModel
+@using System.Globalization
+@using TheBelgian.TimeControl.Core.Payroll.Models
+@{
+    ViewData["Title"] = $"Payroll afsluiten {Model.Month:00}/{Model.Year}";
+    var detail = Model.Detail;
+    var blockers = Model.Blockers;
+    var nl = CultureInfo.GetCultureInfo("nl-BE");
+}
+
+<div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
+    <div>
+        <div class="text-uppercase small text-muted fw-semibold">Payroll shadow</div>
+        <h1 class="h3 mb-1">Maand controleren en afsluiten</h1>
+        <p class="text-muted mb-0">Payroll @Model.Month.ToString("00")/@Model.Year — expliciete bevestiging vereist. Geen Acerta-export, geen Plenion-schrijfactie.</p>
+    </div>
+    <a class="btn btn-sm btn-outline-secondary" asp-page="./Month" asp-route-year="@Model.Year" asp-route-month="@Model.Month">← Maand</a>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(Model.Error))
+{
+    <div class="alert alert-danger">@Model.Error</div>
+}
+
+@if (detail is null || blockers is null)
+{
+    <div class="alert alert-warning">Shadow-maand niet gevonden.</div>
+}
+else
+{
+    <div class="card mb-3">
+        <div class="card-body">
+            <h2 class="h5">Samenvatting</h2>
+            <div class="row g-2 small">
+                <div class="col-6 col-md-4">Medewerkers Included: <strong>@blockers.IncludedCount</strong></div>
+                <div class="col-6 col-md-4">Excluded: <strong>@blockers.ExcludedCount</strong></div>
+                <div class="col-6 col-md-4">Review cases: <strong>@blockers.ReviewCasesTotal</strong></div>
+                <div class="col-6 col-md-4">Gecontroleerd: <strong>@blockers.ReviewedReviewCases</strong></div>
+                <div class="col-6 col-md-4">Opgelost: <strong>@blockers.ResolvedReviewCases</strong></div>
+                <div class="col-6 col-md-4">N.v.t.: <strong>@blockers.DismissedReviewCases</strong></div>
+                <div class="col-6 col-md-4">Open: <strong>@blockers.OpenReviewCases</strong></div>
+                <div class="col-6 col-md-4">Opvolging nodig: <strong>@blockers.FollowUpReviewCases</strong></div>
+                <div class="col-6 col-md-4">Missing Acerta: <strong>@blockers.MissingAcertaIncluded</strong></div>
+                <div class="col-6 col-md-4">NeedsDecision: <strong>@blockers.NeedsDecision</strong></div>
+                <div class="col-6 col-md-4">Employee Pending (info): <strong>@blockers.PendingIncluded</strong></div>
+                <div class="col-6 col-md-4">Status: <strong>@PayrollReviewLabels.MonthStatus(detail.Month.Status)</strong></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <h2 class="h5">Financiële samenvatting (bestaande snapshot)</h2>
+            <div class="row g-2">
+                <div class="col-6 col-md"><div class="border rounded p-2"><div class="small text-muted">Overuren 150%</div><div class="fw-semibold">@blockers.FinancialSummary.TotalOvertime150Units.ToString("0.##", nl)</div></div></div>
+                <div class="col-6 col-md"><div class="border rounded p-2"><div class="small text-muted">Wachtdienst 200%</div><div class="fw-semibold">@blockers.FinancialSummary.TotalStandby200Hours.ToString("0.##", nl) u</div></div></div>
+                <div class="col-6 col-md"><div class="border rounded p-2"><div class="small text-muted">Stadstoelage</div><div class="fw-semibold">€ @blockers.FinancialSummary.TotalCityAllowanceAmount.ToString("0.00", nl)</div></div></div>
+                <div class="col-6 col-md"><div class="border rounded p-2"><div class="small text-muted">KM-vergoeding</div><div class="fw-semibold">€ @blockers.FinancialSummary.TotalKmAmount.ToString("0.00", nl)</div></div></div>
+                <div class="col-6 col-md"><div class="border rounded p-2"><div class="small text-muted">Code 414</div><div class="fw-semibold">€ @blockers.FinancialSummary.TotalCode414Amount.ToString("0.00", nl)</div></div></div>
+            </div>
+            <p class="small text-muted mb-0 mt-2">Versie @blockers.CalculationVersion · config-snapshot @(blockers.HasConfigurationSnapshot ? "aanwezig" : "ontbreekt")</p>
+        </div>
+    </div>
+
+    @if (!blockers.CanFinalize)
+    {
+        <div class="alert alert-warning">
+            <strong>Nog niet klaar om af te sluiten</strong>
+            <ul class="mb-0 mt-2">
+                @foreach (var blocker in blockers.Blockers)
+                {
+                    <li>@blocker.FriendlyMessage <span class="text-muted">(@blocker.Code)</span></li>
+                }
+            </ul>
+        </div>
+        <a class="btn btn-primary" asp-page="./Queue" asp-route-year="@Model.Year" asp-route-month="@Model.Month">Naar opvolging</a>
+    }
+    else
+    {
+        <form method="post" asp-page-handler="Confirm" class="card mb-3">
+            <div class="card-body vstack gap-3">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" asp-for="AttestationConfirmed" id="attestation" />
+                    <label class="form-check-label" for="attestation">
+                        Ik bevestig dat de openstaande payrollcontroles voor deze maand zijn afgehandeld en dat deze shadow-maand mag worden afgesloten.
+                    </label>
+                </div>
+                <div>
+                    <label class="form-label" asp-for="Comment">Commentaar (optioneel)</label>
+                    <textarea class="form-control" asp-for="Comment" rows="2" placeholder="Optionele toelichting bij afsluiting"></textarea>
+                </div>
+                <div class="d-flex flex-wrap gap-2">
+                    <button class="btn btn-danger" type="submit">Maand definitief afsluiten</button>
+                    <a class="btn btn-outline-secondary" asp-page="./Month" asp-route-year="@Model.Year" asp-route-month="@Model.Month">Annuleren</a>
+                </div>
+                <p class="small text-muted mb-0">Dit bevriest de shadow-maand. Er wordt niets naar Acerta of Plenion verstuurd.</p>
+            </div>
+        </form>
+    }
+}

@@ -250,8 +250,7 @@ public sealed class PayrollRosterUxFixTests
             int year, int month, string actor, string? comment, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 
-        public Task<PayrollShadowMonth> FinalizeAsync(
-            int year, int month, string actor, CancellationToken cancellationToken) =>
+        public Task<PayrollShadowMonth> FinalizeAsync(int year, int month, string actor, string? comment, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 
         public Task<IReadOnlyList<PayrollShadowReviewAudit>> GetAuditTrailAsync(

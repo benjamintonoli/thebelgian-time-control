@@ -136,34 +136,6 @@ public sealed class MonthModel(
         return await OnGetAsync(cancellationToken);
     }
 
-    public async Task<IActionResult> OnPostFinalizeAsync(CancellationToken cancellationToken)
-    {
-        if (!EnsureUiEnabled())
-        {
-            return NotFound();
-        }
-
-        try
-        {
-            var blockers = await payrollShadowService.GetFinalizationBlockersAsync(Year, Month, cancellationToken);
-            if (!blockers.CanFinalize)
-            {
-                Error = "Afsluiten geblokkeerd: " + string.Join(" · ", blockers.SummaryLines);
-                return await OnGetAsync(cancellationToken);
-            }
-
-            await payrollShadowService.FinalizeAsync(Year, Month, RequireActor().AuditIdentity, cancellationToken);
-            Message = "Shadow-maand afgesloten (geen Acerta-export).";
-        }
-        catch (Exception exception)
-        {
-            logger.LogWarning(exception, "Payroll shadow finalize failed.");
-            Error = exception.Message;
-        }
-
-        return await OnGetAsync(cancellationToken);
-    }
-
     private async Task LoadAsync(CancellationToken cancellationToken)
     {
         Detail = await payrollShadowService.GetMonthDetailAsync(

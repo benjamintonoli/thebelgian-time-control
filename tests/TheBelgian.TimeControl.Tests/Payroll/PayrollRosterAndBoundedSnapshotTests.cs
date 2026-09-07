@@ -562,7 +562,7 @@ public sealed class PayrollRosterAndBoundedSnapshotTests
 
         await fixture.Service.StartReviewAsync(2026, 8, "Ada Admin", default);
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            fixture.Service.FinalizeAsync(2026, 8, "Ada Admin", default));
+            fixture.Service.FinalizeAsync(2026, 8, "Ada Admin", null, default));
         Assert.Contains("Acerta", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 

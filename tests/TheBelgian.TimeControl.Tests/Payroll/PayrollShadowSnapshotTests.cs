@@ -59,7 +59,7 @@ public sealed class PayrollShadowSnapshotTests
             "Ada Admin",
             default);
         await fixture.Service.StartReviewAsync(2026, 7, "Ada Admin", default);
-        await fixture.Service.FinalizeAsync(2026, 7, "Ada Admin", default);
+        await fixture.Service.FinalizeAsync(2026, 7, "Ada Admin", null, default);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             fixture.Service.SetEligibilityAsync(
@@ -110,7 +110,7 @@ public sealed class PayrollShadowSnapshotTests
             "Ada Admin",
             default);
         await fixture.Service.StartReviewAsync(2026, 7, "Ada Admin", default);
-        await fixture.Service.FinalizeAsync(2026, 7, "Ada Admin", default);
+        await fixture.Service.FinalizeAsync(2026, 7, "Ada Admin", null, default);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             fixture.Service.CreateSnapshotAsync(2026, 7, new DateOnly(2026, 8, 1), "Ada Admin", default));

@@ -69,6 +69,7 @@ public interface IPayrollShadowService
         int year,
         int month,
         string actor,
+        string? comment,
         CancellationToken cancellationToken);
 
     Task SetEligibilityAsync(
@@ -250,6 +251,18 @@ public sealed record PayrollMonthPeriodEligibilityInsight(
     int LaterRosterExcludedCount,
     string? WarningMessage);
 
+public sealed record PayrollFinalizationBlocker(
+    string Code,
+    int Count,
+    string FriendlyMessage);
+
+public sealed record PayrollMonthFinancialSummary(
+    decimal TotalOvertime150Units,
+    decimal TotalStandby200Hours,
+    decimal TotalCityAllowanceAmount,
+    decimal TotalKmAmount,
+    decimal TotalCode414Amount);
+
 public sealed record PayrollMonthFinalizationBlockers(
     bool CanFinalize,
     int PendingIncluded,
@@ -257,6 +270,18 @@ public sealed record PayrollMonthFinalizationBlockers(
     int NeedsDecision,
     int MissingAcertaIncluded,
     int IncludedCount,
+    int ExcludedCount,
+    int OpenReviewCases,
+    int FollowUpReviewCases,
+    int ReviewedReviewCases,
+    int ResolvedReviewCases,
+    int DismissedReviewCases,
+    int ReviewCasesTotal,
+    int IncompleteCalculationIncluded,
+    IReadOnlyList<PayrollFinalizationBlocker> Blockers,
+    PayrollMonthFinancialSummary FinancialSummary,
+    string CalculationVersion,
+    bool HasConfigurationSnapshot,
     IReadOnlyList<string> SummaryLines);
 
 public sealed record ApplyConfirmedRosterToMonthResult(

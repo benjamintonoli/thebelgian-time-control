@@ -56,7 +56,10 @@ public sealed class PayrollReviewWorkflowUxTests
         Assert.Contains("Opvolging", markup);
         Assert.Contains("PayrollReviewLabels.ReviewStatus", markup);
         Assert.Contains("goedgekeurd", markup);
-        Assert.Contains("opvolging nodig", markup);
+        Assert.Contains("Opvolging nodig", markup);
+        Assert.Contains("Maand controleren en afsluiten", markup);
+        Assert.Contains("./Finalize", markup);
+        Assert.Contains("informatief", markup);
         Assert.Contains("|Diff| ≥ 8u", markup);
         Assert.Contains("disabled", markup);
         Assert.Contains("Medewerkers (alfabetisch)", markup);
@@ -221,7 +224,29 @@ public sealed class PayrollReviewWorkflowUxTests
 
         public Task<PayrollMonthFinalizationBlockers> GetFinalizationBlockersAsync(
             int year, int month, CancellationToken cancellationToken) =>
-            Task.FromResult(new PayrollMonthFinalizationBlockers(false, 1, 0, 1, 0, 0, ["1 Pending"]));
+            Task.FromResult(new PayrollMonthFinalizationBlockers(
+                false,
+                PendingIncluded: 1,
+                NeedsFollowUpIncluded: 0,
+                NeedsDecision: 1,
+                MissingAcertaIncluded: 0,
+                IncludedCount: 0,
+                ExcludedCount: 0,
+                OpenReviewCases: 0,
+                FollowUpReviewCases: 0,
+                ReviewedReviewCases: 0,
+                ResolvedReviewCases: 0,
+                DismissedReviewCases: 0,
+                ReviewCasesTotal: 0,
+                IncompleteCalculationIncluded: 0,
+                Blockers:
+                [
+                    new("ELIGIBILITY_NEEDS_DECISION", 1, "1 medewerker(s) met NeedsDecision."),
+                ],
+                FinancialSummary: new PayrollMonthFinancialSummary(0, 0, 0, 0, 0),
+                CalculationVersion: "test",
+                HasConfigurationSnapshot: true,
+                SummaryLines: ["1 medewerker(s) met NeedsDecision."]));
 
         public Task<ApplyConfirmedRosterToMonthResult> ApplyConfirmedRosterToMonthAsync(
             int year, int month, string actor, string? comment, CancellationToken cancellationToken)
@@ -233,7 +258,7 @@ public sealed class PayrollReviewWorkflowUxTests
         public Task AddManualPayrollEmployeeAsync(AddManualPayrollEmployeeRequest request, string actor, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task ConfirmPayrollRosterSelectionAsync(ConfirmPayrollRosterSelectionRequest request, string actor, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task<PayrollShadowMonth> CreateSnapshotAsync(int year, int month, DateOnly evaluationDate, string actor, CancellationToken cancellationToken) => throw new NotSupportedException();
-        public Task<PayrollShadowMonth> FinalizeAsync(int year, int month, string actor, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<PayrollShadowMonth> FinalizeAsync(int year, int month, string actor, string? comment, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<IReadOnlyList<PayrollShadowReviewAudit>> GetAuditTrailAsync(int year, int month, string? resourceId, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<PayrollShadowReviewAudit>>([]);
         public Task<PayrollShadowEmployeeDetail?> GetEmployeeDetailAsync(int year, int month, string resourceId, CancellationToken cancellationToken) => Task.FromResult<PayrollShadowEmployeeDetail?>(null);
         public Task<PayrollRosterPage> GetPayrollRosterAsync(PayrollRosterFilter filter, CancellationToken cancellationToken) => throw new NotSupportedException();
