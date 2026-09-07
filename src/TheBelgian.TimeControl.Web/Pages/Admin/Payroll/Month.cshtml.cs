@@ -25,8 +25,11 @@ public sealed class MonthModel(
     [BindProperty(SupportsGet = true)] public bool MissingAcertaIdentityOnly { get; set; }
     [BindProperty(SupportsGet = true)] public bool NegativeDifferenceOnly { get; set; }
     [BindProperty(SupportsGet = true)] public bool NonzeroStandbyOnly { get; set; }
+    [BindProperty(SupportsGet = true)] public bool LargeAbsoluteDifferenceOnly { get; set; }
 
     public PayrollShadowMonthDetail? Detail { get; private set; }
+    public PayrollMonthPeriodEligibilityInsight? PeriodInsight { get; private set; }
+    public PayrollMonthFinalizationBlockers? FinalizationBlockers { get; private set; }
     public string? Message { get; private set; }
     public string? Error { get; private set; }
 
@@ -51,11 +54,38 @@ public sealed class MonthModel(
         try
         {
             await payrollShadowService.StartReviewAsync(Year, Month, RequireActor().AuditIdentity, cancellationToken);
-            Message = "Review gestart.";
+            Message = "Review gestart. Er wordt niets naar Acerta of Plenion verstuurd.";
         }
         catch (Exception exception)
         {
             logger.LogWarning(exception, "Payroll shadow review start failed.");
+            Error = exception.Message;
+        }
+
+        return await OnGetAsync(cancellationToken);
+    }
+
+    public async Task<IActionResult> OnPostApplyRosterAsync(CancellationToken cancellationToken)
+    {
+        if (!EnsureUiEnabled())
+        {
+            return NotFound();
+        }
+
+        try
+        {
+            var result = await payrollShadowService.ApplyConfirmedRosterToMonthAsync(
+                Year,
+                Month,
+                RequireActor().AuditIdentity,
+                comment: null,
+                cancellationToken);
+            Message =
+                $"Payrolllijst toegepast vanaf {result.AppliedFrom:dd/MM/yyyy}: {result.IncludedWritten} Included, {result.ExcludedWritten} Excluded ({result.SkippedAlreadyEffective} al effectief). Herbereken de snapshot om August te vernieuwen.";
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Payroll roster apply-to-month failed.");
             Error = exception.Message;
         }
 
@@ -74,7 +104,7 @@ public sealed class MonthModel(
             var existing = await payrollShadowService.GetMonthDetailAsync(
                 Year,
                 Month,
-                new PayrollShadowEmployeeFilter(HideExcluded: false),
+                new PayrollShadowEmployeeFilter(HideExcluded: false, PrioritizeReviewExceptions: false),
                 cancellationToken);
             var evaluationDate = existing?.Month.EvaluationDate
                 ?? new DateOnly(Year, Month, 1).AddMonths(1);
@@ -85,7 +115,7 @@ public sealed class MonthModel(
                 evaluationDate,
                 RequireActor().AuditIdentity,
                 cancellationToken);
-            Message = "Shadow-maand herberekend.";
+            Message = "Shadow-maand herberekend. Bestaande reviewbeslissingen zijn bewaard waar mogelijk.";
         }
         catch (Exception exception)
         {
@@ -105,8 +135,15 @@ public sealed class MonthModel(
 
         try
         {
+            var blockers = await payrollShadowService.GetFinalizationBlockersAsync(Year, Month, cancellationToken);
+            if (!blockers.CanFinalize)
+            {
+                Error = "Afsluiten geblokkeerd: " + string.Join(" · ", blockers.SummaryLines);
+                return await OnGetAsync(cancellationToken);
+            }
+
             await payrollShadowService.FinalizeAsync(Year, Month, RequireActor().AuditIdentity, cancellationToken);
-            Message = "Shadow-maand afgesloten.";
+            Message = "Shadow-maand afgesloten (geen Acerta-export).";
         }
         catch (Exception exception)
         {
@@ -129,8 +166,19 @@ public sealed class MonthModel(
                 NeedsFollowUpOnly,
                 MissingAcertaIdentityOnly,
                 NegativeDifferenceOnly,
-                NonzeroStandbyOnly),
+                NonzeroStandbyOnly,
+                HideExcluded: true,
+                LargeAbsoluteDifferenceOnly),
             cancellationToken);
+        if (Detail is null)
+        {
+            PeriodInsight = null;
+            FinalizationBlockers = null;
+            return;
+        }
+
+        PeriodInsight = await payrollShadowService.GetPeriodEligibilityInsightAsync(Year, Month, cancellationToken);
+        FinalizationBlockers = await payrollShadowService.GetFinalizationBlockersAsync(Year, Month, cancellationToken);
     }
 
     private bool EnsureUiEnabled() =>

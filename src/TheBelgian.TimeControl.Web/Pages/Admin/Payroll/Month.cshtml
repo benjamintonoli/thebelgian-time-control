@@ -4,6 +4,9 @@
 @{
     ViewData["Title"] = $"Payroll shadow {Model.Month:00}/{Model.Year}";
     var detail = Model.Detail;
+    var summary = detail?.Summary;
+    var insight = Model.PeriodInsight;
+    var blockers = Model.FinalizationBlockers;
 }
 
 <div class="d-flex justify-content-between align-items-start mb-3">
@@ -12,7 +15,11 @@
         <h1>@Model.Month.ToString("00")/@Model.Year</h1>
         @if (detail is not null)
         {
-            <p class="text-muted mb-0">Status: <strong>@detail.Month.Status</strong> · Evaluatie: @detail.Month.EvaluationDate.ToString("dd/MM/yyyy")</p>
+            <p class="text-muted mb-0">
+                Status: <strong>@PayrollReviewLabels.MonthStatus(detail.Month.Status)</strong>
+                · Evaluatie: @detail.Month.EvaluationDate.ToString("dd/MM/yyyy")
+                · Periode: @detail.Month.PeriodStart.ToString("dd/MM/yyyy") – @detail.Month.PeriodEnd.ToString("dd/MM/yyyy")
+            </p>
         }
     </div>
     <a class="btn btn-sm btn-outline-secondary" asp-page="./Index">← Overzicht</a>
@@ -27,15 +34,98 @@
 }
 else
 {
-    <section class="card mb-3"><div class="card-body d-flex flex-wrap gap-2">
+    @if (insight?.WarningMessage is not null)
+    {
+        <div class="alert alert-warning">
+            <strong>@insight.WarningMessage</strong>
+            <div class="mt-1 small">
+                Huidige maand: Included=@insight.SnapshotIncluded · Excluded=@insight.SnapshotExcluded · NeedsDecision=@insight.SnapshotNeedsDecision
+                @if (insight.HasRosterDecisionsAfterPeriod)
+                {
+                    <text>
+                        · Latere selectie: Included=@insight.LaterRosterIncludedCount · Excluded=@insight.LaterRosterExcludedCount
+                        (vanaf @(insight.EarliestLaterRosterValidFrom?.ToString("dd/MM/yyyy")))
+                    </text>
+                }
+            </div>
+        </div>
+    }
+
+    @if (summary is not null)
+    {
+        <section class="card mb-3"><div class="card-body">
+            <h2 class="h5 mb-2">Payrollcontrole</h2>
+            <p class="mb-1"><strong>@summary.Included</strong> medewerkers Included</p>
+            <p class="mb-1"><strong>@summary.PendingReview</strong> nog te controleren</p>
+            <p class="mb-1"><strong>@summary.Accepted</strong> goedgekeurd</p>
+            <p class="mb-1"><strong>@summary.NeedsFollowUp</strong> opvolging nodig</p>
+            <p class="mb-0 text-muted small">Excluded=@summary.Excluded · NeedsDecision=@summary.NeedsDecision · Totaal kandidaten=@summary.TotalCandidates</p>
+        </div></section>
+    }
+
+    <section class="card mb-3"><div class="card-body">
+        @if (detail.Month.Status == PayrollShadowMonthStatus.ReadyForReview)
+        {
+            <form method="post" asp-page-handler="StartReview" class="mb-3">
+                <button class="btn btn-primary" type="submit">Review starten</button>
+                <div class="form-text">Start de controle van de medewerkers. Er wordt niets naar Acerta of Plenion verstuurd.</div>
+            </form>
+        }
+        else if (detail.Month.Status == PayrollShadowMonthStatus.InReview)
+        {
+            <div class="alert alert-info mb-3 py-2">
+                <strong>Review bezig</strong>
+                @if (summary is not null)
+                {
+                    <span class="ms-2">@summary.PendingReview te controleren · @summary.Accepted goedgekeurd · @summary.NeedsFollowUp opvolging</span>
+                }
+            </div>
+        }
+
         @if (detail.Month.Status != PayrollShadowMonthStatus.Finalized)
         {
-            <form method="post" asp-page-handler="StartReview"><button class="btn btn-sm btn-outline-primary">Start review</button></form>
-            <form method="post" asp-page-handler="Rebuild"
-                  onsubmit="return confirm('Niet-afgesloten shadow-maand herberekenen op basis van huidige roster?');">
-                <button class="btn btn-sm btn-outline-warning">Herbereken snapshot</button>
-            </form>
-            <form method="post" asp-page-handler="Finalize"><button class="btn btn-sm btn-danger">Maand afsluiten</button></form>
+            <div class="d-flex flex-wrap gap-2 align-items-start">
+                @if (insight?.HasRosterDecisionsAfterPeriod == true)
+                {
+                    <form method="post" asp-page-handler="ApplyRoster"
+                          onsubmit="return confirm('This will make the confirmed payroll roster effective from @detail.Month.PeriodStart.ToString("dd/MM/yyyy") for the @Model.Month.ToString("00")/@Model.Year shadow.');">
+                        <button class="btn btn-sm btn-warning" type="submit">Payrolllijst toepassen op deze maand</button>
+                    </form>
+                }
+                <form method="post" asp-page-handler="Rebuild"
+                      onsubmit="return confirm('Niet-afgesloten shadow-maand herberekenen? Bestaande goedgekeurde/opvolging-statussen blijven bewaard per medewerker.');">
+                    <button class="btn btn-sm btn-outline-warning" type="submit">@(Model.Month == 8 ? "Augustus opnieuw berekenen" : "Herbereken snapshot")</button>
+                </form>
+                @if (blockers?.CanFinalize == true)
+                {
+                    <form method="post" asp-page-handler="Finalize"
+                          onsubmit="return confirm('Shadow-maand definitief afsluiten? Dit bevriest alleen de review; er is geen Acerta-export.');">
+                        <button class="btn btn-sm btn-danger" type="submit">Maand afsluiten</button>
+                    </form>
+                }
+                else
+                {
+                    <button class="btn btn-sm btn-danger" type="button" disabled>Maand afsluiten</button>
+                }
+            </div>
+            @if (blockers is not null && !blockers.CanFinalize)
+            {
+                <div class="small text-muted mt-2">
+                    Afsluiten geblokkeerd:
+                    @if (blockers.SummaryLines.Count == 0)
+                    {
+                        <text>onbekende blocker</text>
+                    }
+                    else
+                    {
+                        @string.Join(" · ", blockers.SummaryLines)
+                    }
+                </div>
+            }
+        }
+        else
+        {
+            <div class="alert alert-secondary mb-0 py-2">Maand is afgesloten (alleen-lezen shadow).</div>
         }
     </div></section>
 
@@ -48,15 +138,21 @@ else
                 <option value="">Actief (zonder Excluded)</option>
             </select>
         </div>
-        <div class="col-auto"><label class="form-label">Review</label><select class="form-select form-select-sm" asp-for="Review" asp-items="Html.GetEnumSelectList<PayrollEmployeeReviewStatus>()"><option value="">—</option></select></div>
+        <div class="col-auto">
+            <label class="form-label">Review</label>
+            <select class="form-select form-select-sm" asp-for="Review" asp-items="Html.GetEnumSelectList<PayrollEmployeeReviewStatus>()">
+                <option value="">—</option>
+            </select>
+        </div>
         <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="NeedsDecisionOnly" /><label class="form-check-label">NeedsDecision</label></div>
-        <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="NeedsFollowUpOnly" /><label class="form-check-label">NeedsFollowUp</label></div>
+        <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="NeedsFollowUpOnly" /><label class="form-check-label">Opvolging nodig</label></div>
         <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="MissingAcertaIdentityOnly" /><label class="form-check-label">Missing Acerta ID</label></div>
         <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="NegativeDifferenceOnly" /><label class="form-check-label">Neg. diff.</label></div>
         <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="NonzeroStandbyOnly" /><label class="form-check-label">Standby ≠ 0</label></div>
+        <div class="col-auto form-check"><input class="form-check-input" type="checkbox" asp-for="LargeAbsoluteDifferenceOnly" /><label class="form-check-label">|Diff| ≥ 8u</label></div>
         <div class="col-auto"><button class="btn btn-sm btn-outline-secondary" type="submit">Filter</button></div>
     </div></form>
-    <p class="small text-muted mb-2">Standaardzicht verbergt Excluded. Kies Eligibility = Excluded voor audit.</p>
+    <p class="small text-muted mb-2">Standaardzicht verbergt Excluded en sorteert opvolging / grote verschillen eerst.</p>
 
     <div class="table-responsive card"><div class="card-body p-0">
         <table class="table table-sm align-middle mb-0">
@@ -69,9 +165,26 @@ else
             {
                 <tr>
                     <td><a asp-page="./Employee" asp-route-year="@Model.Year" asp-route-month="@Model.Month" asp-route-resourceId="@row.ResourceId">@row.DisplayName</a></td>
-                    <td>@row.EligibilityStatus</td>
-                    <td class="small text-muted">@(row.SuggestedEligibility?.ToString() ?? "—")</td>
-                    <td>@row.ReviewStatus</td>
+                    <td>@PayrollReviewLabels.Eligibility(row.EligibilityStatus)</td>
+                    <td class="small text-muted">@(row.SuggestedEligibility is null ? "—" : PayrollReviewLabels.Eligibility(row.SuggestedEligibility.Value))</td>
+                    <td>
+                        @if (row.ReviewStatus == PayrollEmployeeReviewStatus.NeedsFollowUp)
+                        {
+                            <span class="badge text-bg-warning">@PayrollReviewLabels.ReviewStatus(row.ReviewStatus)</span>
+                        }
+                        else if (row.ReviewStatus == PayrollEmployeeReviewStatus.Accepted)
+                        {
+                            <span class="badge text-bg-success">@PayrollReviewLabels.ReviewStatus(row.ReviewStatus)</span>
+                        }
+                        else if (row.ReviewStatus == PayrollEmployeeReviewStatus.Pending)
+                        {
+                            <span class="badge text-bg-secondary">@PayrollReviewLabels.ReviewStatus(row.ReviewStatus)</span>
+                        }
+                        else
+                        {
+                            @PayrollReviewLabels.ReviewStatus(row.ReviewStatus)
+                        }
+                    </td>
                     <td>@PayrollDisplayFormatting.Hours(row.LegacyTheoreticalHours)</td>
                     <td>@PayrollDisplayFormatting.Hours(row.LegacyActualOrdinaryHours)</td>
                     <td>@PayrollDisplayFormatting.Hours(row.LegacyDifferenceHours)</td>

@@ -72,13 +72,16 @@ public sealed class EmployeeModel(
     }
 
     public async Task<IActionResult> OnPostAcceptAsync(CancellationToken cancellationToken) =>
-        await SaveReviewAsync(PayrollEmployeeReviewStatus.Accepted, cancellationToken);
+        await SaveReviewAsync(PayrollEmployeeReviewStatus.Accepted, goNext: false, cancellationToken);
+
+    public async Task<IActionResult> OnPostAcceptAndNextAsync(CancellationToken cancellationToken) =>
+        await SaveReviewAsync(PayrollEmployeeReviewStatus.Accepted, goNext: true, cancellationToken);
 
     public async Task<IActionResult> OnPostNeedsFollowUpAsync(CancellationToken cancellationToken) =>
-        await SaveReviewAsync(PayrollEmployeeReviewStatus.NeedsFollowUp, cancellationToken);
+        await SaveReviewAsync(PayrollEmployeeReviewStatus.NeedsFollowUp, goNext: false, cancellationToken);
 
     public async Task<IActionResult> OnPostResetReviewAsync(CancellationToken cancellationToken) =>
-        await SaveReviewAsync(PayrollEmployeeReviewStatus.Pending, cancellationToken);
+        await SaveReviewAsync(PayrollEmployeeReviewStatus.Pending, goNext: false, cancellationToken);
 
     private async Task<IActionResult> SaveEligibilityAsync(
         PayrollEligibilityStatus status,
@@ -108,6 +111,7 @@ public sealed class EmployeeModel(
 
     private async Task<IActionResult> SaveReviewAsync(
         PayrollEmployeeReviewStatus status,
+        bool goNext,
         CancellationToken cancellationToken)
     {
         if (!EnsureUiEnabled())
@@ -121,6 +125,18 @@ public sealed class EmployeeModel(
                 new SetPayrollReviewStatusRequest(Year, Month, ResourceId, status, ReviewComment),
                 RequireActor().AuditIdentity,
                 cancellationToken);
+            if (goNext)
+            {
+                var nextId = await FindNextPendingResourceIdAsync(cancellationToken);
+                if (!string.IsNullOrWhiteSpace(nextId))
+                {
+                    return RedirectToPage("./Employee", new { year = Year, month = Month, resourceId = nextId });
+                }
+
+                Message = "Goedgekeurd. Geen volgende te controleren medewerker.";
+                return RedirectToPage("./Month", new { year = Year, month = Month });
+            }
+
             Message = "Reviewstatus opgeslagen.";
         }
         catch (Exception exception)
@@ -130,6 +146,20 @@ public sealed class EmployeeModel(
         }
 
         return await OnGetAsync(cancellationToken);
+    }
+
+    private async Task<string?> FindNextPendingResourceIdAsync(CancellationToken cancellationToken)
+    {
+        var detail = await payrollShadowService.GetMonthDetailAsync(
+            Year,
+            Month,
+            new PayrollShadowEmployeeFilter(
+                Eligibility: PayrollEligibilityStatus.Included,
+                Review: PayrollEmployeeReviewStatus.Pending),
+            cancellationToken);
+        return detail?.Employees
+            .Select(item => item.ResourceId)
+            .FirstOrDefault(id => !string.Equals(id, ResourceId, StringComparison.Ordinal));
     }
 
     private async Task LoadAsync(CancellationToken cancellationToken)

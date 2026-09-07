@@ -354,6 +354,170 @@ public sealed class PayrollRosterAndBoundedSnapshotTests
     }
 
     [Fact]
+    public async Task LaterRosterConfig_DoesNotApplyToAugust_AndInsightWarns()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        await fixture.Service.ConfirmPayrollRosterSelectionAsync(
+            new ConfirmPayrollRosterSelectionRequest(
+                new DateOnly(2026, 9, 7),
+                ["10"],
+                ["476"],
+                "RosterConfirmation",
+                null),
+            "Ada Admin",
+            default);
+        await fixture.Service.CreateSnapshotAsync(2026, 8, new DateOnly(2026, 9, 2), "Ada Admin", default);
+
+        var detail = await fixture.Service.GetMonthDetailAsync(
+            2026,
+            8,
+            new PayrollShadowEmployeeFilter(HideExcluded: false),
+            default);
+        Assert.All(detail!.Employees, item => Assert.Equal(PayrollEligibilityStatus.NeedsDecision, item.EligibilityStatus));
+
+        var insight = await fixture.Service.GetPeriodEligibilityInsightAsync(2026, 8, default);
+        Assert.True(insight.HasRosterDecisionsAfterPeriod);
+        Assert.Equal(new DateOnly(2026, 9, 7), insight.EarliestLaterRosterValidFrom);
+        Assert.Contains("07/09/2026", insight.WarningMessage);
+        Assert.Contains("08/2026", insight.WarningMessage);
+        Assert.Equal(1, insight.LaterRosterIncludedCount);
+        Assert.Equal(1, insight.LaterRosterExcludedCount);
+    }
+
+    [Fact]
+    public async Task ApplyConfirmedRosterToMonth_FromPeriodStart_ThenRebuild_ResolvesIncludedExcluded()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        await fixture.Service.ConfirmPayrollRosterSelectionAsync(
+            new ConfirmPayrollRosterSelectionRequest(
+                new DateOnly(2026, 9, 7),
+                ["10"],
+                ["476"],
+                "RosterConfirmation",
+                null),
+            "Ada Admin",
+            default);
+        await fixture.Service.CreateSnapshotAsync(2026, 8, new DateOnly(2026, 9, 2), "Ada Admin", default);
+
+        var applied = await fixture.Service.ApplyConfirmedRosterToMonthAsync(
+            2026,
+            8,
+            "Ada Admin",
+            "apply for august",
+            default);
+        Assert.Equal(new DateOnly(2026, 8, 1), applied.AppliedFrom);
+        Assert.Equal(1, applied.IncludedWritten);
+        Assert.Equal(1, applied.ExcludedWritten);
+
+        await using (var context = await fixture.Factory.CreateDbContextAsync())
+        {
+            var configs = await context.PayrollEmployeeConfigurationRecords.AsNoTracking()
+                .Where(item => item.ResourceId == "10")
+                .OrderBy(item => item.ValidFrom)
+                .ToListAsync();
+            Assert.Equal(2, configs.Count);
+            Assert.Equal(new DateOnly(2026, 8, 1), configs[0].ValidFrom);
+            Assert.Equal(new DateOnly(2026, 9, 6), configs[0].ValidTo);
+            Assert.Equal(PayrollEligibilityStatus.Included, configs[0].EligibilityStatus);
+            Assert.Equal(new DateOnly(2026, 9, 7), configs[1].ValidFrom);
+        }
+
+        await fixture.Service.RebuildSnapshotAsync(2026, 8, new DateOnly(2026, 9, 2), "Ada Admin", default);
+        var detail = await fixture.Service.GetMonthDetailAsync(
+            2026,
+            8,
+            new PayrollShadowEmployeeFilter(HideExcluded: false),
+            default);
+        Assert.Equal(
+            PayrollEligibilityStatus.Included,
+            detail!.Employees.Single(item => item.ResourceId == "10").EligibilityStatus);
+        Assert.DoesNotContain(detail.Employees, item => item.ResourceId == "476");
+
+        var defaults = await fixture.Service.GetMonthDetailAsync(2026, 8, new PayrollShadowEmployeeFilter(), default);
+        Assert.DoesNotContain(defaults!.Employees, item => item.ResourceId == "476");
+        Assert.DoesNotContain(
+            defaults.Employees,
+            item => item.EligibilityStatus == PayrollEligibilityStatus.NeedsDecision
+                && item.ResourceId is "10" or "476");
+    }
+
+    [Fact]
+    public async Task RebuildSnapshot_PreservesAcceptedAndNeedsFollowUpReviews()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        await fixture.Service.ConfirmPayrollRosterSelectionAsync(
+            new ConfirmPayrollRosterSelectionRequest(
+                new DateOnly(2026, 8, 1),
+                ["10"],
+                ["476"],
+                "RosterConfirmation",
+                null),
+            "Ada Admin",
+            default);
+        await fixture.Service.CreateSnapshotAsync(2026, 8, new DateOnly(2026, 9, 2), "Ada Admin", default);
+        await fixture.Service.SetReviewStatusAsync(
+            new SetPayrollReviewStatusRequest(2026, 8, "10", PayrollEmployeeReviewStatus.Accepted, "ok"),
+            "Ada Admin",
+            default);
+
+        await fixture.Service.RebuildSnapshotAsync(2026, 8, new DateOnly(2026, 9, 2), "Ada Admin", default);
+        var detail = await fixture.Service.GetMonthDetailAsync(
+            2026,
+            8,
+            new PayrollShadowEmployeeFilter(HideExcluded: false),
+            default);
+        var ada = Assert.Single(detail!.Employees, item => item.ResourceId == "10");
+        Assert.Equal(PayrollEmployeeReviewStatus.Accepted, ada.ReviewStatus);
+    }
+
+    [Fact]
+    public async Task FinalizationBlockers_ReportPendingAndNeedsDecision()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        await fixture.Service.CreateSnapshotAsync(2026, 8, new DateOnly(2026, 9, 2), "Ada Admin", default);
+        var blockers = await fixture.Service.GetFinalizationBlockersAsync(2026, 8, default);
+        Assert.False(blockers.CanFinalize);
+        Assert.Contains(blockers.SummaryLines, line => line.Contains("NeedsDecision", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task StartReview_WhenAlreadyInReview_Throws()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        await fixture.Service.CreateSnapshotAsync(2026, 8, new DateOnly(2026, 9, 2), "Ada Admin", default);
+        await fixture.Service.StartReviewAsync(2026, 8, "Ada Admin", default);
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Service.StartReviewAsync(2026, 8, "Ada Admin", default));
+        Assert.Contains("al gestart", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ApplyConfirmedRosterToMonth_Finalized_Throws()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        await fixture.Service.ConfirmPayrollRosterSelectionAsync(
+            new ConfirmPayrollRosterSelectionRequest(
+                new DateOnly(2026, 9, 7),
+                ["10"],
+                [],
+                "RosterConfirmation",
+                null),
+            "Ada Admin",
+            default);
+        await fixture.Service.CreateSnapshotAsync(2026, 8, new DateOnly(2026, 9, 2), "Ada Admin", default);
+        await using (var context = await fixture.Factory.CreateDbContextAsync())
+        {
+            var month = await context.PayrollShadowMonths.SingleAsync();
+            month.Status = PayrollShadowMonthStatus.Finalized;
+            await context.SaveChangesAsync();
+        }
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Service.ApplyConfirmedRosterToMonthAsync(2026, 8, "Ada Admin", null, default));
+        Assert.Contains("afgesloten", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ExplicitIncluded_MissingAcerta_EntersSnapshot_ButFinalizeBlocked()
     {
         await using var fixture = await Fixture.CreateAsync();

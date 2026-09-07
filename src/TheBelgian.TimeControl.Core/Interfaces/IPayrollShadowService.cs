@@ -37,6 +37,27 @@ public interface IPayrollShadowService
         string actor,
         CancellationToken cancellationToken);
 
+    Task<PayrollMonthPeriodEligibilityInsight> GetPeriodEligibilityInsightAsync(
+        int year,
+        int month,
+        CancellationToken cancellationToken);
+
+    Task<PayrollMonthFinalizationBlockers> GetFinalizationBlockersAsync(
+        int year,
+        int month,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Copies currently confirmed Included/Excluded roster decisions onto PeriodStart
+    /// for an open shadow month. Does not rebuild automatically.
+    /// </summary>
+    Task<ApplyConfirmedRosterToMonthResult> ApplyConfirmedRosterToMonthAsync(
+        int year,
+        int month,
+        string actor,
+        string? comment,
+        CancellationToken cancellationToken);
+
     Task<PayrollShadowMonth> StartReviewAsync(
         int year,
         int month,
@@ -203,7 +224,38 @@ public sealed record PayrollShadowEmployeeFilter(
     bool MissingAcertaIdentityOnly = false,
     bool NegativeDifferenceOnly = false,
     bool NonzeroStandbyOnly = false,
-    bool HideExcluded = true);
+    bool HideExcluded = true,
+    bool LargeAbsoluteDifferenceOnly = false,
+    bool PrioritizeReviewExceptions = true);
+
+public sealed record PayrollMonthPeriodEligibilityInsight(
+    DateOnly PeriodStart,
+    DateOnly PeriodEnd,
+    int SnapshotNeedsDecision,
+    int SnapshotIncluded,
+    int SnapshotExcluded,
+    bool HasRosterDecisionsAfterPeriod,
+    DateOnly? EarliestLaterRosterValidFrom,
+    int LaterRosterIncludedCount,
+    int LaterRosterExcludedCount,
+    string? WarningMessage);
+
+public sealed record PayrollMonthFinalizationBlockers(
+    bool CanFinalize,
+    int PendingIncluded,
+    int NeedsFollowUpIncluded,
+    int NeedsDecision,
+    int MissingAcertaIncluded,
+    int IncludedCount,
+    IReadOnlyList<string> SummaryLines);
+
+public sealed record ApplyConfirmedRosterToMonthResult(
+    int Year,
+    int Month,
+    DateOnly AppliedFrom,
+    int IncludedWritten,
+    int ExcludedWritten,
+    int SkippedAlreadyEffective);
 
 public sealed record SetPayrollEligibilityRequest(
     string ResourceId,

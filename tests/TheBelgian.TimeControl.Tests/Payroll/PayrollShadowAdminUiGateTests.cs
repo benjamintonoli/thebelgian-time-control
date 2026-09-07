@@ -72,6 +72,18 @@ public sealed class PayrollShadowAdminUiGateTests
             int year, int month, DateOnly evaluationDate, string actor, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 
+        public Task<PayrollMonthPeriodEligibilityInsight> GetPeriodEligibilityInsightAsync(
+            int year, int month, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<PayrollMonthFinalizationBlockers> GetFinalizationBlockersAsync(
+            int year, int month, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<ApplyConfirmedRosterToMonthResult> ApplyConfirmedRosterToMonthAsync(
+            int year, int month, string actor, string? comment, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
         public Task<PayrollShadowMonth> FinalizeAsync(
             int year, int month, string actor, CancellationToken cancellationToken) =>
             throw new NotSupportedException();

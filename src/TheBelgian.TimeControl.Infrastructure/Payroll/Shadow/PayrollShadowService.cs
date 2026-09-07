@@ -60,9 +60,15 @@ internal sealed class PayrollShadowService(
             .Where(item => item.ShadowMonthId == shadowMonth.Id)
             .OrderBy(item => item.DisplayNameSnapshot)
             .ToListAsync(cancellationToken);
-        var filtered = ApplyFilter(employees, filter)
-            .Select(MapEmployeeRow)
-            .ToList();
+        var query = ApplyFilter(employees, filter);
+        IEnumerable<PayrollShadowEmployeeResult> ordered = filter.PrioritizeReviewExceptions
+            ? query
+                .OrderByDescending(item => item.ReviewStatus == PayrollEmployeeReviewStatus.NeedsFollowUp)
+                .ThenByDescending(item => Math.Abs(item.LegacyDifferenceHours.GetValueOrDefault()))
+                .ThenBy(item => item.ReviewStatus == PayrollEmployeeReviewStatus.Pending ? 0 : 1)
+                .ThenBy(item => item.DisplayNameSnapshot, StringComparer.OrdinalIgnoreCase)
+            : query.OrderBy(item => item.DisplayNameSnapshot, StringComparer.OrdinalIgnoreCase);
+        var filtered = ordered.Select(MapEmployeeRow).ToList();
         var summary = await BuildSummaryAsync(context, shadowMonth, cancellationToken);
         return new PayrollShadowMonthDetail(shadowMonth, summary, filtered);
     }
@@ -178,24 +184,63 @@ internal sealed class PayrollShadowService(
             throw new InvalidOperationException("Een afgesloten shadow-maand kan niet opnieuw berekend worden.");
         }
 
+        var previousStatus = shadowMonth.Status;
         var material = await MaterializeSnapshotAsync(context, period, cancellationToken);
 
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
         var existingEmployees = await context.PayrollShadowEmployeeResults
             .Where(item => item.ShadowMonthId == shadowMonth.Id)
             .ToListAsync(cancellationToken);
+        var preservedReviews = existingEmployees
+            .Where(item => item.ReviewStatus is PayrollEmployeeReviewStatus.Accepted
+                or PayrollEmployeeReviewStatus.NeedsFollowUp)
+            .ToDictionary(
+                item => item.ResourceId,
+                item => (
+                    item.ReviewStatus,
+                    item.ReviewComment,
+                    item.ReviewedAtUtc,
+                    item.ReviewedBy),
+                StringComparer.Ordinal);
+
         context.PayrollShadowEmployeeResults.RemoveRange(existingEmployees);
 
         shadowMonth.PeriodStart = period.PeriodStart;
         shadowMonth.PeriodEnd = period.PeriodEnd;
         shadowMonth.EvaluationDate = evaluationDate;
-        shadowMonth.Status = PayrollShadowMonthStatus.ReadyForReview;
+        shadowMonth.Status = previousStatus == PayrollShadowMonthStatus.InReview
+            ? PayrollShadowMonthStatus.InReview
+            : PayrollShadowMonthStatus.ReadyForReview;
         shadowMonth.CalculationVersion = PayrollShadowConfigurationSnapshot.CurrentCalculationVersion();
         shadowMonth.ConfigurationSnapshotJson = material.ConfigurationSnapshotJson;
-        shadowMonth.LastReviewedAtUtc = null;
-        shadowMonth.LastReviewedBy = null;
 
         AddEmployeeResults(context, shadowMonth.Id, material);
+        await context.SaveChangesAsync(cancellationToken);
+
+        if (preservedReviews.Count > 0)
+        {
+            var rebuiltEmployees = await context.PayrollShadowEmployeeResults
+                .Where(item => item.ShadowMonthId == shadowMonth.Id)
+                .ToListAsync(cancellationToken);
+            foreach (var employee in rebuiltEmployees)
+            {
+                if (!preservedReviews.TryGetValue(employee.ResourceId, out var preserved))
+                {
+                    continue;
+                }
+
+                if (employee.EligibilityStatus == PayrollEligibilityStatus.Excluded)
+                {
+                    continue;
+                }
+
+                employee.ReviewStatus = preserved.ReviewStatus;
+                employee.ReviewComment = preserved.ReviewComment;
+                employee.ReviewedAtUtc = preserved.ReviewedAtUtc;
+                employee.ReviewedBy = preserved.ReviewedBy;
+            }
+        }
+
         await AppendAuditAsync(
             context,
             shadowMonth.Id,
@@ -203,10 +248,268 @@ internal sealed class PayrollShadowService(
             PayrollShadowAuditAction.MonthSnapshotRebuilt,
             actor,
             null,
-            "Non-finalized shadow month rebuilt after roster/eligibility correction.");
+            preservedReviews.Count > 0
+                ? $"Non-finalized shadow month rebuilt; preserved {preservedReviews.Count} review decision(s)."
+                : "Non-finalized shadow month rebuilt after roster/eligibility correction.");
         await context.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return shadowMonth;
+    }
+
+    public async Task<PayrollMonthPeriodEligibilityInsight> GetPeriodEligibilityInsightAsync(
+        int year,
+        int month,
+        CancellationToken cancellationToken)
+    {
+        EnsureEnabled();
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var shadowMonth = await context.PayrollShadowMonths.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Year == year && item.Month == month, cancellationToken)
+            ?? throw new InvalidOperationException("Shadow-maand niet gevonden.");
+
+        var employees = await context.PayrollShadowEmployeeResults.AsNoTracking()
+            .Where(item => item.ShadowMonthId == shadowMonth.Id)
+            .ToListAsync(cancellationToken);
+        var configurations = (await LoadConfigurationsAsync(context, cancellationToken))
+            .Select(item => item.ToDomain())
+            .ToList();
+
+        var laterDecisions = configurations
+            .Where(item =>
+                item.EligibilityStatus is PayrollEligibilityStatus.Included or PayrollEligibilityStatus.Excluded
+                && item.ValidFrom > shadowMonth.PeriodEnd)
+            .ToList();
+        var earliestLater = laterDecisions.Count == 0
+            ? (DateOnly?)null
+            : laterDecisions.Min(item => item.ValidFrom);
+
+        string? warning = null;
+        if (earliestLater is not null)
+        {
+            warning =
+                $"De payrollselectie is geldig vanaf {earliestLater.Value:dd/MM/yyyy} en is niet van toepassing op {shadowMonth.Month:00}/{shadowMonth.Year}.";
+        }
+
+        return new PayrollMonthPeriodEligibilityInsight(
+            shadowMonth.PeriodStart,
+            shadowMonth.PeriodEnd,
+            employees.Count(item => item.EligibilityStatus == PayrollEligibilityStatus.NeedsDecision),
+            employees.Count(item => item.EligibilityStatus == PayrollEligibilityStatus.Included),
+            employees.Count(item => item.EligibilityStatus == PayrollEligibilityStatus.Excluded),
+            laterDecisions.Count > 0,
+            earliestLater,
+            laterDecisions.Count(item => item.EligibilityStatus == PayrollEligibilityStatus.Included),
+            laterDecisions.Count(item => item.EligibilityStatus == PayrollEligibilityStatus.Excluded),
+            warning);
+    }
+
+    public async Task<PayrollMonthFinalizationBlockers> GetFinalizationBlockersAsync(
+        int year,
+        int month,
+        CancellationToken cancellationToken)
+    {
+        EnsureEnabled();
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var shadowMonth = await context.PayrollShadowMonths.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Year == year && item.Month == month, cancellationToken)
+            ?? throw new InvalidOperationException("Shadow-maand niet gevonden.");
+        var employees = await context.PayrollShadowEmployeeResults.AsNoTracking()
+            .Where(item => item.ShadowMonthId == shadowMonth.Id)
+            .ToListAsync(cancellationToken);
+
+        var included = employees
+            .Where(item => item.EligibilityStatus == PayrollEligibilityStatus.Included)
+            .ToList();
+        var pending = included.Count(item => item.ReviewStatus == PayrollEmployeeReviewStatus.Pending);
+        var followUp = included.Count(item => item.ReviewStatus == PayrollEmployeeReviewStatus.NeedsFollowUp);
+        var needsDecision = employees.Count(item => item.EligibilityStatus == PayrollEligibilityStatus.NeedsDecision);
+        var missingAcerta = included.Count(item => item.AcertaIdentityStatus == AcertaIdentityStatus.Missing);
+        var lines = new List<string>();
+        if (included.Count == 0)
+        {
+            lines.Add("Geen Included medewerkers.");
+        }
+
+        if (pending > 0)
+        {
+            lines.Add($"{pending} Pending (te controleren)");
+        }
+
+        if (followUp > 0)
+        {
+            lines.Add($"{followUp} NeedsFollowUp (opvolging nodig)");
+        }
+
+        if (needsDecision > 0)
+        {
+            lines.Add($"{needsDecision} NeedsDecision");
+        }
+
+        if (missingAcerta > 0)
+        {
+            lines.Add($"{missingAcerta} Missing Acerta ID");
+        }
+
+        if (shadowMonth.Status == PayrollShadowMonthStatus.Finalized)
+        {
+            lines.Add("Maand is al afgesloten.");
+        }
+
+        var canFinalize = lines.Count == 0
+            && shadowMonth.Status is PayrollShadowMonthStatus.ReadyForReview or PayrollShadowMonthStatus.InReview;
+        return new PayrollMonthFinalizationBlockers(
+            canFinalize,
+            pending,
+            followUp,
+            needsDecision,
+            missingAcerta,
+            included.Count,
+            lines);
+    }
+
+    public async Task<ApplyConfirmedRosterToMonthResult> ApplyConfirmedRosterToMonthAsync(
+        int year,
+        int month,
+        string actor,
+        string? comment,
+        CancellationToken cancellationToken)
+    {
+        EnsureEnabled();
+        ValidateActor(actor);
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var shadowMonth = await context.PayrollShadowMonths
+            .SingleOrDefaultAsync(item => item.Year == year && item.Month == month, cancellationToken)
+            ?? throw new InvalidOperationException("Shadow-maand niet gevonden.");
+        if (shadowMonth.Status == PayrollShadowMonthStatus.Finalized)
+        {
+            throw new InvalidOperationException("Een afgesloten shadow-maand kan niet gewijzigd worden.");
+        }
+
+        var asOf = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
+        if (asOf < shadowMonth.PeriodEnd)
+        {
+            asOf = shadowMonth.PeriodEnd.AddDays(1);
+        }
+
+        var records = await LoadConfigurationsAsync(context, cancellationToken);
+        var configurations = records.Select(item => item.ToDomain()).ToList();
+        var confirmed = configurations
+            .Where(item =>
+                item.EligibilityStatus is PayrollEligibilityStatus.Included or PayrollEligibilityStatus.Excluded
+                && item.IsActiveFor(asOf, asOf))
+            .GroupBy(item => item.ResourceId, StringComparer.Ordinal)
+            .Select(group => group.OrderByDescending(item => item.ValidFrom).First())
+            .OrderBy(item => item.ResourceId, StringComparer.Ordinal)
+            .ToList();
+        if (confirmed.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "Geen bevestigde payrollselectie gevonden om toe te passen op deze maand.");
+        }
+
+        var includedWritten = 0;
+        var excludedWritten = 0;
+        var skipped = 0;
+        var reason = "RosterAppliedToMonth";
+        var note = string.IsNullOrWhiteSpace(comment)
+            ? $"Toegepast op {shadowMonth.Month:00}/{shadowMonth.Year} vanaf {shadowMonth.PeriodStart:yyyy-MM-dd}."
+            : comment.Trim();
+        var now = timeProvider.GetUtcNow();
+        var working = configurations.ToList();
+
+        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        foreach (var decision in confirmed)
+        {
+            var activeForMonth = working
+                .Where(item =>
+                    item.ResourceId == decision.ResourceId
+                    && item.IsActiveFor(shadowMonth.PeriodStart, shadowMonth.PeriodEnd))
+                .ToArray();
+            if (activeForMonth.Length == 1
+                && activeForMonth[0].EligibilityStatus == decision.EligibilityStatus)
+            {
+                skipped++;
+                continue;
+            }
+
+            if (activeForMonth.Length > 0)
+            {
+                throw new InvalidOperationException(
+                    $"Resource {decision.ResourceId} heeft al een andere eligibility in {shadowMonth.Month:00}/{shadowMonth.Year}.");
+            }
+
+            DateOnly? bridgeTo = null;
+            var nextStart = working
+                .Where(item =>
+                    item.ResourceId == decision.ResourceId
+                    && item.ValidFrom > shadowMonth.PeriodStart)
+                .Select(item => item.ValidFrom)
+                .DefaultIfEmpty()
+                .Min();
+            if (nextStart != default)
+            {
+                bridgeTo = nextStart.AddDays(-1);
+                if (bridgeTo < shadowMonth.PeriodStart)
+                {
+                    throw new InvalidOperationException(
+                        $"Kan roster niet toepassen voor resource {decision.ResourceId}: ongeldig bruginterval.");
+                }
+            }
+
+            var candidate = new PayrollEmployeeConfiguration(
+                decision.ResourceId,
+                shadowMonth.PeriodStart,
+                bridgeTo,
+                decision.EligibilityStatus,
+                reason,
+                note,
+                PayrollEligibilityDecisionSource.Admin);
+            await EnsureConfigurationDoesNotOverlapFinalizedPeriodAsync(context, candidate, cancellationToken);
+            PayrollEligibilityResolver.EnsureNoOverlap(working, candidate);
+
+            context.PayrollEmployeeConfigurationRecords.Add(new PayrollEmployeeConfigurationRecord
+            {
+                ResourceId = candidate.ResourceId,
+                ValidFrom = candidate.ValidFrom,
+                ValidTo = candidate.ValidTo,
+                EligibilityStatus = candidate.EligibilityStatus,
+                ReasonCode = candidate.ReasonCode,
+                Comment = candidate.Comment,
+                DecisionSource = candidate.DecisionSource,
+                CreatedAtUtc = now,
+                CreatedBy = actor.Trim(),
+            });
+            working.Add(candidate);
+            await ApplyEligibilityToOpenSnapshotsAsync(context, candidate, cancellationToken);
+
+            if (decision.EligibilityStatus == PayrollEligibilityStatus.Included)
+            {
+                includedWritten++;
+            }
+            else
+            {
+                excludedWritten++;
+            }
+        }
+
+        await AppendAuditAsync(
+            context,
+            shadowMonth.Id,
+            null,
+            PayrollShadowAuditAction.MonthRosterApplied,
+            actor,
+            reason,
+            $"Included={includedWritten}; Excluded={excludedWritten}; Skipped={skipped}. {note}");
+        await context.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        return new ApplyConfirmedRosterToMonthResult(
+            year,
+            month,
+            shadowMonth.PeriodStart,
+            includedWritten,
+            excludedWritten,
+            skipped);
     }
 
     public async Task<PayrollShadowMonth> StartReviewAsync(
@@ -227,6 +530,11 @@ internal sealed class PayrollShadowService(
         if (shadowMonth.Status == PayrollShadowMonthStatus.Finalized)
         {
             throw new InvalidOperationException("Een afgesloten shadow-maand kan niet opnieuw geopend worden.");
+        }
+
+        if (shadowMonth.Status == PayrollShadowMonthStatus.InReview)
+        {
+            throw new InvalidOperationException("Review is al gestart voor deze shadow-maand.");
         }
 
         shadowMonth.Status = PayrollShadowMonthStatus.InReview;
@@ -940,6 +1248,11 @@ internal sealed class PayrollShadowService(
             query = query.Where(item => item.StandbyRoundedHours.GetValueOrDefault() != 0m);
         }
 
+        if (filter.LargeAbsoluteDifferenceOnly)
+        {
+            query = query.Where(item => Math.Abs(item.LegacyDifferenceHours.GetValueOrDefault()) >= 8m);
+        }
+
         return query;
     }
 
@@ -1054,6 +1367,9 @@ internal sealed class PayrollShadowService(
         var employees = await context.PayrollShadowEmployeeResults.AsNoTracking()
             .Where(item => item.ShadowMonthId == month.Id)
             .ToListAsync(cancellationToken);
+        var included = employees
+            .Where(item => item.EligibilityStatus == PayrollEligibilityStatus.Included)
+            .ToList();
         return new PayrollShadowMonthSummary(
             month.Year,
             month.Month,
@@ -1062,12 +1378,12 @@ internal sealed class PayrollShadowService(
             month.EvaluationDate,
             month.CalculationVersion,
             employees.Count,
-            employees.Count(item => item.EligibilityStatus == PayrollEligibilityStatus.Included),
+            included.Count,
             employees.Count(item => item.EligibilityStatus == PayrollEligibilityStatus.Excluded),
             employees.Count(item => item.EligibilityStatus == PayrollEligibilityStatus.NeedsDecision),
-            employees.Count(item => item.ReviewStatus == PayrollEmployeeReviewStatus.Pending),
-            employees.Count(item => item.ReviewStatus == PayrollEmployeeReviewStatus.NeedsFollowUp),
-            employees.Count(item => item.ReviewStatus == PayrollEmployeeReviewStatus.Accepted));
+            included.Count(item => item.ReviewStatus == PayrollEmployeeReviewStatus.Pending),
+            included.Count(item => item.ReviewStatus == PayrollEmployeeReviewStatus.NeedsFollowUp),
+            included.Count(item => item.ReviewStatus == PayrollEmployeeReviewStatus.Accepted));
     }
 
     private static async Task ApplyEligibilityToOpenSnapshotsAsync(

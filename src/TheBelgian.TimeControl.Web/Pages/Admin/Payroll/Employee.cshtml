@@ -26,26 +26,32 @@ else
 {
     <div class="row g-3 mb-4">
         <div class="col-md-6"><div class="card h-100"><div class="card-body">
-            <h2 class="h6">Legacy shadow berekening</h2>
-            <dl class="row small mb-0">
-                <dt class="col-5">Theoretisch</dt><dd class="col-7">@PayrollDisplayFormatting.Hours(employee.LegacyTheoreticalHours)</dd>
-                <dt class="col-5">Actual</dt><dd class="col-7">@PayrollDisplayFormatting.Hours(employee.LegacyActualOrdinaryHours)</dd>
+            <h2 class="h6">Payrollresultaat</h2>
+            <dl class="row mb-0">
+                <dt class="col-5">Theoretische uren</dt><dd class="col-7">@PayrollDisplayFormatting.Hours(employee.LegacyTheoreticalHours)</dd>
+                <dt class="col-5">Berekende uren</dt><dd class="col-7">@PayrollDisplayFormatting.Hours(employee.LegacyActualOrdinaryHours)</dd>
                 <dt class="col-5">Verschil</dt><dd class="col-7">@PayrollDisplayFormatting.Hours(employee.LegacyDifferenceHours)</dd>
-                <dt class="col-5">Standby exact</dt><dd class="col-7">@PayrollDisplayFormatting.Hours(employee.StandbyExactHours)</dd>
-                <dt class="col-5">Standby 200%</dt><dd class="col-7">@PayrollDisplayFormatting.Hours(employee.StandbyRoundedHours)</dd>
-                <dt class="col-5">City units / €</dt><dd class="col-7">@(employee.CityTripUnits?.ToString() ?? "—") / @PayrollDisplayFormatting.Euro(employee.CityAllowanceAmount)</dd>
-                <dt class="col-5">KM eligible</dt><dd class="col-7">@PayrollDisplayFormatting.Hours(employee.EligibleKm)</dd>
-                <dt class="col-5">Extra75 legacy</dt><dd class="col-7">@PayrollDisplayFormatting.Hours(employee.Extra75LegacyValue)</dd>
-                <dt class="col-5">KM rate / €</dt><dd class="col-7">@PayrollDisplayFormatting.Hours(employee.KmRate) / @PayrollDisplayFormatting.Euro(employee.KmAmount)</dd>
-                <dt class="col-5">Code135 150/200</dt><dd class="col-7">@PayrollDisplayFormatting.Hours(employee.Code135At150Units) / @PayrollDisplayFormatting.Hours(employee.Code135At200Units)</dd>
-                <dt class="col-5">Code414 €</dt><dd class="col-7">@PayrollDisplayFormatting.Euro(employee.Code414Amount)</dd>
+                <dt class="col-5">Wachtdienst 200%</dt><dd class="col-7">@PayrollDisplayFormatting.Hours(employee.StandbyRoundedHours)</dd>
+                <dt class="col-5">Stadsritten</dt><dd class="col-7">@(employee.CityTripUnits?.ToString() ?? "—") / @PayrollDisplayFormatting.Euro(employee.CityAllowanceAmount)</dd>
+                <dt class="col-5">KM-vergoeding</dt><dd class="col-7">@PayrollDisplayFormatting.Euro(employee.KmAmount)</dd>
+                <dt class="col-5">Looncode 414</dt><dd class="col-7">@PayrollDisplayFormatting.Euro(employee.Code414Amount)</dd>
             </dl>
+            <details class="mt-3">
+                <summary class="small text-muted">Berekeningsdetails</summary>
+                <dl class="row small mb-0 mt-2">
+                    <dt class="col-5">Wachtdienst exact</dt><dd class="col-7">@PayrollDisplayFormatting.Hours(employee.StandbyExactHours)</dd>
+                    <dt class="col-5">KM</dt><dd class="col-7">@PayrollDisplayFormatting.Hours(employee.EligibleKm)</dd>
+                    <dt class="col-5">Extra75 legacy</dt><dd class="col-7">@PayrollDisplayFormatting.Hours(employee.Extra75LegacyValue)</dd>
+                    <dt class="col-5">KM-tarief</dt><dd class="col-7">@PayrollDisplayFormatting.Hours(employee.KmRate)</dd>
+                    <dt class="col-5">Overuren 150% / 200%</dt><dd class="col-7">@PayrollDisplayFormatting.Hours(employee.Code135At150Units) / @PayrollDisplayFormatting.Hours(employee.Code135At200Units)</dd>
+                </dl>
+            </details>
         </div></div></div>
         <div class="col-md-6"><div class="card h-100"><div class="card-body">
             <h2 class="h6">Eligibility &amp; review</h2>
-            <p><strong>Effectief:</strong> @employee.EligibilityStatus @(employee.EligibilityReason is not null ? $"({employee.EligibilityReason})" : "")</p>
-            <p class="small text-muted"><strong>Suggestie:</strong> @(employee.SuggestedEligibility?.ToString() ?? "—") · @(employee.SuggestedReason ?? "—")</p>
-            <p><strong>Review:</strong> @employee.ReviewStatus</p>
+            <p><strong>Effectief:</strong> @PayrollReviewLabels.Eligibility(employee.EligibilityStatus) @(employee.EligibilityReason is not null ? $"({employee.EligibilityReason})" : "")</p>
+            <p class="small text-muted"><strong>Suggestie:</strong> @(employee.SuggestedEligibility is null ? "—" : PayrollReviewLabels.Eligibility(employee.SuggestedEligibility.Value)) · @(employee.SuggestedReason ?? "—")</p>
+            <p><strong>Review:</strong> @PayrollReviewLabels.ReviewStatus(employee.ReviewStatus)</p>
             <p><strong>Acerta ID:</strong> @employee.AcertaIdentityStatus</p>
         </div></div></div>
     </div>
@@ -53,6 +59,19 @@ else
     @if (detail!.Month.Status != PayrollShadowMonthStatus.Finalized)
     {
         <div class="row g-3 mb-4">
+            <div class="col-md-6"><div class="card"><div class="card-body">
+                <h2 class="h6">Reviewbeslissing</h2>
+                <form method="post" class="row g-2">
+                    <input type="hidden" asp-for="Year" /><input type="hidden" asp-for="Month" /><input type="hidden" asp-for="ResourceId" />
+                    <div class="col-12"><label class="form-label">Commentaar (optioneel)</label><input class="form-control form-control-sm" asp-for="ReviewComment" /></div>
+                    <div class="col-12 d-flex flex-wrap gap-2">
+                        <button class="btn btn-success" type="submit" asp-page-handler="Accept">Goedkeuren</button>
+                        <button class="btn btn-outline-success" type="submit" asp-page-handler="AcceptAndNext">Goedkeuren &amp; volgende</button>
+                        <button class="btn btn-warning" type="submit" asp-page-handler="NeedsFollowUp">Opvolging nodig</button>
+                        <button class="btn btn-sm btn-outline-secondary" type="submit" asp-page-handler="ResetReview">Reset Pending</button>
+                    </div>
+                </form>
+            </div></div></div>
             <div class="col-md-6"><div class="card"><div class="card-body">
                 <h2 class="h6">Eligibility-actie</h2>
                 <form method="post" class="row g-2">
@@ -68,18 +87,6 @@ else
                     </div>
                 </form>
             </div></div></div>
-            <div class="col-md-6"><div class="card"><div class="card-body">
-                <h2 class="h6">Review-actie</h2>
-                <form method="post" class="row g-2">
-                    <input type="hidden" asp-for="Year" /><input type="hidden" asp-for="Month" /><input type="hidden" asp-for="ResourceId" />
-                    <div class="col-12"><label class="form-label">Comment</label><input class="form-control form-control-sm" asp-for="ReviewComment" /></div>
-                    <div class="col-12 d-flex gap-2">
-                        <button class="btn btn-sm btn-success" type="submit" asp-page-handler="Accept">Accepted</button>
-                        <button class="btn btn-sm btn-warning" type="submit" asp-page-handler="NeedsFollowUp">NeedsFollowUp</button>
-                        <button class="btn btn-sm btn-outline-secondary" type="submit" asp-page-handler="ResetReview">Reset Pending</button>
-                    </div>
-                </form>
-            </div></div></div>
         </div>
     }
 
@@ -88,7 +95,7 @@ else
         <ul class="small mb-0">
         @foreach (var config in detail.EligibilityConfigurations)
         {
-            <li>@config.ValidFrom.ToString("dd/MM/yyyy") – @(config.ValidTo?.ToString("dd/MM/yyyy") ?? "∞"): @config.EligibilityStatus — @config.ReasonCode (@config.DecisionSource)</li>
+            <li>@config.ValidFrom.ToString("dd/MM/yyyy") – @(config.ValidTo?.ToString("dd/MM/yyyy") ?? "∞"): @PayrollReviewLabels.Eligibility(config.EligibilityStatus) — @config.ReasonCode (@config.DecisionSource)</li>
         }
         </ul>
     </div></section>
