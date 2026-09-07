@@ -20,12 +20,22 @@ public static class PayrollFindingsEngine
         int planningQueryCount,
         IReadOnlyList<StandbyGpsDayEvidence>? standbyGps = null,
         int gpsQueryCount = 0,
-        string? gpsSourceNotes = null)
+        string? gpsSourceNotes = null,
+        IReadOnlySet<string>? includedResourceIds = null)
     {
         var special = SpecialProjectTimeControl.Evaluate(performances, planning, legacyDifferenceByResource);
         var overlaps = OverlapControl.Evaluate(performances);
         var standby = StandbyControl.Evaluate(performances, planning, standbyGps ?? []);
-        var findings = special.Concat(overlaps).Concat(standby)
+        var included = includedResourceIds
+            ?? performances.Select(item => item.ResourceId)
+                .Concat(planning.Select(item => item.ResourceId))
+                .ToHashSet(StringComparer.Ordinal);
+        var missing = MissingTechnicianControl.Evaluate(
+            performances,
+            planning,
+            standbyGps ?? [],
+            included);
+        var findings = special.Concat(overlaps).Concat(standby).Concat(missing)
             .OrderBy(item => item.ResourceId, StringComparer.Ordinal)
             .ThenByDescending(item => item.Severity)
             .ThenBy(item => item.Date)

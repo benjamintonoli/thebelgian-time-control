@@ -1,5 +1,6 @@
 @page "/Admin/Payroll/{year:int}/{month:int}/{resourceId}"
 @model TheBelgian.TimeControl.Web.Pages.Admin.Payroll.EmployeeModel
+@using TheBelgian.TimeControl.Core.Payroll.Findings
 @using TheBelgian.TimeControl.Core.Payroll.Models
 @{
     ViewData["Title"] = $"Payroll shadow {Model.ResourceId}";
@@ -109,6 +110,13 @@ else
                         <span class="text-muted small">@PayrollReviewLabels.FindingType(finding.FindingType)</span>
                     </div>
                     <p class="mb-1">@finding.Description</p>
+                    @if (finding.FindingType == PayrollFindingType.MissingPlannedTechnicianPerformance)
+                    {
+                        <p class="mb-1 small">
+                            <strong>GPS:</strong> @PayrollReviewLabels.MissingTechnicianEvidence(finding.GpsClassification)
+                            · <strong>Evidence strength:</strong> @PayrollReviewLabels.FindingSeverity(finding.Severity)
+                        </p>
+                    }
                     @if (finding.PlannedHours is not null || finding.BookedHours is not null || finding.SuggestedPayableHours is not null)
                     {
                         <p class="mb-1 small">
@@ -134,17 +142,29 @@ else
                     @if (finding.SuggestedPayableStart is not null || finding.SuggestedPayableEnd is not null || finding.SuggestedProjectId is not null)
                     {
                         <p class="mb-1 small">
+                            @if (finding.FindingType == PayrollFindingType.MissingPlannedTechnicianPerformance)
+                            {
+                                <text><strong>Voorstel:</strong> </text>
+                            }
+                            else if (finding.SuggestedPayableStart is not null || finding.SuggestedPayableEnd is not null)
+                            {
+                                <text>Voorstel interval: </text>
+                            }
                             @if (finding.SuggestedPayableStart is not null || finding.SuggestedPayableEnd is not null)
                             {
-                                <text>Voorstel interval: @(finding.SuggestedPayableStart?.ToString("HH:mm") ?? "—")–@(finding.SuggestedPayableEnd?.ToString("HH:mm") ?? "—")</text>
+                                <text>@(finding.SuggestedPayableStart?.ToString("HH:mm") ?? "—")–@(finding.SuggestedPayableEnd?.ToString("HH:mm") ?? "—")</text>
+                            }
+                            @if (finding.SuggestedPayableHours is not null && finding.FindingType == PayrollFindingType.MissingPlannedTechnicianPerformance)
+                            {
+                                <text> · @PayrollDisplayFormatting.Hours(finding.SuggestedPayableHours)</text>
                             }
                             @if (finding.SuggestedProjectId is not null)
                             {
-                                <text> · Voorstel dossier: @finding.SuggestedProjectId@(string.IsNullOrWhiteSpace(finding.SuggestedBonNr) ? "" : $" / BON {finding.SuggestedBonNr}")</text>
+                                <text> · Project @finding.SuggestedProjectId@(string.IsNullOrWhiteSpace(finding.SuggestedBonNr) ? "" : $" · Bon {finding.SuggestedBonNr}")</text>
                             }
                         </p>
                     }
-                    @if (!string.IsNullOrWhiteSpace(finding.GpsClassification))
+                    @if (!string.IsNullOrWhiteSpace(finding.GpsClassification) && finding.FindingType != PayrollFindingType.MissingPlannedTechnicianPerformance)
                     {
                         <p class="mb-1 small text-muted">GPS-classificatie: @finding.GpsClassification</p>
                     }

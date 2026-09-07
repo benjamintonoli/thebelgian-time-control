@@ -16,6 +16,7 @@ public enum PayrollFindingType
     StandbyPossibleWrongDossier = 12,
     StandbyAmbiguousEvidence = 13,
     StandbyNoGpsData = 14,
+    MissingPlannedTechnicianPerformance = 15,
 }
 
 public enum PayrollFindingSeverity
@@ -47,4 +48,15 @@ public enum StandbyGpsClassification
     PhysicalIntervention = 1,
     Ambiguous = 2,
     NoGpsData = 3,
+}
+
+public enum MissingTechnicianEvidenceClass
+{
+    PlanningPlusPeer = 0,
+    PlanningPlusGps = 1,
+    PlanningPlusPeerPlusGps = 2,
+    NoGpsData = 3,
+    ContradictedByGps = 4,
+    ContradictedByExistingPerformance = 5,
+    Ambiguous = 6,
 }

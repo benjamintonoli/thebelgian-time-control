@@ -1345,6 +1345,7 @@ internal sealed class PayrollShadowService(
                 or PayrollFindingType.StandbyPossibleWrongDossier
                 or PayrollFindingType.StandbyAmbiguousEvidence
                 or PayrollFindingType.StandbyNoGpsData,
+            "MISSING" => type is PayrollFindingType.MissingPlannedTechnicianPerformance,
             _ => false,
         };
 
@@ -1390,21 +1391,6 @@ internal sealed class PayrollShadowService(
         var nameByResource = allResources
             .GroupBy(item => item.ResourceId, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.First().DisplayName, StringComparer.Ordinal);
-        var standbyPairs = performances
-            .Where(item => !item.IsCalendarSynthetic && (item.IsStandby || item.HfdTaakId == 23))
-            .Select(item => (
-                item.ResourceId,
-                nameByResource.GetValueOrDefault(item.ResourceId) ?? item.ResourceId,
-                item.Date))
-            .Distinct()
-            .ToArray();
-        var standbyGps = standbyPairs.Length == 0
-            ? new StandbyGpsBatchResult([], 0, 0, 0, 0, 0, "No standby rows.")
-            : await standbyGpsSource.ReadStandbyGpsAsync(
-                period.PeriodStart,
-                period.PeriodEnd,
-                standbyPairs,
-                cancellationToken);
         var calendarRows = await calendarSource.ReadCalendarRowsAsync(
             period.PeriodStart,
             period.PeriodEnd,
@@ -1450,6 +1436,34 @@ internal sealed class PayrollShadowService(
             rows.Add(new PendingEmployeeResult(candidate, resolution, calculated, reviewStatus));
         }
 
+        var includedResourceIds = rows
+            .Where(item => item.Resolution.EligibilityStatus == PayrollEligibilityStatus.Included)
+            .Select(item => item.Candidate.ResourceId)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var standbyPairs = performances
+            .Where(item => !item.IsCalendarSynthetic && (item.IsStandby || item.HfdTaakId == 23))
+            .Select(item => (
+                item.ResourceId,
+                nameByResource.GetValueOrDefault(item.ResourceId) ?? item.ResourceId,
+                item.Date));
+        var missingTechPairs = PlannedWorkGroupBuilder.Build(planning)
+            .SelectMany(group => group.ResourceIds.Select(resourceId => (
+                resourceId,
+                nameByResource.GetValueOrDefault(resourceId) ?? resourceId,
+                group.Date)));
+        var gpsPairs = standbyPairs
+            .Concat(missingTechPairs)
+            .Distinct()
+            .ToArray();
+        var standbyGps = gpsPairs.Length == 0
+            ? new StandbyGpsBatchResult([], 0, 0, 0, 0, 0, "No standby/missing-tech GPS pairs.")
+            : await standbyGpsSource.ReadStandbyGpsAsync(
+                period.PeriodStart,
+                period.PeriodEnd,
+                gpsPairs,
+                cancellationToken);
+
         var legacyDiff = rows.ToDictionary(
             item => item.Candidate.ResourceId,
             item => item.Calculated?.LegacyDifferenceHours,
@@ -1461,7 +1475,8 @@ internal sealed class PayrollShadowService(
             planningQueryCount,
             standbyGps.Days,
             standbyGps.ApiCallCount,
-            standbyGps.Notes);
+            standbyGps.Notes,
+            includedResourceIds);
 
         return new SnapshotMaterial(configurationSnapshotJson, rows, findingsRun);
     }

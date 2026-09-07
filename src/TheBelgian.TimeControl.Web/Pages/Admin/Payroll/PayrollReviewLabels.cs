@@ -60,7 +60,21 @@ public static class PayrollReviewLabels
             PayrollFindingType.StandbyPossibleWrongDossier => "Wachtdienst mogelijk op verkeerd dossier",
             PayrollFindingType.StandbyAmbiguousEvidence => "Wachtdienst GPS-bewijs onduidelijk",
             PayrollFindingType.StandbyNoGpsData => "Wachtdienst zonder GPS-bewijs",
+            PayrollFindingType.MissingPlannedTechnicianPerformance => "Mogelijk ontbrekende prestatie",
             _ => type.ToString(),
+        };
+
+    public static string MissingTechnicianEvidence(string? classification) =>
+        classification switch
+        {
+            nameof(MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps) => "Ondersteunt aanwezigheid (planning + collega + GPS)",
+            nameof(MissingTechnicianEvidenceClass.PlanningPlusPeer) => "Planning + collega",
+            nameof(MissingTechnicianEvidenceClass.PlanningPlusGps) => "Planning + GPS",
+            nameof(MissingTechnicianEvidenceClass.NoGpsData) => "Geen GPS",
+            nameof(MissingTechnicianEvidenceClass.ContradictedByGps) => "Tegenstrijdig (GPS)",
+            nameof(MissingTechnicianEvidenceClass.ContradictedByExistingPerformance) => "Tegenstrijdig (bestaande prestatie)",
+            nameof(MissingTechnicianEvidenceClass.Ambiguous) => "Onduidelijk",
+            _ => classification ?? "—",
         };
 
     public static string SeverityBadgeClass(PayrollFindingSeverity severity) =>
