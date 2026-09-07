@@ -65,7 +65,11 @@ public sealed record PayrollReviewCase(
     string? PlannedSummary = null,
     string? DifferenceSummary = null,
     string? RuleHint = null,
-    string? FriendlyState = null);
+    string? FriendlyState = null,
+    decimal? BookedHours = null,
+    decimal? PlannedHours = null,
+    string? DecisionCode = null,
+    string? DecisionLabel = null);
 
 public sealed record PayrollReviewQueueFilter(
     PayrollReviewCategory Category = PayrollReviewCategory.All,

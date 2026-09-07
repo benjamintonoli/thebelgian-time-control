@@ -185,6 +185,25 @@ public sealed class PayrollReviewWorkflowUxTests
                 []));
         }
 
+        public Task<PayrollAdminQueuePage> GetAdminQueueAsync(
+            int year,
+            int month,
+            PayrollReviewQueueFilter filter,
+            CancellationToken cancellationToken)
+        {
+            var emptyCategories = Enum.GetValues<PayrollReviewCategory>()
+                .Where(item => item != PayrollReviewCategory.All)
+                .ToDictionary(item => item, _ => 0);
+            return Task.FromResult(new PayrollAdminQueuePage(
+                year,
+                month,
+                new PayrollReviewQueueSummary(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, emptyCategories, emptyCategories),
+                new PayrollAdminQueueSummary(0, 0, 0, 0, 0, 0, 0, emptyCategories, emptyCategories, emptyCategories, emptyCategories, emptyCategories),
+                [],
+                [],
+                []));
+        }
+
         public Task SetCaseStatusAsync(
             int year,
             int month,
@@ -204,6 +223,26 @@ public sealed class PayrollReviewWorkflowUxTests
             string actor,
             CancellationToken cancellationToken) =>
             Task.FromResult(new PayrollReviewBulkUpdateResult(caseKeys.Count, 0, []));
+
+        public Task<PayrollAdminDecisionResult> SetAdminDecisionAsync(
+            int year,
+            int month,
+            string adminCaseKey,
+            string decisionCode,
+            string? comment,
+            string actor,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new PayrollAdminDecisionResult(adminCaseKey, decisionCode, decisionCode, PayrollFindingStatus.Reviewed, 0));
+
+        public Task<PayrollReviewBulkUpdateResult> BulkSetAdminDecisionAsync(
+            int year,
+            int month,
+            IReadOnlyList<string> adminCaseKeys,
+            string decisionCode,
+            string comment,
+            string actor,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new PayrollReviewBulkUpdateResult(adminCaseKeys.Count, 0, []));
     }
 
     private sealed class RecordingService : IPayrollShadowService

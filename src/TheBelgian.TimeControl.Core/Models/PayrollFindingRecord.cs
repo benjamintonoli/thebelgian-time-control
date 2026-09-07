@@ -31,4 +31,6 @@ public sealed class PayrollFindingRecord
     public DateTimeOffset? ReviewedAtUtc { get; set; }
     public string? ReviewedBy { get; set; }
     public string? ReviewComment { get; set; }
+    public string? DecisionCode { get; set; }
+    public string? DecisionLabel { get; set; }
 }

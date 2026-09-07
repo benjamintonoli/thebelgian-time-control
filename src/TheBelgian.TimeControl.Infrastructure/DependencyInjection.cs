@@ -663,6 +663,8 @@ public static class DependencyInjection
                      ("ReviewedAtUtc", "TEXT NULL"),
                      ("ReviewedBy", "TEXT NULL"),
                      ("ReviewComment", "TEXT NULL"),
+                     ("DecisionCode", "TEXT NULL"),
+                     ("DecisionLabel", "TEXT NULL"),
                  })
         {
             await EnsureColumnAsync(

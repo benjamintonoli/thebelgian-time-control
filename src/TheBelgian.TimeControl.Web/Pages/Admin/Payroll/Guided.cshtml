@@ -1,0 +1,179 @@
+@page "/Admin/Payroll/{year:int}/{month:int}/Guided/{category}"
+@model TheBelgian.TimeControl.Web.Pages.Admin.Payroll.GuidedModel
+@using System.Globalization
+@using TheBelgian.TimeControl.Core.Payroll.Findings
+@using TheBelgian.TimeControl.Core.Payroll.Review
+@{
+    ViewData["Title"] = $"Controle {PayrollReviewCategories.DisplayName(Model.Category)} {Model.Month:00}/{Model.Year}";
+    var current = Model.Current;
+    var nl = CultureInfo.GetCultureInfo("nl-BE");
+    var summary = Model.Queue?.AdminSummary;
+}
+
+<div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
+    <div>
+        <div class="text-uppercase small text-muted fw-semibold">Begeleide controle</div>
+        <h1 class="h3 mb-1">@PayrollReviewCategories.DisplayName(Model.Category)</h1>
+        @if (summary is not null)
+        {
+            <p class="text-muted mb-0">
+                Te beoordelen @summary.UnresolvedAdminByCategory.GetValueOrDefault(Model.Category)
+                · Opvolging @summary.FollowUpAdminByCategory.GetValueOrDefault(Model.Category)
+                · Afgehandeld @summary.CompletedAdminByCategory.GetValueOrDefault(Model.Category)
+            </p>
+        }
+    </div>
+    <div class="d-flex gap-2">
+        <a class="btn btn-sm btn-outline-secondary" asp-page="./Queue" asp-route-year="@Model.Year" asp-route-month="@Model.Month" asp-route-Category="@Model.Category">Lijst</a>
+        <a class="btn btn-sm btn-outline-secondary" asp-page="./Queue" asp-route-year="@Model.Year" asp-route-month="@Model.Month">← Categorieën</a>
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(Model.Message)) { <div class="alert alert-success">@Model.Message</div> }
+@if (!string.IsNullOrWhiteSpace(Model.Error)) { <div class="alert alert-danger">@Model.Error</div> }
+
+@if (current is null)
+{
+    <div class="alert alert-success">
+        Geen openstaande admin-cases in deze categorie voor de huidige filters.
+        <a asp-page="./Queue" asp-route-year="@Model.Year" asp-route-month="@Model.Month">Terug naar overzicht</a>
+    </div>
+}
+else
+{
+    <div class="card mb-3 border-primary">
+        <div class="card-body">
+            <div class="d-flex justify-content-between flex-wrap gap-2 mb-2">
+                <div class="small text-muted">Voortgang: <strong>@(Model.CurrentIndex + 1)</strong> van <strong>@Model.TotalVisible</strong></div>
+                <span class="badge text-bg-light text-dark">@PayrollGuidedDecisions.AdminStatusLabel(current.WorkflowStatus)</span>
+            </div>
+            <div class="fw-semibold mb-1">@(current.DisplayName ?? current.ResourceId) · @current.Date.ToString("dd/MM/yyyy")</div>
+            @if (!string.IsNullOrWhiteSpace(current.ProjectId) || !string.IsNullOrWhiteSpace(current.BonNr))
+            {
+                <div class="small text-muted mb-2">
+                    @if (!string.IsNullOrWhiteSpace(current.ProjectId)) { <span>Project @current.ProjectId</span> }
+                    @if (!string.IsNullOrWhiteSpace(current.BonNr)) { <span class="ms-2">BON @current.BonNr</span> }
+                </div>
+            }
+            <h2 class="h5">@current.BusinessQuestion</h2>
+            <p class="mb-2">@current.IssueSummary</p>
+            @if (!string.IsNullOrWhiteSpace(current.KeyFact))
+            {
+                <p class="fw-semibold mb-2">@current.KeyFact</p>
+            }
+            <div class="row g-2 small mb-3">
+                <div class="col-md-4"><span class="text-muted">Geboekt:</span> @(current.BookedSummary ?? "—")</div>
+                @if (!string.IsNullOrWhiteSpace(current.PlannedSummary))
+                {
+                    <div class="col-md-4"><span class="text-muted">Planning:</span> @current.PlannedSummary</div>
+                }
+                @if (!string.IsNullOrWhiteSpace(current.DifferenceSummary))
+                {
+                    <div class="col-md-4"><span class="fw-semibold text-danger">@current.DifferenceSummary</span></div>
+                }
+                @if (current.UnderlyingPerformanceCount > 1)
+                {
+                    <div class="col-md-4"><span class="text-muted">Prestaties:</span> @current.UnderlyingPerformanceCount</div>
+                }
+                @if (current.TotalBookedHours is { } total)
+                {
+                    <div class="col-md-4"><span class="text-muted">Totaal:</span> @total.ToString("0.##", nl) u</div>
+                }
+            </div>
+            @if (!string.IsNullOrWhiteSpace(current.HybridScenarioNote))
+            {
+                <div class="alert alert-warning py-2 small">@current.HybridScenarioNote</div>
+            }
+            else if (!string.IsNullOrWhiteSpace(current.EvidenceSummary))
+            {
+                <p class="small text-muted">@current.EvidenceSummary</p>
+            }
+            @if (!string.IsNullOrWhiteSpace(current.ActionabilityHint))
+            {
+                <p class="small text-muted mb-2">@current.ActionabilityHint</p>
+            }
+
+            @if (current.UnderlyingCases.Count > 1)
+            {
+                <details class="mb-3">
+                    <summary class="small text-muted">@current.UnderlyingReviewCaseCount onderliggende rijen</summary>
+                    <ul class="small mb-0 mt-2">
+                        @foreach (var row in current.UnderlyingCases)
+                        {
+                            <li>@(row.BookedSummary ?? row.ProblemLabel) · @(row.BonNr ?? row.ProjectId ?? "—")</li>
+                        }
+                    </ul>
+                </details>
+            }
+
+            <details class="mb-3">
+                <summary class="small text-muted">Technische details</summary>
+                <div class="small text-muted mt-1">Findings: @string.Join(", ", current.FindingKeys)</div>
+            </details>
+
+            @if (current.WorkflowStatus is PayrollFindingStatus.Open or PayrollFindingStatus.NeedsFollowUp)
+            {
+                <form method="post" class="vstack gap-3" id="guided-form">
+                    <input type="hidden" name="AdminCaseKey" value="@current.AdminCaseKey" />
+                    <input type="hidden" name="Category" value="@Model.Category" />
+                    <input type="hidden" name="Search" value="@Model.Search" />
+                    <input type="hidden" name="Scope" value="@Model.Scope" />
+
+                    <div class="d-flex flex-wrap gap-2" role="group" aria-label="Beslissing">
+                        @foreach (var choice in current.Choices)
+                        {
+                            <button class="btn btn-outline-primary"
+                                    type="submit"
+                                    name="DecisionCode"
+                                    value="@choice.DecisionCode"
+                                    formaction="?handler=DecideAndNext">
+                                @choice.Label
+                            </button>
+                        }
+                    </div>
+
+                    @if (current.Category == PayrollReviewCategory.Standby)
+                    {
+                        <div>
+                            <label class="form-label small mb-1">Telefonisch contact bevestigd? (optioneel, bij telefoon+fysiek)</label>
+                            <select class="form-select form-select-sm" name="PhoneConfirmed" style="max-width:16rem">
+                                <option value="">—</option>
+                                <option value="yes">Ja</option>
+                                <option value="no">Nee</option>
+                                <option value="unknown">Onbekend</option>
+                            </select>
+                        </div>
+                    }
+
+                    <div>
+                        <label class="form-label" asp-for="Comment">Commentaar</label>
+                        <input class="form-control" asp-for="Comment" placeholder="Optioneel / verplicht bij Onzeker of fout" autofocus />
+                    </div>
+
+                    <div class="d-flex flex-wrap gap-2">
+                        <button class="btn btn-outline-secondary" type="submit" asp-page-handler="Previous">← Vorige</button>
+                        <button class="btn btn-outline-secondary" type="submit" asp-page-handler="Next">Volgende →</button>
+                    </div>
+                </form>
+            }
+            else
+            {
+                <p class="mb-2">Status: <strong>@PayrollGuidedDecisions.AdminStatusLabel(current.WorkflowStatus)</strong>
+                    @if (!string.IsNullOrWhiteSpace(current.DecisionLabel))
+                    {
+                        <span>· @current.DecisionLabel</span>
+                    }
+                </p>
+                @if (!string.IsNullOrWhiteSpace(current.ReviewComment))
+                {
+                    <p class="small text-muted">@current.ReviewComment</p>
+                }
+                <form method="post" class="d-flex gap-2">
+                    <input type="hidden" name="AdminCaseKey" value="@current.AdminCaseKey" />
+                    <button class="btn btn-outline-secondary" type="submit" asp-page-handler="Previous">← Vorige</button>
+                    <button class="btn btn-outline-secondary" type="submit" asp-page-handler="Next">Volgende →</button>
+                </form>
+            }
+        </div>
+    </div>
+}

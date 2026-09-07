@@ -226,6 +226,13 @@ public static class PayrollReviewCaseBuilder
             hybridNote,
             actionability);
 
+        var bookedHours = findings.Any(item => item.BookedHours is not null)
+            ? findings.Sum(item => item.BookedHours ?? 0m)
+            : (decimal?)null;
+        var plannedHours = findings.Select(item => item.PlannedHours).FirstOrDefault(item => item.HasValue);
+        var decisionCode = findings.Select(item => item.DecisionCode).FirstOrDefault(item => !string.IsNullOrWhiteSpace(item));
+        var decisionLabel = findings.Select(item => item.DecisionLabel).FirstOrDefault(item => !string.IsNullOrWhiteSpace(item));
+
         return new PayrollReviewCase(
             caseKey,
             category,
@@ -254,7 +261,11 @@ public static class PayrollReviewCaseBuilder
             planned,
             difference,
             ruleHint,
-            friendlyState);
+            friendlyState,
+            bookedHours,
+            plannedHours,
+            decisionCode,
+            decisionLabel);
     }
 
     private static (string? Planned, string? Difference, string? RuleHint, string? FriendlyState) BuildCategoryPresentation(
@@ -396,8 +407,8 @@ public static class PayrollReviewCaseBuilder
             && action.BlockReason.Contains("telefonische", StringComparison.OrdinalIgnoreCase))
         {
             hybrid = BuildHybridScenarioNote(action);
-            return (PayrollReviewCaseActionability.Blocked, "Geblokkeerd", hybrid,
-                "Eenvoudige GPS-correctie geblokkeerd — hybride telefoon+fysiek mogelijk");
+            return (PayrollReviewCaseActionability.Blocked, "Correctie vereist verdere controle", hybrid,
+                "Eenvoudige GPS-correctie niet beschikbaar — hybride telefoon+fysiek mogelijk");
         }
 
         if (action is not null && action.Status == PayrollProposedActionStatus.ReadyForApproval)
@@ -406,12 +417,12 @@ public static class PayrollReviewCaseBuilder
             var summary = proposal is null
                 ? "Voorstel klaar"
                 : $"{proposal.CurrentStart:HH:mm}–{proposal.CurrentEnd:HH:mm} → {proposal.ProposedStart:HH:mm}–{proposal.ProposedEnd:HH:mm}";
-            return (PayrollReviewCaseActionability.ReadyProposal, "Voorstel klaar", null, summary);
+            return (PayrollReviewCaseActionability.ReadyProposal, "Voorstel beschikbaar (geen auto-uitvoering)", null, summary);
         }
 
         if (action is not null && action.Status == PayrollProposedActionStatus.Blocked)
         {
-            return (PayrollReviewCaseActionability.Blocked, "Geblokkeerd", null, action.BlockReason);
+            return (PayrollReviewCaseActionability.Blocked, "Automatische correctie niet beschikbaar", null, action.BlockReason);
         }
 
         if (findings.Any(item =>

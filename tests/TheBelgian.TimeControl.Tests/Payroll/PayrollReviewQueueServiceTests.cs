@@ -140,6 +140,69 @@ public sealed class PayrollReviewQueueServiceTests
         Assert.Equal(1, fixture.Actions.ListCalls);
     }
 
+    [Fact]
+    public async Task GuidedDecision_PersistsDecisionCode_AndAudit()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        _ = await fixture.SeedThreeOpenCasesAsync();
+        var page = await fixture.Service.GetAdminQueueAsync(
+            2026,
+            8,
+            new PayrollReviewQueueFilter(Scope: PayrollReviewQueueScope.All),
+            default);
+        var adminKey = page.AdminCases.Single(item => item.FindingKeys.Contains("p300-a")).AdminCaseKey;
+
+        var result = await fixture.Service.SetAdminDecisionAsync(
+            2026,
+            8,
+            adminKey,
+            PayrollGuidedDecisionCodes.P300WorkValid,
+            null,
+            "Ada Admin",
+            default);
+
+        Assert.Equal(PayrollFindingStatus.Reviewed, result.Status);
+        Assert.Equal(PayrollGuidedDecisionCodes.P300WorkValid, result.DecisionCode);
+
+        await using var context = await fixture.Factory.CreateDbContextAsync();
+        var finding = await context.PayrollFindingRecords.AsNoTracking()
+            .SingleAsync(item => item.FindingKey == "p300-a");
+        Assert.Equal(PayrollGuidedDecisionCodes.P300WorkValid, finding.DecisionCode);
+        Assert.Equal("Werk was terecht", finding.DecisionLabel);
+        Assert.Equal(PayrollFindingStatus.Reviewed, finding.Status);
+
+        var audit = await context.PayrollShadowReviewAudits.AsNoTracking()
+            .OrderByDescending(item => item.Id)
+            .FirstAsync();
+        Assert.Equal(PayrollGuidedDecisionCodes.P300WorkValid, audit.ReasonCode);
+        Assert.Contains("admin-case:", audit.Comment, StringComparison.Ordinal);
+        Assert.Equal(0, fixture.Actions.ExecuteCalls);
+    }
+
+    [Fact]
+    public async Task BulkAdminDecision_RejectsStandby()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        _ = await fixture.SeedThreeOpenCasesAsync();
+        var page = await fixture.Service.GetAdminQueueAsync(
+            2026,
+            8,
+            new PayrollReviewQueueFilter(Category: PayrollReviewCategory.Standby, Scope: PayrollReviewQueueScope.All),
+            default);
+        var standby = Assert.Single(page.AdminCases);
+        Assert.False(standby.AllowsBulkDisposition);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Service.BulkSetAdminDecisionAsync(
+                2026,
+                8,
+                [standby.AdminCaseKey],
+                PayrollGuidedDecisionCodes.StandbyPhysicalOnly,
+                "bulk",
+                "Ada Admin",
+                default));
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;

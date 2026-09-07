@@ -81,6 +81,63 @@ internal sealed class PayrollReviewQueueService(
             withoutOpen);
     }
 
+    public async Task<PayrollAdminQueuePage> GetAdminQueueAsync(
+        int year,
+        int month,
+        PayrollReviewQueueFilter filter,
+        CancellationToken cancellationToken)
+    {
+        EnsureEnabled();
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var shadowMonth = await context.PayrollShadowMonths.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Year == year && item.Month == month, cancellationToken);
+        if (shadowMonth is null)
+        {
+            return EmptyAdminPage(year, month);
+        }
+
+        var employees = await context.PayrollShadowEmployeeResults.AsNoTracking()
+            .Where(item => item.ShadowMonthId == shadowMonth.Id)
+            .ToListAsync(cancellationToken);
+        var included = employees
+            .Where(item => item.EligibilityStatus == PayrollEligibilityStatus.Included)
+            .OrderBy(item => string.IsNullOrWhiteSpace(item.DisplayNameSnapshot) ? item.ResourceId : item.DisplayNameSnapshot, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(item => item.ResourceId, StringComparer.Ordinal)
+            .ToList();
+        var includedByResource = included.ToDictionary(item => item.ResourceId, StringComparer.Ordinal);
+
+        var findings = await context.PayrollFindingRecords.AsNoTracking()
+            .Where(item => item.ShadowMonthId == shadowMonth.Id)
+            .ToListAsync(cancellationToken);
+        findings = findings
+            .Where(item => includedByResource.ContainsKey(item.ResourceId))
+            .ToList();
+
+        var actions = await LoadActionsAsync(year, month, cancellationToken);
+        var allReviewCases = PayrollReviewCaseBuilder.Build(findings, includedByResource, actions);
+        var decisionCodes = findings
+            .Where(item => !string.IsNullOrWhiteSpace(item.DecisionCode))
+            .GroupBy(item => item.FindingKey, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First().DecisionCode, StringComparer.Ordinal);
+        var decisionLabels = findings
+            .Where(item => !string.IsNullOrWhiteSpace(item.DecisionLabel))
+            .GroupBy(item => item.FindingKey, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First().DecisionLabel, StringComparer.Ordinal);
+        var allAdminCases = PayrollAdminCaseBuilder.Build(allReviewCases, decisionCodes, decisionLabels);
+        var filteredAdmin = PayrollAdminCaseBuilder.ApplyFilter(allAdminCases, filter);
+        var reviewSummary = PayrollReviewCaseBuilder.Summarize(allReviewCases, included, actions);
+        var adminSummary = PayrollAdminCaseBuilder.Summarize(allReviewCases, allAdminCases);
+
+        return new PayrollAdminQueuePage(
+            year,
+            month,
+            reviewSummary,
+            adminSummary,
+            filteredAdmin,
+            allReviewCases,
+            included);
+    }
+
     public async Task SetCaseStatusAsync(
         int year,
         int month,
@@ -242,6 +299,187 @@ internal sealed class PayrollReviewQueueService(
         return new PayrollReviewBulkUpdateResult(distinctKeys.Length, updatedKeys.Count, updatedKeys);
     }
 
+    public async Task<PayrollAdminDecisionResult> SetAdminDecisionAsync(
+        int year,
+        int month,
+        string adminCaseKey,
+        string decisionCode,
+        string? comment,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        var page = await GetAdminQueueAsync(
+            year,
+            month,
+            new PayrollReviewQueueFilter(Scope: PayrollReviewQueueScope.All),
+            cancellationToken);
+        var adminCase = page.AdminCases.FirstOrDefault(item =>
+            string.Equals(item.AdminCaseKey, adminCaseKey, StringComparison.Ordinal))
+            ?? throw new InvalidOperationException($"Admin-case niet gevonden: {adminCaseKey}");
+
+        var choice = PayrollGuidedDecisions.Resolve(decisionCode, adminCase.Category);
+        if (choice.RequiresComment && string.IsNullOrWhiteSpace(comment))
+        {
+            throw new InvalidOperationException("Een reden/commentaar is verplicht voor deze beslissing.");
+        }
+
+        var updated = await ApplyAdminDecisionCoreAsync(
+            year,
+            month,
+            adminCase,
+            choice,
+            comment,
+            actor,
+            cancellationToken);
+        return new PayrollAdminDecisionResult(
+            adminCase.AdminCaseKey,
+            choice.DecisionCode,
+            choice.Label,
+            choice.ResultStatus,
+            updated);
+    }
+
+    public async Task<PayrollReviewBulkUpdateResult> BulkSetAdminDecisionAsync(
+        int year,
+        int month,
+        IReadOnlyList<string> adminCaseKeys,
+        string decisionCode,
+        string comment,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        EnsureEnabled();
+        if (adminCaseKeys is null || adminCaseKeys.Count == 0)
+        {
+            throw new ArgumentException("Selecteer minstens één case.", nameof(adminCaseKeys));
+        }
+
+        var distinctKeys = adminCaseKeys
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Select(item => item.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        var page = await GetAdminQueueAsync(
+            year,
+            month,
+            new PayrollReviewQueueFilter(Scope: PayrollReviewQueueScope.All),
+            cancellationToken);
+        var selected = page.AdminCases
+            .Where(item => distinctKeys.Contains(item.AdminCaseKey, StringComparer.Ordinal))
+            .ToList();
+        if (selected.Count == 0)
+        {
+            return new PayrollReviewBulkUpdateResult(distinctKeys.Length, 0, []);
+        }
+
+        if (selected.Any(item => !item.AllowsBulkDisposition))
+        {
+            throw new InvalidOperationException(
+                "Bulk is niet toegelaten voor wachtdienst of sterk bewijs ontbrekende prestatie. Beoordeel die cases individueel.");
+        }
+
+        var categories = selected.Select(item => item.Category).Distinct().ToArray();
+        if (categories.Length != 1)
+        {
+            throw new InvalidOperationException("Bulk-beslissing vereist één categorie tegelijk.");
+        }
+
+        var choice = PayrollGuidedDecisions.Resolve(decisionCode, categories[0]);
+        if (choice.RequiresComment && string.IsNullOrWhiteSpace(comment))
+        {
+            throw new InvalidOperationException("Een gemeenschappelijke reden is verplicht.");
+        }
+
+        var updatedKeys = new List<string>();
+        foreach (var adminCase in selected)
+        {
+            await ApplyAdminDecisionCoreAsync(
+                year,
+                month,
+                adminCase,
+                choice,
+                comment,
+                actor,
+                cancellationToken);
+            updatedKeys.Add(adminCase.AdminCaseKey);
+        }
+
+        return new PayrollReviewBulkUpdateResult(distinctKeys.Length, updatedKeys.Count, updatedKeys);
+    }
+
+    private async Task<int> ApplyAdminDecisionCoreAsync(
+        int year,
+        int month,
+        PayrollAdminCase adminCase,
+        PayrollGuidedChoice choice,
+        string? comment,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var shadowMonth = await context.PayrollShadowMonths
+            .SingleOrDefaultAsync(item => item.Year == year && item.Month == month, cancellationToken)
+            ?? throw new InvalidOperationException($"Geen payroll shadow-maand voor {year}-{month:00}.");
+        if (shadowMonth.Status == PayrollShadowMonthStatus.Finalized)
+        {
+            throw new InvalidOperationException("Afgesloten shadow-maand kan niet gewijzigd worden.");
+        }
+
+        if (string.IsNullOrWhiteSpace(actor))
+        {
+            throw new InvalidOperationException("Actor is verplicht.");
+        }
+
+        var findingKeys = adminCase.FindingKeys.ToHashSet(StringComparer.Ordinal);
+        var matches = await context.PayrollFindingRecords
+            .Where(item => item.ShadowMonthId == shadowMonth.Id)
+            .ToListAsync(cancellationToken);
+        matches = matches.Where(item => findingKeys.Contains(item.FindingKey)).ToList();
+        if (matches.Count == 0)
+        {
+            throw new InvalidOperationException($"Geen findings voor admin-case {adminCase.AdminCaseKey}.");
+        }
+
+        var now = timeProvider.GetUtcNow();
+        var trimmedActor = actor.Trim();
+        var trimmedComment = string.IsNullOrWhiteSpace(comment) ? null : comment.Trim();
+        foreach (var finding in matches)
+        {
+            finding.Status = choice.ResultStatus;
+            finding.DecisionCode = choice.DecisionCode;
+            finding.DecisionLabel = choice.Label;
+            finding.ReviewedAtUtc = now;
+            finding.ReviewedBy = trimmedActor;
+            finding.ReviewComment = trimmedComment;
+        }
+
+        var auditAction = choice.ResultStatus switch
+        {
+            PayrollFindingStatus.Reviewed => PayrollShadowAuditAction.ReviewAccepted,
+            PayrollFindingStatus.NeedsFollowUp => PayrollShadowAuditAction.ReviewNeedsFollowUp,
+            PayrollFindingStatus.Dismissed => PayrollShadowAuditAction.ReviewReset,
+            _ => PayrollShadowAuditAction.ReviewReset,
+        };
+        context.PayrollShadowReviewAudits.Add(new PayrollShadowReviewAudit
+        {
+            ShadowMonthId = shadowMonth.Id,
+            ResourceId = adminCase.ResourceId,
+            Action = auditAction,
+            Actor = trimmedActor,
+            TimestampUtc = now,
+            ReasonCode = choice.DecisionCode,
+            Comment =
+                $"admin-case:{adminCase.AdminCaseKey} | decision:{choice.DecisionCode} | findings:{string.Join(",", adminCase.FindingIds)}"
+                + (trimmedComment is null ? string.Empty : $" | {trimmedComment}"),
+        });
+
+        shadowMonth.LastReviewedAtUtc = now;
+        shadowMonth.LastReviewedBy = trimmedActor;
+        await context.SaveChangesAsync(cancellationToken);
+        return matches.Count;
+    }
+
     private async Task<IReadOnlyList<PayrollProposedActionRecord>> LoadActionsAsync(
         int year,
         int month,
@@ -302,4 +540,31 @@ internal sealed class PayrollReviewQueueService(
             [],
             [],
             []);
+
+    private static PayrollAdminQueuePage EmptyAdminPage(int year, int month)
+    {
+        var emptyCategories = Enum.GetValues<PayrollReviewCategory>()
+            .Where(item => item != PayrollReviewCategory.All)
+            .ToDictionary(item => item, _ => 0);
+        return new PayrollAdminQueuePage(
+            year,
+            month,
+            new PayrollReviewQueueSummary(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, emptyCategories, emptyCategories),
+            new PayrollAdminQueueSummary(
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                emptyCategories,
+                emptyCategories,
+                emptyCategories,
+                emptyCategories,
+                emptyCategories),
+            [],
+            [],
+            []);
+    }
 }

@@ -11,6 +11,12 @@ public interface IPayrollReviewQueueService
         PayrollReviewQueueFilter filter,
         CancellationToken cancellationToken);
 
+    Task<PayrollAdminQueuePage> GetAdminQueueAsync(
+        int year,
+        int month,
+        PayrollReviewQueueFilter filter,
+        CancellationToken cancellationToken);
+
     Task SetCaseStatusAsync(
         int year,
         int month,
@@ -21,7 +27,7 @@ public interface IPayrollReviewQueueService
         CancellationToken cancellationToken);
 
     /// <summary>
-    /// Updates only the explicitly provided case keys (never an implicit full-month select).
+    /// Updates only the explicitly provided review-case keys (never an implicit full-month select).
     /// Allowed statuses: NeedsFollowUp, Reviewed, Dismissed.
     /// </summary>
     Task<PayrollReviewBulkUpdateResult> BulkSetCaseStatusAsync(
@@ -29,6 +35,30 @@ public interface IPayrollReviewQueueService
         int month,
         IReadOnlyList<string> caseKeys,
         PayrollFindingStatus status,
+        string comment,
+        string actor,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Applies a guided admin decision to all findings under an AdminCase.
+    /// </summary>
+    Task<PayrollAdminDecisionResult> SetAdminDecisionAsync(
+        int year,
+        int month,
+        string adminCaseKey,
+        string decisionCode,
+        string? comment,
+        string actor,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Bulk disposition for explicitly selected AdminCase keys (low-risk categories only).
+    /// </summary>
+    Task<PayrollReviewBulkUpdateResult> BulkSetAdminDecisionAsync(
+        int year,
+        int month,
+        IReadOnlyList<string> adminCaseKeys,
+        string decisionCode,
         string comment,
         string actor,
         CancellationToken cancellationToken);
