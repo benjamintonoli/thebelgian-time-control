@@ -376,12 +376,34 @@ public static class PayrollActionEligibility
 
         if (!callout.IsComplete)
         {
-            return Block(
+            var blockedProposal = new PayrollActionAdjustProposal(
+                context.ExistingPerformanceId.Value,
+                context.ExistingPerformanceStart.Value,
+                context.ExistingPerformanceEnd.Value,
+                proposedStart,
+                proposedEnd,
+                PayrollStandbyActivityTypes.WaitingTime,
+                PayrollStandbyActivityTypes.WaitingMainTaskExternalId);
+            var blockedEvidence = evidence with
+            {
+                CalloutEvidence = callout.EvidenceNote,
+                Evidence = string.IsNullOrWhiteSpace(evidence.Evidence)
+                    ? callout.EvidenceNote
+                    : evidence.Evidence + " | " + callout.EvidenceNote,
+                SuggestedPayableStart = proposedStart,
+                SuggestedPayableEnd = proposedEnd,
+            };
+            var blockedRevision = ComputeSourceRevision(blockedEvidence, null, blockedProposal);
+            return new PayrollActionEligibilityResult(
                 actionType,
-                evidence with { CalloutEvidence = callout.EvidenceNote },
+                PayrollProposedActionStatus.Blocked,
                 PayrollIntervalSemantics.Ambiguous,
                 callout.BlockReasonCode,
-                callout.BlockReason ?? "Incomplete fysieke callout; correctie is geblokkeerd.");
+                callout.BlockReason ?? "Incomplete fysieke callout; correctie is geblokkeerd.",
+                null,
+                blockedProposal,
+                blockedEvidence,
+                blockedRevision);
         }
 
         var proposal = new PayrollActionAdjustProposal(
