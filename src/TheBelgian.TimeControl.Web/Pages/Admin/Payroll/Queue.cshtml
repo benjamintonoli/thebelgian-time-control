@@ -256,7 +256,7 @@ else
                         var multi = item.Performances.Count > 1;
                         var expandId = "perf-" + Math.Abs(item.AdminCaseKey.GetHashCode()).ToString("x", CultureInfo.InvariantCulture);
                         <tr class="triage-row" data-admin-case-key="@item.AdminCaseKey" data-workflow="@item.WorkflowStatus">
-                            <td class="text-nowrap">@item.Date.ToString("dd/MM")</td>
+                            <td class="text-nowrap">@PayrollDisplayFormatting.DateWithWeekdayShort(item.Date)</td>
                             <td>
                                 <div class="fw-semibold">@(item.DisplayName ?? item.ResourceId)</div>
                                 @if (multi)
@@ -395,7 +395,7 @@ else
                                     <input class="form-check-input case-check" type="checkbox" name="SelectedAdminCaseKeys" value="@item.AdminCaseKey" form="bulk-form" />
                                 }
                             </td>
-                            <td>@item.Date.ToString("dd/MM")</td>
+                            <td>@PayrollDisplayFormatting.DateWithWeekdayShort(item.Date)</td>
                             <td>
                                 <div class="fw-semibold">@(item.DisplayName ?? item.ResourceId)</div>
                                 @if (!string.IsNullOrWhiteSpace(item.BonNr) || !string.IsNullOrWhiteSpace(item.ProjectId))
@@ -434,7 +434,7 @@ else
                                 }
                                 <div class="flex-grow-1">
                                     <div class="fw-semibold">@(item.DisplayName ?? item.ResourceId)</div>
-                                    <div class="small text-muted">@item.Date.ToString("dd/MM/yyyy")</div>
+                                    <div class="small text-muted">@PayrollDisplayFormatting.DateWithWeekday(item.Date)</div>
                                     <p class="mb-1 mt-1">@item.IssueSummary</p>
                                     <p class="small mb-2">@(item.KeyFact ?? item.BookedSummary)</p>
                                     <a class="btn btn-sm btn-outline-primary"

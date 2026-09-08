@@ -31,7 +31,7 @@ else
         <div class="d-flex justify-content-between flex-wrap gap-2 mb-3">
             <div>
                 <h2 class="h4 mb-1">@(selected.DisplayName ?? selected.ResourceId)</h2>
-                <div class="text-muted">@selected.Date.ToString("dd/MM/yyyy")</div>
+                <div class="text-muted">@PayrollDisplayFormatting.DateWithWeekday(selected.Date)</div>
             </div>
             <span class="badge text-bg-light text-dark border">@PayrollGuidedDecisions.AdminStatusLabel(selected.WorkflowStatus)</span>
         </div>
@@ -167,6 +167,7 @@ else
 
         <section class="mb-3 d-none" id="correction-panel">
             <div class="text-uppercase small text-muted fw-semibold mb-2">Correctievoorstel</div>
+            <p class="small mb-1">@PayrollDisplayFormatting.DateWithWeekday(selected.Date)</p>
             <p class="small">Admin-ingegeven VAN/TOT → voorstel. Execution blijft uit.</p>
             @foreach (var target in detail.CorrectionTargets.Where(item => item.CorrectionCapability != PayrollProject300CorrectionCapability.ZeroDeleteUnavailable))
             {

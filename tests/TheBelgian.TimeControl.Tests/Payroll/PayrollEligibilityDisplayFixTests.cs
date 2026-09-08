@@ -84,6 +84,30 @@ public sealed class PayrollEligibilityDisplayFixTests
         Assert.Equal(190.61666666666667m, raw);
     }
 
+    [Theory]
+    [InlineData(2026, 8, 31, "ma")] // Monday
+    [InlineData(2026, 9, 1, "di")]  // Tuesday
+    [InlineData(2026, 9, 2, "wo")]  // Wednesday
+    [InlineData(2026, 9, 3, "do")]  // Thursday
+    [InlineData(2026, 9, 4, "vr")]  // Friday
+    [InlineData(2026, 9, 5, "za")]  // Saturday
+    [InlineData(2026, 9, 6, "zo")]  // Sunday
+    public void DisplayFormatting_DutchWeekday_AllSevenDays(int year, int month, int day, string expected)
+    {
+        var date = new DateOnly(year, month, day);
+        Assert.Equal(expected, PayrollDisplayFormatting.DutchWeekdayAbbreviation(date));
+        Assert.Equal($"{expected} {day:00}/{month:00}", PayrollDisplayFormatting.DateWithWeekdayShort(date));
+        Assert.Equal($"{expected} {day:00}/{month:00}/{year}", PayrollDisplayFormatting.DateWithWeekday(date));
+    }
+
+    [Fact]
+    public void DisplayFormatting_Weekday_DoesNotMutateStoredDate()
+    {
+        var date = new DateOnly(2026, 8, 31);
+        _ = PayrollDisplayFormatting.DateWithWeekday(date);
+        Assert.Equal(new DateOnly(2026, 8, 31), date);
+    }
+
     private static async Task<RosterPostForm> BindFormAsync(Dictionary<string, StringValues> form)
     {
         var services = new ServiceCollection();

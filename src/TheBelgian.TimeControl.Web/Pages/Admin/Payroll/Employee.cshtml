@@ -107,7 +107,7 @@ else
                     <div class="d-flex flex-wrap gap-2 align-items-center mb-1">
                         <span class="badge @PayrollReviewLabels.SeverityBadgeClass(finding.Severity)">@PayrollReviewLabels.FindingSeverity(finding.Severity)</span>
                         <strong>@finding.Title</strong>
-                        <span class="text-muted small">@finding.Date.ToString("dd/MM/yyyy")</span>
+                        <span class="text-muted small">@PayrollDisplayFormatting.DateWithWeekday(finding.Date)</span>
                         <span class="text-muted small">@PayrollReviewLabels.FindingType(finding.FindingType)</span>
                     </div>
                     <p class="mb-1">@finding.Description</p>

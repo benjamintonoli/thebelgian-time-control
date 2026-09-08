@@ -93,7 +93,7 @@ else
                             <a class="queue-case-link wb-select-case" href="#" data-admin-case-key="@item.AdminCaseKey" aria-current="@(active is null ? null : "true")">
                                 <div class="queue-case-top">
                                     <strong>@(item.DisplayName ?? item.ResourceId)</strong>
-                                    <span>@item.Date.ToString("dd/MM")</span>
+                                    <span>@PayrollDisplayFormatting.DateWithWeekdayShort(item.Date)</span>
                                 </div>
                                 <div class="queue-facts">
                                     <span>@(item.TimeIntervalSummary ?? item.BookedSummary ?? "—")</span>

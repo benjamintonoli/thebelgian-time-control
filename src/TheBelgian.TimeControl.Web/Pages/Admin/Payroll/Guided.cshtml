@@ -47,7 +47,7 @@ else
                 <div class="small text-muted">Voortgang: <strong>@(Model.CurrentIndex + 1)</strong> van <strong>@Model.TotalVisible</strong></div>
                 <span class="badge text-bg-light text-dark">@PayrollGuidedDecisions.AdminStatusLabel(current.WorkflowStatus)</span>
             </div>
-            <div class="fw-semibold mb-1">@(current.DisplayName ?? current.ResourceId) · @current.Date.ToString("dd/MM/yyyy")</div>
+            <div class="fw-semibold mb-1">@(current.DisplayName ?? current.ResourceId) · @PayrollDisplayFormatting.DateWithWeekday(current.Date)</div>
             @if (!string.IsNullOrWhiteSpace(current.ProjectId) || !string.IsNullOrWhiteSpace(current.BonNr))
             {
                 <div class="small text-muted mb-2">

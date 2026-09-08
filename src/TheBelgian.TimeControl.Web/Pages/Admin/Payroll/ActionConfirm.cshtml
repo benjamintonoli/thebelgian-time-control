@@ -73,7 +73,7 @@ else
                     <p class="mb-1"><strong>Nieuwe prestatie aanmaken</strong></p>
                     <ul class="small mb-0">
                         <li>Medewerker: @view.CreateProposal.ResourceId</li>
-                        <li>Datum: @view.CreateProposal.Date.ToString("dd/MM/yyyy")</li>
+                        <li>Datum: @PayrollDisplayFormatting.DateWithWeekday(view.CreateProposal.Date)</li>
                         <li>Dossier/project: @view.CreateProposal.ProjectId</li>
                         <li>Bon: @(view.CreateProposal.BonNr ?? "—")</li>
                         <li>Start: @view.CreateProposal.Start.ToString("HH:mm")</li>
@@ -85,6 +85,7 @@ else
                 else if (view.AdjustProposal is not null)
                 {
                     <p class="mb-1"><strong>Tijdscorrectie bestaande prestatie</strong></p>
+                    <p class="mb-1 small">Datum: @PayrollDisplayFormatting.DateWithWeekday(view.AdjustProposal.CurrentStart)</p>
                     <p class="mb-0 small">
                         Start: @view.AdjustProposal.CurrentStart.ToString("HH:mm") → @view.AdjustProposal.ProposedStart.ToString("HH:mm")<br />
                         Einde: @view.AdjustProposal.CurrentEnd.ToString("HH:mm") → @view.AdjustProposal.ProposedEnd.ToString("HH:mm")
