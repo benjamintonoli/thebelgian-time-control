@@ -11,6 +11,23 @@ public interface IPayrollProject300WorkbenchService
         string? selectedAdminCaseKey,
         CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Core detail without PowerFleet (GPS deferred). Use <see cref="GetGpsContextAsync"/> separately.
+    /// </summary>
+    Task<PayrollProject300WorkbenchPage> GetCoreDetailAsync(
+        int year,
+        int month,
+        PayrollReviewQueueFilter filter,
+        string? selectedAdminCaseKey,
+        CancellationToken cancellationToken);
+
+    Task<PayrollProject300GpsLoadResult> GetGpsContextAsync(
+        int year,
+        int month,
+        string adminCaseKey,
+        bool prefetchNext = true,
+        CancellationToken cancellationToken = default);
+
     Task<PayrollProject300ProposeCorrectionResult> ProposeTimeCorrectionAsync(
         int year,
         int month,
@@ -21,6 +38,8 @@ public interface IPayrollProject300WorkbenchService
         string reason,
         string actor,
         CancellationToken cancellationToken);
+
+    PayrollProject300GpsCacheHint GetGpsCacheHint(string resourceId, DateOnly workDate);
 }
 
 public sealed record PayrollProject300ProposeCorrectionResult(
@@ -28,3 +47,13 @@ public sealed record PayrollProject300ProposeCorrectionResult(
     string Message,
     Guid? ActionId,
     string? BlockReason);
+
+public sealed record PayrollProject300GpsLoadResult(
+    string AdminCaseKey,
+    string ResourceId,
+    DateOnly Date,
+    PayrollProject300GpsContext GpsContext,
+    bool CacheHit,
+    int PowerFleetApiCalls,
+    string? PrefetchAdminCaseKey,
+    bool PrefetchStarted);

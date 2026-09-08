@@ -112,7 +112,7 @@ else
                     @foreach (var item in wb.Cases)
                     {
                         var active = string.Equals(wb.SelectedKey, item.AdminCaseKey, StringComparison.Ordinal) ? "active" : null;
-                        <article class="queue-case @active" id="queue-case-@item.AdminCaseKey.GetHashCode().ToString("x")" data-admin-case-key="@item.AdminCaseKey">
+                        <article class="queue-case @active" id="queue-case-@item.AdminCaseKey.GetHashCode().ToString("x")" data-admin-case-key="@item.AdminCaseKey" data-resource-id="@item.ResourceId" data-date="@item.Date.ToString("yyyy-MM-dd")">
                             <a class="queue-case-link" href="@CaseHref(item.AdminCaseKey)" aria-current="@(active is null ? null : "true")">
                                 <div class="queue-case-top">
                                     <strong>@(item.DisplayName ?? item.ResourceId)</strong>
@@ -125,6 +125,20 @@ else
                                 <div class="queue-customer">@(item.PerformanceDescriptionSummary ?? item.IssueSummary)</div>
                                 <div class="queue-case-bottom">
                                     <span class="queue-status">@PayrollGuidedDecisions.AdminStatusLabel(item.WorkflowStatus)</span>
+                                    @{
+                                        var hint = Model.GpsHints.GetValueOrDefault(item.AdminCaseKey);
+                                        var hintText = hint switch
+                                        {
+                                            PayrollProject300GpsCacheHint.Available => "GPS✓",
+                                            PayrollProject300GpsCacheHint.Unavailable => "GPS–",
+                                            PayrollProject300GpsCacheHint.Cached => "GPS✓",
+                                            _ => "",
+                                        };
+                                    }
+                                    @if (!string.IsNullOrEmpty(hintText))
+                                    {
+                                        <span class="queue-gps-hint text-muted">@hintText</span>
+                                    }
                                 </div>
                             </a>
                         </article>
@@ -166,7 +180,7 @@ else
                             <div class="small">Omschrijving: @(string.IsNullOrWhiteSpace(row.Description) ? "—" : row.Description)</div>
                             <div class="small">Memo: @(string.IsNullOrWhiteSpace(row.Memo) ? "—" : row.Memo)</div>
                             <div class="small text-muted">
-                                @if (!string.IsNullOrWhiteSpace(row.ProjectId)) { <span>Project @row.ProjectId</span> }
+                                <span>@(row.ProjectDisplayLabel ?? "Project 300")</span>
                                 @if (!string.IsNullOrWhiteSpace(row.BonNr)) { <span class="ms-2">BON @row.BonNr</span> }
                                 <span class="ms-2">#@row.PerformanceId</span>
                                 @if (row.HfdTaakId is { } hfd) { <span class="ms-2">HFDTAAK @hfd</span> }
@@ -200,11 +214,12 @@ else
 
                 <section class="mb-3">
                     <h3 class="h6 text-uppercase text-muted">C. GPS / dagverloop</h3>
-                    <p class="small mb-1">@detail.GpsContext.Summary</p>
-                    <p class="small text-muted">@PayrollProject300CaseDetail.GpsNeverValidatesNote</p>
-                    @if (detail.GpsContext.Available && detail.GpsContext.Events.Count > 0)
-                    {
-                        <ul class="list-unstyled small">
+                    <div id="gps-panel"
+                         data-admin-case-key="@selected.AdminCaseKey"
+                         data-loading="@(detail.GpsContext.IsLoading ? "true" : "false")">
+                        <p class="small mb-1" id="gps-summary">@detail.GpsContext.Summary</p>
+                        <p class="small text-muted">@PayrollProject300CaseDetail.GpsNeverValidatesNote</p>
+                        <ul class="list-unstyled small" id="gps-events">
                             @foreach (var ev in detail.GpsContext.Events)
                             {
                                 <li>
@@ -215,14 +230,12 @@ else
                                 </li>
                             }
                         </ul>
-                    }
-                    <details class="small">
-                        <summary>Technische GPS-ids</summary>
-                        <div>Mapping: @detail.GpsContext.MappingKind</div>
-                        <div>ObjectId: @(detail.GpsContext.ObjectIdCollapsed ?? "—")</div>
-                        <div>Trips: @detail.GpsContext.TripsCollapsed.Count</div>
-                    </details>
-                    <div class="small text-muted mt-1">Kaart: geen aparte map-component in TimeControl; timeline hierboven is de GPS-context.</div>
+                        <details class="small">
+                            <summary>Technische GPS-ids</summary>
+                            <div>Mapping: <span id="gps-mapping">@detail.GpsContext.MappingKind</span></div>
+                            <div>ObjectId: <span id="gps-object">@(detail.GpsContext.ObjectIdCollapsed ?? "—")</span></div>
+                        </details>
+                    </div>
                 </section>
 
                 <section class="mb-3">
@@ -265,26 +278,27 @@ else
 
                 <section class="mb-3 d-none" id="correction-panel">
                     <h3 class="h6 text-uppercase text-muted">F. Correctie</h3>
-                    <p class="small">Alleen bestaande bewezen VAN/TOT-correctie (WaitingTime / HFDTAAK 23). Geen delete/nul. Execution blijft uit.</p>
+                    <p class="small">Admin-ingegeven VAN/TOT → PayrollAction-voorstel. Geen auto-GPS-target. Execution blijft uit. Per PerformanceId apart.</p>
                     @foreach (var target in detail.CorrectionTargets.Where(item => item.CorrectionCapability != PayrollProject300CorrectionCapability.ZeroDeleteUnavailable))
                     {
                         <div class="border rounded p-2 mb-2 correction-target" data-performance-id="@target.PerformanceId">
-                            <div class="small fw-semibold">#@target.PerformanceId · HFDTAAK @(target.HfdTaakId?.ToString(CultureInfo.InvariantCulture) ?? "—") · @(target.ActivityType ?? "onbekend")</div>
-                            <div class="small">CURRENT @FmtTime(target.CurrentStart)–@FmtTime(target.CurrentEnd) · @FmtHours(target.AtlHours)</div>
+                            <div class="small fw-semibold">#@target.PerformanceId · @(target.FriendlyTaskName ?? $"HFDTAAK {target.HfdTaakId?.ToString(CultureInfo.InvariantCulture) ?? "—"}") · @(target.ActivityType ?? "onbekend")</div>
+                            <div class="small">HUIDIG @FmtTime(target.CurrentStart)–@FmtTime(target.CurrentEnd) · @FmtHours(target.AtlHours)</div>
                             <div class="small text-muted mb-2">@target.CapabilityMessage</div>
                             @if (target.CorrectionCapability == PayrollProject300CorrectionCapability.SupportedVanTot)
                             {
                                 <div class="row g-2 align-items-end">
-                                    <div class="col-auto"><label class="form-label small mb-0">Nieuw VAN</label><input class="form-control form-control-sm corr-start" type="time" value="@FmtTime(target.CurrentStart)" /></div>
-                                    <div class="col-auto"><label class="form-label small mb-0">Nieuw TOT</label><input class="form-control form-control-sm corr-end" type="time" value="@FmtTime(target.CurrentEnd)" /></div>
+                                    <div class="col-auto"><label class="form-label small mb-0">NIEUW start</label><input class="form-control form-control-sm corr-start" type="time" value="@FmtTime(target.CurrentStart)" /></div>
+                                    <div class="col-auto"><label class="form-label small mb-0">NIEUW einde</label><input class="form-control form-control-sm corr-end" type="time" value="@FmtTime(target.CurrentEnd)" /></div>
+                                    <div class="col-md-3"><div class="small">Nieuwe duur: <span class="corr-duration">—</span></div><div class="small">Verschil: <span class="corr-delta">—</span></div></div>
                                     <div class="col-md-4"><label class="form-label small mb-0">Reden</label><input class="form-control form-control-sm corr-reason" placeholder="Verplicht" /></div>
-                                    <div class="col-auto"><button type="button" class="btn btn-sm btn-warning wb-propose-corr">Voorstel opslaan</button></div>
+                                    <div class="col-auto"><button type="button" class="btn btn-sm btn-warning wb-propose-corr">Correctievoorstel opslaan</button></div>
                                 </div>
                             }
                         </div>
                     }
                     <div class="alert alert-secondary small mb-0">@PayrollProject300WorkbenchBuilder.ZeroDeleteUnavailableMessage</div>
-                    <div class="alert alert-light border small mt-2 mb-0">Planning ontbreekt → planning moet aangevuld/gecorrigeerd worden (geen planning-write).</div>
+                    <div class="alert alert-light border small mt-2 mb-0">Volledige prestatie ongeldig? Gebruik Opvolging nodig met reden — geen delete/nul.</div>
                     <div class="small text-danger d-none" id="wb-corr-error"></div>
                     <div class="small text-success d-none" id="wb-corr-ok"></div>
                 </section>
@@ -424,6 +438,58 @@ else
 
   const active = document.querySelector('.queue-case.active');
   active?.scrollIntoView({ block: 'nearest' });
+
+  function updateCorrMeta(box) {
+    const start = box.querySelector('.corr-start')?.value;
+    const end = box.querySelector('.corr-end')?.value;
+    if (!start || !end) return;
+    const [sh, sm] = start.split(':').map(Number);
+    const [eh, em] = end.split(':').map(Number);
+    const mins = (eh * 60 + em) - (sh * 60 + sm);
+    const dur = box.querySelector('.corr-duration');
+    const delta = box.querySelector('.corr-delta');
+    if (dur) dur.textContent = (mins / 60).toFixed(2).replace('.', ',') + ' u';
+    if (delta) delta.textContent = (mins >= 0 ? '+' : '') + mins + ' min t.o.v. start-einde input';
+  }
+  document.querySelectorAll('.correction-target').forEach(box => {
+    box.querySelectorAll('.corr-start, .corr-end').forEach(input => {
+      input.addEventListener('change', () => updateCorrMeta(box));
+      updateCorrMeta(box);
+    });
+  });
+
+  const gpsPanel = document.getElementById('gps-panel');
+  if (gpsPanel && gpsPanel.dataset.loading === 'true') {
+    const key = gpsPanel.dataset.adminCaseKey;
+    const gpsUrl = '@Url.Page("./Workbench", new { year = Model.Year, month = Model.Month, handler = "Gps" })' + '&adminCaseKey=' + encodeURIComponent(key);
+    fetch(gpsUrl, { headers: { 'Accept': 'application/json' } })
+      .then(r => r.json())
+      .then(payload => {
+        const summary = document.getElementById('gps-summary');
+        const events = document.getElementById('gps-events');
+        if (summary) summary.textContent = payload.summary || 'Geen betrouwbare GPS-context beschikbaar.';
+        if (events) {
+          events.innerHTML = '';
+          (payload.events || []).forEach(ev => {
+            const li = document.createElement('li');
+            li.innerHTML = '<strong>' + ev.at + '</strong>' + (ev.end ? '–' + ev.end : '') + ' · ' + (ev.label || '') +
+              (ev.detail ? ' <span class="text-muted">— ' + ev.detail + '</span>' : '');
+            events.appendChild(li);
+          });
+        }
+        const mapping = document.getElementById('gps-mapping');
+        const objectId = document.getElementById('gps-object');
+        if (mapping) mapping.textContent = payload.mappingKind || '—';
+        if (objectId) objectId.textContent = payload.objectId || '—';
+        gpsPanel.dataset.loading = 'false';
+        const article = document.querySelector('.queue-case[data-admin-case-key="' + CSS.escape(key) + '"] .queue-gps-hint');
+        if (article) article.textContent = payload.available ? 'GPS✓' : 'GPS–';
+      })
+      .catch(() => {
+        const summary = document.getElementById('gps-summary');
+        if (summary) summary.textContent = 'Geen betrouwbare GPS-context beschikbaar.';
+      });
+  }
 })();
 </script>
 }

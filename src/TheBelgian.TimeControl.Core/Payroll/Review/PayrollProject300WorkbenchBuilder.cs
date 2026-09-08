@@ -12,8 +12,9 @@ public static class PayrollProject300WorkbenchBuilder
 {
     public const string MatchingReservationGeen = "Geen";
     public const string MissingGpsSummary = "Geen betrouwbare GPS-context beschikbaar";
+    public const string GpsLoadingSummary = "GPS-context laden...";
     public const string UnsupportedActivityMessage =
-        "Automatische tijdscorrectie niet beschikbaar voor dit type prestatie.";
+        "Deze prestatie kan nog niet veilig vanuit TimeControl aangepast worden.";
     public const string ZeroDeleteUnavailableMessage =
         "Volledig verwijderen/nul zetten is nog niet veilig ondersteund.";
 
@@ -23,7 +24,9 @@ public static class PayrollProject300WorkbenchBuilder
         PayrollAdminCase adminCase,
         IReadOnlyList<NormalizedPerformanceEntry> dayPerformances,
         IReadOnlyList<PayrollPlanningReservation> dayPlanning,
-        StandbyGpsDayEvidence? gps)
+        StandbyGpsDayEvidence? gps,
+        bool gpsPending = false,
+        IReadOnlyDictionary<long, PayrollProject300ResolvedActivity>? activityByPerformanceId = null)
     {
         ArgumentNullException.ThrowIfNull(adminCase);
         dayPerformances ??= [];
@@ -43,7 +46,9 @@ public static class PayrollProject300WorkbenchBuilder
                 ProjectId: item.ProjectId ?? item.ProjectNumber?.ToString(CultureInfo.InvariantCulture),
                 BonNr: item.BonNr,
                 HfdTaakId: item.HfdTaakId,
-                IsSelected: true))
+                IsSelected: true,
+                ProjectDisplayLabel: BuildProjectDisplayLabel(item.ProjectNumber, item.ProjectId, item.BonNr),
+                ProjectNumber: item.ProjectNumber))
             .ToArray();
 
         var planningRows = dayPlanning
@@ -59,8 +64,17 @@ public static class PayrollProject300WorkbenchBuilder
             .ToArray();
 
         var timeline = BuildNeighborTimeline(selected, dayPerformances);
-        var gpsContext = BuildGpsContext(selected, gps);
-        var corrections = BuildCorrectionTargets(selected);
+        var gpsContext = gpsPending && gps is null
+            ? new PayrollProject300GpsContext(
+                Available: false,
+                Summary: GpsLoadingSummary,
+                Events: [],
+                MappingKind: "Pending",
+                ObjectIdCollapsed: null,
+                TripsCollapsed: [],
+                IsLoading: true)
+            : BuildGpsContext(selected, gps);
+        var corrections = BuildCorrectionTargets(selected, activityByPerformanceId);
         var technical = BuildTechnicalNotes(adminCase, selected, gps);
 
         return new PayrollProject300CaseDetail(
@@ -73,6 +87,46 @@ public static class PayrollProject300WorkbenchBuilder
             CorrectionTargets: corrections,
             TechnicalCollapsedNotes: technical);
     }
+
+    /// <summary>
+    /// Human-facing project label: prefer BON, then Project 100/200/300, then project number.
+    /// Avoids raw internal database ids as the primary label.
+    /// </summary>
+    public static string BuildProjectDisplayLabel(
+        int? projectNumber,
+        string? projectId = null,
+        string? bonNr = null)
+    {
+        if (!string.IsNullOrWhiteSpace(bonNr))
+        {
+            return "BON " + bonNr.Trim();
+        }
+
+        if (projectNumber is 100 or 200 or 300)
+        {
+            return "Project " + projectNumber.Value.ToString(CultureInfo.InvariantCulture);
+        }
+
+        if (projectNumber is > 0)
+        {
+            return projectNumber.Value.ToString(CultureInfo.InvariantCulture);
+        }
+
+        if (!string.IsNullOrWhiteSpace(projectId))
+        {
+            var trimmed = projectId.Trim();
+            if (!LooksLikeRawInternalId(trimmed))
+            {
+                return trimmed;
+            }
+        }
+
+        return "—";
+    }
+
+    private static bool LooksLikeRawInternalId(string value) =>
+        value.Length >= 4
+        && value.All(char.IsDigit);
 
     private static NormalizedPerformanceEntry[] ResolveSelectedPerformances(
         PayrollAdminCase adminCase,
@@ -175,8 +229,7 @@ public static class PayrollProject300WorkbenchBuilder
             PerformanceId: entry.SourceEntryId,
             Start: entry.Start,
             End: entry.End,
-            ProjectLabel: entry.ProjectId
-                ?? entry.ProjectNumber?.ToString(CultureInfo.InvariantCulture),
+            ProjectLabel: BuildProjectDisplayLabel(entry.ProjectNumber, entry.ProjectId, entry.BonNr),
             Description: entry.Description,
             IsSelected300: selectedIds.Contains(entry.SourceEntryId));
 
@@ -200,17 +253,17 @@ public static class PayrollProject300WorkbenchBuilder
         }
 
         var evidence = gps;
-        var windowStart = selected.Min(item => item.Start!.Value).AddHours(-2);
-        var windowEnd = selected.Max(item => item.End!.Value).AddHours(2);
         var selectedStart = selected.Min(item => item.Start!.Value);
         var selectedEnd = selected.Max(item => item.End!.Value);
+        var windowStart = selectedStart.AddHours(-2);
+        var windowEnd = selectedEnd.AddHours(2);
 
-        var overlapping = evidence.Trips
+        var candidates = evidence.Trips
             .Where(trip => trip.Start < windowEnd && trip.End > windowStart)
             .OrderBy(trip => trip.Start)
             .ToArray();
 
-        if (overlapping.Length == 0)
+        if (candidates.Length == 0)
         {
             return new PayrollProject300GpsContext(
                 Available: false,
@@ -221,20 +274,45 @@ public static class PayrollProject300WorkbenchBuilder
                 TripsCollapsed: evidence.Trips);
         }
 
-        var events = overlapping
-            .Select(trip =>
-            {
-                var phase = ClassifyTripPhase(trip, selectedStart, selectedEnd);
-                return new PayrollProject300GpsEvent(
-                    At: trip.Start,
-                    End: trip.End,
-                    Label: phase,
-                    Detail: BuildTripDetail(trip));
-            })
-            .ToArray();
+        var events = new List<PayrollProject300GpsEvent>();
+
+        var before = candidates
+            .Where(trip => trip.End <= selectedStart)
+            .OrderByDescending(trip => trip.End)
+            .FirstOrDefault();
+        if (before is not null)
+        {
+            events.Add(BuildBeforeEvent(before));
+        }
+
+        foreach (var during in candidates.Where(trip =>
+                     trip.Start < selectedEnd && trip.End > selectedStart))
+        {
+            events.Add(BuildDuringEvent(during));
+        }
+
+        var after = candidates
+            .Where(trip => trip.Start >= selectedEnd)
+            .OrderBy(trip => trip.Start)
+            .FirstOrDefault();
+        if (after is not null)
+        {
+            events.AddRange(BuildAfterEvents(after));
+        }
+
+        if (events.Count == 0)
+        {
+            return new PayrollProject300GpsContext(
+                Available: false,
+                Summary: MissingGpsSummary,
+                Events: [],
+                MappingKind: evidence.MappingKind,
+                ObjectIdCollapsed: evidence.ObjectId,
+                TripsCollapsed: evidence.Trips);
+        }
 
         var summary =
-            $"{overlapping.Length} rit(ten) rond geboekt venster "
+            $"{events.Count} GPS-punt(en) rond geboekt venster "
             + $"({FormatClock(selectedStart)}–{FormatClock(selectedEnd)}); "
             + PayrollProject300CaseDetail.GpsNeverValidatesNote;
 
@@ -247,32 +325,90 @@ public static class PayrollProject300WorkbenchBuilder
             TripsCollapsed: evidence.Trips);
     }
 
-    private static string ClassifyTripPhase(
-        StandbyGpsTripEvidence trip,
-        DateTimeOffset selectedStart,
-        DateTimeOffset selectedEnd)
+    private static PayrollProject300GpsEvent BuildBeforeEvent(StandbyGpsTripEvidence trip)
     {
-        if (trip.End <= selectedStart)
-        {
-            return "Voor";
-        }
+        var location = FirstAddress(trip.EndAddress, trip.StartAddress);
+        var label = string.IsNullOrWhiteSpace(location)
+            ? "Voor: stilstand/locatie"
+            : "Voor: stilstand: " + location;
 
-        if (trip.Start >= selectedEnd)
-        {
-            return "Na";
-        }
-
-        return "Tijdens";
+        return new PayrollProject300GpsEvent(
+            At: trip.Start,
+            End: trip.End,
+            Label: label,
+            Detail: BuildTripDetail(trip, includeAddresses: false),
+            Phase: "Before");
     }
 
-    private static string? BuildTripDetail(StandbyGpsTripEvidence trip)
+    private static PayrollProject300GpsEvent BuildDuringEvent(StandbyGpsTripEvidence trip)
+    {
+        var location = FirstAddress(trip.StartAddress, trip.EndAddress);
+        var detailParts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(location))
+        {
+            detailParts.Add("Locatie: " + location);
+        }
+
+        var baseDetail = BuildTripDetail(trip, includeAddresses: false);
+        if (!string.IsNullOrWhiteSpace(baseDetail))
+        {
+            detailParts.Add(baseDetail);
+        }
+
+        return new PayrollProject300GpsEvent(
+            At: trip.Start,
+            End: trip.End,
+            Label: "Tijdens geboekte 300-tijd",
+            Detail: detailParts.Count == 0 ? null : string.Join(" · ", detailParts),
+            Phase: "During");
+    }
+
+    private static IEnumerable<PayrollProject300GpsEvent> BuildAfterEvents(StandbyGpsTripEvidence trip)
+    {
+        var startLocation = TrimOrNull(trip.StartAddress);
+        var endLocation = TrimOrNull(trip.EndAddress);
+
+        var vertrekDetailParts = new List<string>
+        {
+            $"{FormatClock(trip.Start)}–{FormatClock(trip.End)}",
+        };
+        if (!string.IsNullOrWhiteSpace(startLocation))
+        {
+            vertrekDetailParts.Add(startLocation);
+        }
+
+        if (trip.DistanceKilometres > 0)
+        {
+            vertrekDetailParts.Add($"{trip.DistanceKilometres.ToString("0.0", Belgian)} km");
+        }
+
+        yield return new PayrollProject300GpsEvent(
+            At: trip.Start,
+            End: trip.End,
+            Label: "Na: vertrek",
+            Detail: string.Join(" · ", vertrekDetailParts),
+            Phase: "After");
+
+        if (!string.IsNullOrWhiteSpace(endLocation))
+        {
+            yield return new PayrollProject300GpsEvent(
+                At: trip.End,
+                End: null,
+                Label: "Na: aankomst: " + endLocation,
+                Detail: FormatClock(trip.End),
+                Phase: "After");
+        }
+    }
+
+    private static string? BuildTripDetail(StandbyGpsTripEvidence trip, bool includeAddresses)
     {
         var parts = new List<string>
         {
             $"{FormatClock(trip.Start)}–{FormatClock(trip.End)}",
         };
 
-        if (!string.IsNullOrWhiteSpace(trip.StartAddress) || !string.IsNullOrWhiteSpace(trip.EndAddress))
+        if (includeAddresses
+            && (!string.IsNullOrWhiteSpace(trip.StartAddress) || !string.IsNullOrWhiteSpace(trip.EndAddress)))
         {
             var from = string.IsNullOrWhiteSpace(trip.StartAddress) ? "—" : trip.StartAddress.Trim();
             var to = string.IsNullOrWhiteSpace(trip.EndAddress) ? "—" : trip.EndAddress.Trim();
@@ -284,17 +420,55 @@ public static class PayrollProject300WorkbenchBuilder
             parts.Add(trip.VehiclePlate.Trim());
         }
 
-        parts.Add($"{trip.DistanceKilometres.ToString("0.0", Belgian)} km");
+        if (trip.DistanceKilometres > 0)
+        {
+            parts.Add($"{trip.DistanceKilometres.ToString("0.0", Belgian)} km");
+        }
+
         return string.Join(" · ", parts);
     }
 
+    private static string? FirstAddress(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            var trimmed = TrimOrNull(value);
+            if (trimmed is not null)
+            {
+                return trimmed;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? TrimOrNull(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
     private static List<PayrollProject300CorrectionTarget> BuildCorrectionTargets(
-        NormalizedPerformanceEntry[] selected)
+        NormalizedPerformanceEntry[] selected,
+        IReadOnlyDictionary<long, PayrollProject300ResolvedActivity>? activityByPerformanceId)
     {
         var targets = new List<PayrollProject300CorrectionTarget>();
         foreach (var item in selected.OrderBy(item => item.Start).ThenBy(item => item.SortKey))
         {
-            if (item.HfdTaakId == PayrollStandbyActivityTypes.WaitingMainTaskExternalId)
+            if (activityByPerformanceId is not null
+                && activityByPerformanceId.TryGetValue(item.SourceEntryId, out var resolved))
+            {
+                targets.Add(new PayrollProject300CorrectionTarget(
+                    PerformanceId: item.SourceEntryId,
+                    CurrentStart: item.Start,
+                    CurrentEnd: item.End,
+                    AtlHours: item.AtlHoursRaw,
+                    HfdTaakId: item.HfdTaakId,
+                    ActivityType: resolved.ActivityType,
+                    CorrectionCapability: resolved.Supported
+                        ? PayrollProject300CorrectionCapability.SupportedVanTot
+                        : PayrollProject300CorrectionCapability.UnsupportedActivity,
+                    CapabilityMessage: BuildResolvedCapabilityMessage(resolved),
+                    FriendlyTaskName: resolved.FriendlyTaskName));
+            }
+            else if (item.HfdTaakId == PayrollStandbyActivityTypes.WaitingMainTaskExternalId)
             {
                 targets.Add(new PayrollProject300CorrectionTarget(
                     PerformanceId: item.SourceEntryId,
@@ -327,12 +501,41 @@ public static class PayrollProject300WorkbenchBuilder
                 HfdTaakId: item.HfdTaakId,
                 ActivityType: item.HfdTaakId == PayrollStandbyActivityTypes.WaitingMainTaskExternalId
                     ? PayrollStandbyActivityTypes.WaitingTime
-                    : null,
+                    : activityByPerformanceId is not null
+                        && activityByPerformanceId.TryGetValue(item.SourceEntryId, out var zeroResolved)
+                        ? zeroResolved.ActivityType
+                        : null,
                 CorrectionCapability: PayrollProject300CorrectionCapability.ZeroDeleteUnavailable,
-                CapabilityMessage: ZeroDeleteUnavailableMessage));
+                CapabilityMessage: ZeroDeleteUnavailableMessage,
+                FriendlyTaskName: activityByPerformanceId is not null
+                    && activityByPerformanceId.TryGetValue(item.SourceEntryId, out var zeroFriendly)
+                    ? zeroFriendly.FriendlyTaskName
+                    : null));
         }
 
         return targets;
+    }
+
+    private static string BuildResolvedCapabilityMessage(PayrollProject300ResolvedActivity resolved)
+    {
+        if (resolved.Supported)
+        {
+            return string.IsNullOrWhiteSpace(resolved.Message)
+                ? "VAN/TOT-correctie beschikbaar."
+                : resolved.Message;
+        }
+
+        var message = string.IsNullOrWhiteSpace(resolved.Message)
+            ? UnsupportedActivityMessage
+            : resolved.Message;
+
+        if (!string.IsNullOrWhiteSpace(resolved.FriendlyTaskName)
+            && !message.Contains(resolved.FriendlyTaskName, StringComparison.Ordinal))
+        {
+            return message + " (" + resolved.FriendlyTaskName.Trim() + ")";
+        }
+
+        return message;
     }
 
     private static List<string> BuildTechnicalNotes(

@@ -168,11 +168,162 @@ public sealed class PayrollProject300WorkbenchTests
         Assert.Equal("Geen", detail.MatchingReservationLabel);
         Assert.Contains(PayrollProject300CaseDetail.GpsNeverValidatesNote, detail.GpsContext.Summary);
         Assert.Contains(PayrollProject300CaseDetail.GpsNeverValidatesNote, detail.TechnicalCollapsedNotes);
-        Assert.Contains(detail.GpsContext.Events, item => item.Label == "Tijdens");
-        Assert.Contains(detail.GpsContext.Events, item => item.Detail!.Contains("Depot A", StringComparison.Ordinal));
+        Assert.Contains(detail.GpsContext.Events, item =>
+            item.Label == "Tijdens geboekte 300-tijd" && item.Phase == "During");
+        Assert.Contains(detail.GpsContext.Events, item =>
+            (item.Detail ?? string.Empty).Contains("Depot A", StringComparison.Ordinal)
+            || item.Label.Contains("Depot A", StringComparison.Ordinal));
         Assert.DoesNotContain(detail.GpsContext.Events, item =>
-            (item.Detail ?? string.Empty).Contains("thuis", StringComparison.OrdinalIgnoreCase)
-            && !(item.Detail ?? string.Empty).Contains("Depot", StringComparison.Ordinal));
+            ((item.Detail ?? string.Empty) + item.Label).Contains("thuis", StringComparison.OrdinalIgnoreCase)
+            && !((item.Detail ?? string.Empty) + item.Label).Contains("Depot", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void GpsPending_ShowsLoadingState_WithoutBlockingDetail()
+    {
+        var admin = AdminCase(101, 1m);
+        var day = new[] { Performance(101, "08:00", "09:00", 1m) };
+
+        var detail = PayrollProject300WorkbenchBuilder.BuildDetail(
+            admin,
+            day,
+            [],
+            gps: null,
+            gpsPending: true);
+
+        Assert.Single(detail.BookedRows);
+        Assert.True(detail.GpsContext.IsLoading);
+        Assert.False(detail.GpsContext.Available);
+        Assert.Equal(PayrollProject300WorkbenchBuilder.GpsLoadingSummary, detail.GpsContext.Summary);
+        Assert.Equal("Pending", detail.GpsContext.MappingKind);
+        Assert.Empty(detail.GpsContext.Events);
+    }
+
+    [Fact]
+    public void GpsContext_HumanBeforeDuringAfter_Labels()
+    {
+        var admin = AdminCase(101, 2m);
+        var day = new[] { Performance(101, "10:00", "12:00", 2m) };
+        var gps = new StandbyGpsDayEvidence(
+            "10",
+            Day,
+            HasVehicleMapping: true,
+            MappingAmbiguous: false,
+            ObjectId: "OBJ-9",
+            RegistrationPlate: "1-XYZ-999",
+            MappingReason: "Resolved",
+            Trips:
+            [
+                new StandbyGpsTripEvidence(
+                    "before",
+                    At("09:00"),
+                    At("09:30"),
+                    DistanceKilometres: 0.2m,
+                    DrivingMinutes: 5,
+                    StartAddress: "Depot A",
+                    EndAddress: "Meise stilstand",
+                    ObjectId: "OBJ-9",
+                    VehiclePlate: "1-XYZ-999"),
+                new StandbyGpsTripEvidence(
+                    "during",
+                    At("10:15"),
+                    At("11:00"),
+                    DistanceKilometres: 3.5m,
+                    DrivingMinutes: 20,
+                    StartAddress: "Werf Noord",
+                    EndAddress: "Werf Noord",
+                    ObjectId: "OBJ-9",
+                    VehiclePlate: "1-XYZ-999"),
+                new StandbyGpsTripEvidence(
+                    "after",
+                    At("12:10"),
+                    At("12:40"),
+                    DistanceKilometres: 8.0m,
+                    DrivingMinutes: 25,
+                    StartAddress: "Werf Noord",
+                    EndAddress: "Magazijn Zuid",
+                    ObjectId: "OBJ-9",
+                    VehiclePlate: "1-XYZ-999"),
+            ],
+            MappingKind: "Plate");
+
+        var detail = PayrollProject300WorkbenchBuilder.BuildDetail(admin, day, [], gps);
+
+        Assert.True(detail.GpsContext.Available);
+        Assert.Contains(PayrollProject300CaseDetail.GpsNeverValidatesNote, detail.GpsContext.Summary);
+
+        var before = Assert.Single(detail.GpsContext.Events, item => item.Phase == "Before");
+        Assert.Contains("Voor: stilstand", before.Label, StringComparison.Ordinal);
+        Assert.Contains("Meise stilstand", before.Label, StringComparison.Ordinal);
+
+        var during = Assert.Single(detail.GpsContext.Events, item => item.Phase == "During");
+        Assert.Equal("Tijdens geboekte 300-tijd", during.Label);
+        Assert.Contains("Werf Noord", during.Detail!, StringComparison.Ordinal);
+
+        Assert.Contains(
+            detail.GpsContext.Events,
+            item => item.Phase == "After" && item.Label == "Na: vertrek");
+        Assert.Contains(
+            detail.GpsContext.Events,
+            item => item.Phase == "After" && item.Label.StartsWith("Na: aankomst:", StringComparison.Ordinal)
+                && item.Label.Contains("Magazijn Zuid", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ActivityDictionary_EnablesCustomerWorkSupport()
+    {
+        var admin = AdminCase(101, 1m);
+        var day = new[] { Performance(101, "08:00", "09:00", 1m, hfdTaakId: 7) };
+        var activities = new Dictionary<long, PayrollProject300ResolvedActivity>
+        {
+            [101] = new(
+                PerformanceId: 101,
+                ActivityType: "CustomerWork",
+                Supported: true,
+                Message: "VAN/TOT-correctie beschikbaar (CustomerWork via HFDTAAK 7).",
+                FriendlyTaskName: "HFDTAAK 7 (CW: Klantwerk)"),
+        };
+
+        var detail = PayrollProject300WorkbenchBuilder.BuildDetail(
+            admin,
+            day,
+            [],
+            gps: null,
+            activityByPerformanceId: activities);
+
+        var supported = Assert.Single(
+            detail.CorrectionTargets,
+            item => item.CorrectionCapability == PayrollProject300CorrectionCapability.SupportedVanTot);
+        Assert.Equal("CustomerWork", supported.ActivityType);
+        Assert.Equal("HFDTAAK 7 (CW: Klantwerk)", supported.FriendlyTaskName);
+        Assert.Contains(
+            detail.CorrectionTargets,
+            item => item.CorrectionCapability == PayrollProject300CorrectionCapability.ZeroDeleteUnavailable);
+    }
+
+    [Fact]
+    public void BuildProjectDisplayLabel_Project300()
+    {
+        Assert.Equal(
+            "Project 300",
+            PayrollProject300WorkbenchBuilder.BuildProjectDisplayLabel(300, projectId: "49432"));
+        Assert.Equal(
+            "BON 7788",
+            PayrollProject300WorkbenchBuilder.BuildProjectDisplayLabel(300, projectId: "49432", bonNr: "7788"));
+        Assert.Equal("—", PayrollProject300WorkbenchBuilder.BuildProjectDisplayLabel(null, projectId: "49432"));
+    }
+
+    [Fact]
+    public void BookedRows_SetProjectDisplayLabelAndProjectNumber()
+    {
+        var admin = AdminCase(101, 1m);
+        var day = new[] { Performance(101, "08:00", "09:00", 1m) };
+
+        var detail = PayrollProject300WorkbenchBuilder.BuildDetail(admin, day, [], gps: null);
+        var row = Assert.Single(detail.BookedRows);
+
+        Assert.Equal(300, row.ProjectNumber);
+        Assert.Equal("Project 300", row.ProjectDisplayLabel);
     }
 
     [Fact]

@@ -37,7 +37,9 @@ public sealed record PayrollProject300BookedRow(
     string? ProjectId,
     string? BonNr,
     int? HfdTaakId,
-    bool IsSelected);
+    bool IsSelected,
+    string? ProjectDisplayLabel = null,
+    int? ProjectNumber = null);
 
 public sealed record PayrollProject300PlanningRow(
     TimeOnly? TimeFrom,
@@ -67,7 +69,8 @@ public sealed record PayrollProject300GpsEvent(
     DateTimeOffset At,
     DateTimeOffset? End,
     string Label,
-    string? Detail);
+    string? Detail,
+    string Phase = "");
 
 public sealed record PayrollProject300GpsContext(
     bool Available,
@@ -75,7 +78,9 @@ public sealed record PayrollProject300GpsContext(
     IReadOnlyList<PayrollProject300GpsEvent> Events,
     string MappingKind,
     string? ObjectIdCollapsed,
-    IReadOnlyList<StandbyGpsTripEvidence> TripsCollapsed);
+    IReadOnlyList<StandbyGpsTripEvidence> TripsCollapsed,
+    bool IsLoading = false,
+    string? CacheStatus = null);
 
 public enum PayrollProject300CorrectionCapability
 {
@@ -92,9 +97,31 @@ public sealed record PayrollProject300CorrectionTarget(
     int? HfdTaakId,
     string? ActivityType,
     PayrollProject300CorrectionCapability CorrectionCapability,
-    string CapabilityMessage);
+    string CapabilityMessage,
+    string? FriendlyTaskName = null);
 
 public sealed record PayrollProject300WorkbenchMetrics(
     int PlenionPerformanceQueries,
     int PlenionPlanningQueries,
-    int PowerFleetApiCalls);
+    int PowerFleetApiCalls,
+    bool GpsDeferred = false,
+    bool GpsCacheHit = false);
+
+/// <summary>
+/// Pre-resolved PWS activity for a concrete PerformanceId (no invented ID map).
+/// </summary>
+public sealed record PayrollProject300ResolvedActivity(
+    long PerformanceId,
+    string? ActivityType,
+    bool Supported,
+    string Message,
+    string? FriendlyTaskName);
+
+public enum PayrollProject300GpsCacheHint
+{
+    Unknown = 0,
+    Cached = 1,
+    Loading = 2,
+    Unavailable = 3,
+    Available = 4,
+}

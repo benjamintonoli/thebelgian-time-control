@@ -35,6 +35,8 @@ public sealed class WorkbenchModel(
     [BindProperty] public string? CorrectionReason { get; set; }
 
     public PayrollProject300WorkbenchPage? Workbench { get; private set; }
+    public IReadOnlyDictionary<string, PayrollProject300GpsCacheHint> GpsHints { get; private set; } =
+        new Dictionary<string, PayrollProject300GpsCacheHint>(StringComparer.Ordinal);
     public string? Message { get; private set; }
     public string? Error { get; private set; }
 
@@ -186,9 +188,61 @@ public sealed class WorkbenchModel(
         }
     }
 
+    public async Task<IActionResult> OnGetGpsAsync(string adminCaseKey, CancellationToken cancellationToken)
+    {
+        if (!EnsureUiEnabled())
+        {
+            return NotFound();
+        }
+
+        try
+        {
+            var result = await workbenchService.GetGpsContextAsync(
+                Year,
+                Month,
+                adminCaseKey,
+                prefetchNext: true,
+                cancellationToken);
+            return new JsonResult(new
+            {
+                ok = true,
+                adminCaseKey = result.AdminCaseKey,
+                available = result.GpsContext.Available,
+                isLoading = result.GpsContext.IsLoading,
+                summary = result.GpsContext.Summary,
+                neverValidates = PayrollProject300CaseDetail.GpsNeverValidatesNote,
+                cacheHit = result.CacheHit,
+                powerFleetApiCalls = result.PowerFleetApiCalls,
+                prefetchAdminCaseKey = result.PrefetchAdminCaseKey,
+                events = result.GpsContext.Events.Select(item => new
+                {
+                    at = item.At.ToString("HH:mm", CultureInfo.InvariantCulture),
+                    end = item.End?.ToString("HH:mm", CultureInfo.InvariantCulture),
+                    label = item.Label,
+                    detail = item.Detail,
+                    phase = item.Phase,
+                }),
+                mappingKind = result.GpsContext.MappingKind,
+                objectId = result.GpsContext.ObjectIdCollapsed,
+            });
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "GPS load failed for {AdminCaseKey}", adminCaseKey);
+            return new JsonResult(new
+            {
+                ok = true,
+                available = false,
+                summary = PayrollProject300WorkbenchBuilder.MissingGpsSummary,
+                neverValidates = PayrollProject300CaseDetail.GpsNeverValidatesNote,
+                events = Array.Empty<object>(),
+            });
+        }
+    }
+
     private async Task LoadAsync(CancellationToken cancellationToken)
     {
-        Workbench = await workbenchService.GetWorkbenchAsync(
+        Workbench = await workbenchService.GetCoreDetailAsync(
             Year,
             Month,
             new PayrollReviewQueueFilter(
@@ -198,6 +252,17 @@ public sealed class WorkbenchModel(
                 Scope: Scope),
             Focus,
             cancellationToken);
+
+        var hints = new Dictionary<string, PayrollProject300GpsCacheHint>(StringComparer.Ordinal);
+        if (Workbench is not null)
+        {
+            foreach (var item in Workbench.Cases)
+            {
+                hints[item.AdminCaseKey] = workbenchService.GetGpsCacheHint(item.ResourceId, item.Date);
+            }
+        }
+
+        GpsHints = hints;
     }
 
     private bool EnsureUiEnabled() =>
