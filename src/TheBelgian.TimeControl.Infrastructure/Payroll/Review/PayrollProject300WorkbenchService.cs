@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TheBelgian.TimeControl.Core.Configuration;
@@ -31,6 +32,9 @@ internal sealed class PayrollProject300WorkbenchService(
     PayrollProject300HfdCache hfdCache,
     IDbContextFactory<TimeControlDbContext> contextFactory,
     IOptions<PayrollShadowOptions> shadowOptions,
+    IOptions<KnownLocationsOptions> knownLocationsOptions,
+    IOptions<PayrollWorkbenchOptions> workbenchOptions,
+    IHostEnvironment hostEnvironment,
     TimeProvider timeProvider,
     ILogger<PayrollProject300WorkbenchService> logger) : IPayrollProject300WorkbenchService
 {
@@ -38,6 +42,13 @@ internal sealed class PayrollProject300WorkbenchService(
     private readonly ConcurrentDictionary<string, byte> _prefetchInFlight = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, Task<(StandbyGpsDayEvidence? Evidence, bool CacheHit, int ApiCalls)>> _gpsFlights =
         new(StringComparer.Ordinal);
+
+    private KnownLocationCatalog CreateKnownLocations() =>
+        KnownLocationCatalog.FromOptions(knownLocationsOptions.Value);
+
+    private bool IncludeTechnicalDiagnostics =>
+        workbenchOptions.Value.ShowDiagnostics || hostEnvironment.IsDevelopment();
+
 
     public Task<PayrollProject300WorkbenchPage> GetWorkbenchAsync(
         int year,
@@ -212,7 +223,9 @@ internal sealed class PayrollProject300WorkbenchService(
             performances,
             [],
             evidence,
-            gpsPending: false).GpsContext;
+            gpsPending: false,
+            knownLocations: CreateKnownLocations(),
+            includeTechnicalDiagnostics: IncludeTechnicalDiagnostics).GpsContext;
         gpsContextCache.Set(selected.AdminCaseKey, gpsContext);
 
         var (prefetchKey2, prefetchStarted2) = prefetchNext
@@ -434,7 +447,9 @@ internal sealed class PayrollProject300WorkbenchService(
             performances,
             planning,
             null,
-            gpsPending: true);
+            gpsPending: true,
+            knownLocations: CreateKnownLocations(),
+            includeTechnicalDiagnostics: IncludeTechnicalDiagnostics);
         var byId = performances.ToDictionary(item => item.SourceEntryId);
         foreach (var row in probe.BookedRows)
         {
@@ -478,7 +493,9 @@ internal sealed class PayrollProject300WorkbenchService(
             cacheHit ? cachedGps : null,
             gpsPending: !cacheHit,
             activities,
-            bonMemo);
+            bonMemo,
+            CreateKnownLocations(),
+            IncludeTechnicalDiagnostics);
 
         if (cacheHit && !detail.GpsContext.IsLoading)
         {

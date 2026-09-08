@@ -128,20 +128,20 @@ else
                 <ul class="list-unstyled p300-day-timeline mb-0" id="p300-day-timeline">
                     @foreach (var entry in detail.DayTimeline)
                     {
-                        <li class="d-flex gap-2 py-2 border-bottom @(entry.IsSelected300 ? "bg-light" : "")">
-                            <div class="text-nowrap small fw-semibold" style="min-width: 5.5rem;">
+                        <li class="d-flex gap-2 py-2 border-bottom p300-tl-row @(entry.IsSelected300 ? "p300-tl-selected" : "")">
+                            <div class="text-nowrap small fw-semibold p300-tl-time" style="min-width: 5.5rem;">
                                 @FmtTime(entry.Start)@if (entry.End is { } e) { <span>–@e.ToString("HH:mm")</span> }
                             </div>
-                            <div>
-                                <span class="badge text-bg-secondary">@entry.Badge</span>
-                                <span class="@(entry.IsSelected300 ? "fw-semibold" : "")">@entry.Title</span>
+                            <div class="p300-tl-body">
+                                <span class="badge p300-badge p300-badge-@entry.Badge.ToLowerInvariant()">@entry.Badge</span>
+                                <span class="p300-tl-title @(entry.IsSelected300 ? "fw-semibold" : "")">@entry.Title</span>
                                 @if (!string.IsNullOrWhiteSpace(entry.Subtitle))
                                 {
-                                    <div class="small text-muted">@entry.Subtitle</div>
+                                    <div class="small p300-tl-sub">@entry.Subtitle</div>
                                 }
                                 @if (!string.IsNullOrWhiteSpace(entry.SecondaryDetail) && entry.Kind == PayrollProject300DayTimelineKind.Gps)
                                 {
-                                    <div class="small text-muted">@entry.SecondaryDetail</div>
+                                    <div class="small p300-tl-secondary">@entry.SecondaryDetail</div>
                                 }
                             </div>
                         </li>
@@ -175,23 +175,18 @@ else
             <div class="small text-success d-none" id="wb-corr-ok"></div>
         </section>
 
-        <details class="small text-muted mb-5">
-            <summary>Technische details</summary>
-            <ul class="mb-0">
-                @foreach (var note in detail.TechnicalCollapsedNotes)
-                {
-                    <li>@note</li>
-                }
-                @foreach (var key in selected.FindingKeys)
-                {
-                    <li>@key</li>
-                }
-                @foreach (var row in detail.BookedRows)
-                {
-                    <li>Performance #@row.PerformanceId · HFDTAAK @(row.HfdTaakId?.ToString(CultureInfo.InvariantCulture) ?? "—")</li>
-                }
-            </ul>
-        </details>
+        @if (Model.ShowDiagnostics && detail.TechnicalCollapsedNotes.Count > 0)
+        {
+            <details class="small text-muted mb-5">
+                <summary>Technische details (diagnostiek)</summary>
+                <ul class="mb-0">
+                    @foreach (var note in detail.TechnicalCollapsedNotes)
+                    {
+                        <li>@note</li>
+                    }
+                </ul>
+            </details>
+        }
 
         <div class="p300-sticky-decisions border-top bg-white pt-3 pb-2" id="decision-card">
             <div class="text-uppercase small text-muted fw-semibold mb-2">Beslissing</div>

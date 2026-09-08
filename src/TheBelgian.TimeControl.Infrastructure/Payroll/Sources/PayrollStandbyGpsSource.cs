@@ -210,9 +210,16 @@ internal sealed class PayrollStandbyGpsSource(
                 item.EndDateTime,
                 item.DistanceKilometres,
                 item.DrivingMinutes,
-                item.StartAddress,
-                item.EndAddress,
+                PreferLabel(item.StartAddress, item.StartLocation),
+                PreferLabel(item.EndAddress, item.EndLocation),
                 item.ObjectId,
-                item.VehiclePlate))
+                item.VehiclePlate,
+                item.StartLatitude,
+                item.StartLongitude,
+                item.EndLatitude,
+                item.EndLongitude))
             .ToList();
+
+    private static string? PreferLabel(string? address, string? location) =>
+        string.IsNullOrWhiteSpace(address) ? location : address;
 }

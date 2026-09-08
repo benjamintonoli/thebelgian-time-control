@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using TheBelgian.TimeControl.Core.Configuration;
 using TheBelgian.TimeControl.Core.Interfaces;
@@ -16,7 +17,9 @@ public sealed class WorkbenchModel(
     IPayrollReviewQueueService reviewQueueService,
     ICurrentUserContext currentUser,
     IOptions<PayrollShadowOptions> payrollOptions,
+    IOptions<PayrollWorkbenchOptions> workbenchOptions,
     IOptions<AdminReviewWorkflowOptions> reviewOptions,
+    IHostEnvironment hostEnvironment,
     ILogger<WorkbenchModel> logger) : PageModel
 {
     [BindProperty(SupportsGet = true)] public int Year { get; set; }
@@ -37,6 +40,8 @@ public sealed class WorkbenchModel(
     public PayrollProject300WorkbenchPage? Workbench { get; private set; }
     public IReadOnlyDictionary<string, PayrollProject300GpsCacheHint> GpsHints { get; private set; } =
         new Dictionary<string, PayrollProject300GpsCacheHint>(StringComparer.Ordinal);
+    public bool ShowDiagnostics =>
+        workbenchOptions.Value.ShowDiagnostics || hostEnvironment.IsDevelopment();
     public string? Message { get; private set; }
     public string? Error { get; private set; }
 
@@ -244,8 +249,6 @@ public sealed class WorkbenchModel(
                 summary = result.GpsContext.Summary,
                 neverValidates = PayrollProject300CaseDetail.GpsNeverValidatesNote,
                 cacheHit = result.CacheHit,
-                powerFleetApiCalls = result.PowerFleetApiCalls,
-                prefetchAdminCaseKey = result.PrefetchAdminCaseKey,
                 events = result.GpsContext.Events.Select(item => new
                 {
                     at = item.At.ToString("HH:mm", CultureInfo.InvariantCulture),
@@ -254,8 +257,6 @@ public sealed class WorkbenchModel(
                     detail = item.Detail,
                     phase = item.Phase,
                 }),
-                mappingKind = result.GpsContext.MappingKind,
-                objectId = result.GpsContext.ObjectIdCollapsed,
             });
         }
         catch (Exception exception)

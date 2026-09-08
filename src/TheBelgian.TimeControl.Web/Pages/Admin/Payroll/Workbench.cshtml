@@ -155,7 +155,39 @@ else
   z-index: 5;
   box-shadow: 0 -6px 16px rgba(0,0,0,.04);
 }
-.p300-day-timeline .badge { font-size: .65rem; }
+.p300-day-timeline .p300-tl-time,
+.p300-day-timeline .p300-tl-title,
+.p300-day-timeline .p300-tl-sub {
+  color: #1a1d21;
+}
+.p300-day-timeline .p300-tl-secondary {
+  color: #495057;
+}
+.p300-tl-selected {
+  background: #f1f3f5;
+}
+.p300-badge {
+  font-size: .7rem;
+  font-weight: 600;
+  letter-spacing: .02em;
+  border: 1px solid transparent;
+}
+.p300-badge-gps {
+  background: #0b3d5c;
+  color: #fff;
+}
+.p300-badge-300 {
+  background: #7a1f1f;
+  color: #fff;
+}
+.p300-badge-planning {
+  background: #1b4332;
+  color: #fff;
+}
+.p300-badge-prestatie {
+  background: #343a40;
+  color: #fff;
+}
 @@media (min-width: 992px) {
   .payroll-p300-workbench { grid-template-columns: minmax(260px, 32%) minmax(0, 68%); }
 }

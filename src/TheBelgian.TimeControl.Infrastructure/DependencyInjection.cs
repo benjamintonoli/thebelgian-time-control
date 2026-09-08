@@ -89,6 +89,10 @@ public static class DependencyInjection
                 }
             }, "PayrollActions-configuratie is ongeldig.")
             .ValidateOnStart();
+        services.AddOptions<KnownLocationsOptions>()
+            .Bind(configuration.GetSection(KnownLocationsOptions.SectionName));
+        services.AddOptions<PayrollWorkbenchOptions>()
+            .Bind(configuration.GetSection(PayrollWorkbenchOptions.SectionName));
         services.AddOptions<CloudflareAccessOptions>()
             .Bind(configuration.GetSection(CloudflareAccessOptions.SectionName))
             .Validate(options => !options.Enabled ||

@@ -85,7 +85,12 @@ public sealed class PayrollProject300WorkbenchTests
             Reservation(taskTypeId: 3, projectNumber: 300, from: "13:00", to: "14:00", subject: "Verlof"),
         };
 
-        var detail = PayrollProject300WorkbenchBuilder.BuildDetail(admin, day, planning, gps: null);
+        var detail = PayrollProject300WorkbenchBuilder.BuildDetail(
+            admin,
+            day,
+            planning,
+            gps: null,
+            includeTechnicalDiagnostics: true);
 
         Assert.Equal("Geen", detail.MatchingReservationLabel);
         Assert.All(detail.DayPlanningRows, row => Assert.False(row.IsMatchingSupport));
@@ -163,20 +168,36 @@ public sealed class PayrollProject300WorkbenchTests
             ],
             MappingKind: "Plate");
 
-        var detail = PayrollProject300WorkbenchBuilder.BuildDetail(admin, day, [], gps);
+        var detail = PayrollProject300WorkbenchBuilder.BuildDetail(
+            admin,
+            day,
+            [],
+            gps,
+            includeTechnicalDiagnostics: true);
 
         Assert.True(detail.GpsContext.Available);
         Assert.Equal("Geen", detail.MatchingReservationLabel);
         Assert.Contains(PayrollProject300CaseDetail.GpsNeverValidatesNote, detail.GpsContext.Summary);
         Assert.Contains(PayrollProject300CaseDetail.GpsNeverValidatesNote, detail.TechnicalCollapsedNotes);
         Assert.Contains(detail.GpsContext.Events, item =>
-            item.Label.Contains("300-tijd", StringComparison.Ordinal) && item.Phase is "During" or "Overlap" or "Departure");
+            item.Label.Contains("Vertrek", StringComparison.Ordinal)
+            || item.Label.Contains("Aankomst", StringComparison.Ordinal)
+            || item.Label.Contains("stilstand", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(detail.GpsContext.Events, item =>
-            (item.Detail ?? string.Empty).Contains("Depot A", StringComparison.Ordinal)
-            || item.Label.Contains("Depot A", StringComparison.Ordinal));
+            ((item.Detail ?? string.Empty) + item.Label).Contains("Depot A", StringComparison.Ordinal)
+            || item.Label.Contains("Depot", StringComparison.Ordinal));
         Assert.DoesNotContain(detail.GpsContext.Events, item =>
             ((item.Detail ?? string.Empty) + item.Label).Contains("thuis", StringComparison.OrdinalIgnoreCase)
             && !((item.Detail ?? string.Empty) + item.Label).Contains("Depot", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ProductionDetail_OmitsTechnicalDiagnosticsByDefault()
+    {
+        var admin = AdminCase(101, 2m);
+        var day = new[] { Performance(101, "10:00", "12:00", 2m) };
+        var detail = PayrollProject300WorkbenchBuilder.BuildDetail(admin, day, [], gps: null);
+        Assert.Empty(detail.TechnicalCollapsedNotes);
     }
 
     [Fact]
@@ -219,10 +240,10 @@ public sealed class PayrollProject300WorkbenchTests
                     "before",
                     At("09:00"),
                     At("09:30"),
-                    DistanceKilometres: 0.2m,
-                    DrivingMinutes: 5,
-                    StartAddress: "Depot A",
-                    EndAddress: "Meise stilstand",
+                    DistanceKilometres: 4.2m,
+                    DrivingMinutes: 20,
+                    StartAddress: "1785 Merchtem",
+                    EndAddress: "1861 Meise",
                     ObjectId: "OBJ-9",
                     VehiclePlate: "1-XYZ-999"),
                 new StandbyGpsTripEvidence(
@@ -231,8 +252,8 @@ public sealed class PayrollProject300WorkbenchTests
                     At("11:00"),
                     DistanceKilometres: 3.5m,
                     DrivingMinutes: 20,
-                    StartAddress: "Werf Noord",
-                    EndAddress: "Werf Noord",
+                    StartAddress: "1861 Meise",
+                    EndAddress: "1000 Brussel",
                     ObjectId: "OBJ-9",
                     VehiclePlate: "1-XYZ-999"),
                 new StandbyGpsTripEvidence(
@@ -241,8 +262,8 @@ public sealed class PayrollProject300WorkbenchTests
                     At("12:40"),
                     DistanceKilometres: 8.0m,
                     DrivingMinutes: 25,
-                    StartAddress: "Werf Noord",
-                    EndAddress: "Magazijn Zuid",
+                    StartAddress: "1000 Brussel",
+                    EndAddress: "2800 Mechelen",
                     ObjectId: "OBJ-9",
                     VehiclePlate: "1-XYZ-999"),
             ],
@@ -253,21 +274,160 @@ public sealed class PayrollProject300WorkbenchTests
         Assert.True(detail.GpsContext.Available);
         Assert.Contains(PayrollProject300CaseDetail.GpsNeverValidatesNote, detail.GpsContext.Summary);
 
-        var before = Assert.Single(detail.GpsContext.Events, item => item.Phase == "Before");
-        Assert.Contains("Voor: stilstand", before.Label, StringComparison.Ordinal);
-        Assert.Contains("Meise stilstand", before.Label, StringComparison.Ordinal);
+        Assert.Contains(detail.GpsContext.Events, item =>
+            item.Phase == "Before" && item.Label.Contains("Vertrek", StringComparison.Ordinal));
+        Assert.Contains(detail.GpsContext.Events, item =>
+            item.Phase == "Before" && item.Label.Contains("Aankomst", StringComparison.Ordinal)
+            && item.Label.Contains("Meise", StringComparison.Ordinal));
 
-        var during = Assert.Single(detail.GpsContext.Events, item => item.Phase is "During" or "Overlap" or "Departure");
-        Assert.Contains("300-tijd", during.Label, StringComparison.Ordinal);
-        Assert.Contains("Werf", during.Label + (during.Detail ?? string.Empty), StringComparison.Ordinal);
+        Assert.Contains(detail.DayTimeline!, item =>
+            item.Badge == "GPS" && item.Title.Contains("Vertrek", StringComparison.Ordinal)
+            && item.Title.Contains("Meise", StringComparison.Ordinal));
+        Assert.Contains(detail.DayTimeline!, item =>
+            item.Badge == "GPS" && item.Title.Contains("Aankomst", StringComparison.Ordinal)
+            && item.Title.Contains("Brussel", StringComparison.Ordinal));
+        Assert.Contains(detail.DayTimeline!, item =>
+            item.Badge == "GPS" && item.Title.Contains("Vertrek", StringComparison.Ordinal)
+            && item.Title.Contains("Brussel", StringComparison.Ordinal));
+        Assert.Contains(detail.DayTimeline!, item =>
+            item.Badge == "GPS" && item.Title.Contains("Aankomst", StringComparison.Ordinal)
+            && item.Title.Contains("Mechelen", StringComparison.Ordinal));
+    }
 
-        Assert.Contains(
-            detail.GpsContext.Events,
-            item => item.Phase == "After" && item.Label == "Na: vertrek");
-        Assert.Contains(
-            detail.GpsContext.Events,
-            item => item.Phase == "After" && item.Label.StartsWith("Na: aankomst:", StringComparison.Ordinal)
-                && item.Label.Contains("Magazijn Zuid", StringComparison.Ordinal));
+    [Fact]
+    public void TripChain_IncompleteDestination_DoesNotInventArrival()
+    {
+        var trips = new[]
+        {
+            new StandbyGpsTripEvidence(
+                "open",
+                At("09:00"),
+                At("09:30"),
+                DistanceKilometres: 5m,
+                DrivingMinutes: 20,
+                StartAddress: "1785 Merchtem",
+                EndAddress: null,
+                ObjectId: "OBJ",
+                VehiclePlate: "1-AAA"),
+        };
+
+        var chain = PayrollProject300WorkbenchBuilder.BuildGpsTripChainEntries(
+            trips,
+            At("10:00"),
+            At("11:00"));
+
+        Assert.Contains(chain, item => item.Title.Contains("Vertrek", StringComparison.Ordinal));
+        Assert.Contains(chain, item =>
+            item.Subtitle != null
+            && item.Subtitle.Contains("bestemming niet betrouwbaar", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(chain, item =>
+            item.Title.StartsWith("Aankomst", StringComparison.Ordinal)
+            && !item.Title.Contains("onvolledig", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ExactOverlap_Wording_IncludesMinutes()
+    {
+        var wording = PayrollProject300WorkbenchBuilder.FormatExactOverlapWording(
+            At("10:50"),
+            At("11:05"),
+            At("10:00"),
+            At("11:00"));
+        Assert.Equal("Vertrek tijdens 300-boeking", wording);
+
+        var partial = PayrollProject300WorkbenchBuilder.FormatExactOverlapWording(
+            At("09:55"),
+            At("10:05"),
+            At("10:00"),
+            At("12:00"));
+        Assert.Contains("Aankomst", partial!, StringComparison.Ordinal);
+        Assert.Contains("vóór einde 300-boeking", partial!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void KnownLocation_InsideRadius_AliasesTheBelgian()
+    {
+        var catalog = new KnownLocationCatalog(
+        [
+            new KnownLocationDefinition(
+                "The Belgian",
+                "Meise",
+                50.984487,
+                4.300723,
+                120,
+                "Slozenstraat 86, 1861 Meise"),
+        ]);
+
+        var inside = catalog.Resolve(50.98450m, 4.30080m, "Slozenstraat 84, 1861 Meise");
+        Assert.True(inside.MatchedByGeofence);
+        Assert.Equal("The Belgian — Meise", inside.Primary);
+
+        var outside = catalog.Resolve(50.99000m, 4.31000m, "1785 Merchtem");
+        Assert.False(outside.MatchedByGeofence);
+        Assert.Equal("Merchtem", outside.Primary);
+
+        var absent = KnownLocationCatalog.Empty.Resolve(50.98450m, 4.30080m, "Slozenstraat 86, 1861 Meise");
+        Assert.False(absent.MatchedByGeofence);
+        Assert.Equal("Meise", absent.Primary);
+    }
+
+    [Fact]
+    public void TripChain_KnownLocation_OnArrivalDeparture()
+    {
+        var catalog = new KnownLocationCatalog(
+        [
+            new KnownLocationDefinition("The Belgian", "Meise", 50.984487, 4.300723, 120, "Slozenstraat 86"),
+        ]);
+        var trips = new[]
+        {
+            new StandbyGpsTripEvidence(
+                "to-hq",
+                At("06:37"),
+                At("06:52"),
+                DistanceKilometres: 8m,
+                DrivingMinutes: 15,
+                StartAddress: "1785 Merchtem",
+                EndAddress: "Slozenstraat 84, 1861 Meise",
+                ObjectId: "OBJ",
+                VehiclePlate: "1-AAA",
+                StartLatitude: 50.97000m,
+                StartLongitude: 4.28000m,
+                EndLatitude: 50.98450m,
+                EndLongitude: 4.30080m),
+            new StandbyGpsTripEvidence(
+                "from-hq",
+                At("06:55"),
+                At("07:31"),
+                DistanceKilometres: 12m,
+                DrivingMinutes: 36,
+                StartAddress: "Slozenstraat 86, 1861 Meise",
+                EndAddress: "1000 Brussel",
+                ObjectId: "OBJ",
+                VehiclePlate: "1-AAA",
+                StartLatitude: 50.98448m,
+                StartLongitude: 4.30072m,
+                EndLatitude: 50.85000m,
+                EndLongitude: 4.35000m),
+        };
+
+        var chain = PayrollProject300WorkbenchBuilder.BuildGpsTripChainEntries(
+            trips,
+            At("06:35"),
+            At("06:55"),
+            catalog);
+
+        Assert.Contains(chain, item => item.Title == "Aankomst The Belgian — Meise");
+        Assert.Contains(chain, item => item.Title == "Vertrek The Belgian — Meise");
+        Assert.Contains(chain, item => item.Title.Contains("Aankomst", StringComparison.Ordinal)
+            && item.Title.Contains("Brussel", StringComparison.Ordinal));
+        Assert.Contains(chain, item =>
+            item.Title == "Vertrek The Belgian — Meise"
+            || (item.Subtitle != null && item.Subtitle.Contains("Vertrek tijdens 300-boeking", StringComparison.Ordinal)));
+        Assert.Contains(chain, item =>
+            item.Subtitle != null && (
+                item.Subtitle.Contains("Overlapt", StringComparison.Ordinal)
+                || item.Subtitle.Contains("Vertrek tijdens", StringComparison.Ordinal)
+                || item.Subtitle.Contains("Aankomst", StringComparison.Ordinal)));
     }
 
     [Fact]
@@ -408,7 +568,8 @@ public sealed class PayrollProject300WorkbenchTests
             day,
             [],
             gps: null,
-            bonTechnicianRemark: "BON technieker memo");
+            bonTechnicianRemark: "BON technieker memo",
+            includeTechnicalDiagnostics: true);
 
         var tech = detail.TechnicianContext;
         Assert.NotNull(tech);

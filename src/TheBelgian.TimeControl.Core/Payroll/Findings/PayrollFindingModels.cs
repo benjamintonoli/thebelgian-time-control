@@ -63,7 +63,11 @@ public sealed record StandbyGpsTripEvidence(
     string? StartAddress,
     string? EndAddress,
     string? ObjectId,
-    string? VehiclePlate);
+    string? VehiclePlate,
+    decimal? StartLatitude = null,
+    decimal? StartLongitude = null,
+    decimal? EndLatitude = null,
+    decimal? EndLongitude = null);
 
 public sealed record StandbyGpsDayEvidence(
     string ResourceId,
