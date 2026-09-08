@@ -122,7 +122,18 @@ else
                                     <span>@(item.TimeIntervalSummary ?? item.BookedSummary ?? "—")</span>
                                     <span>@PayrollTriageEvidence.FormatHours(item.TotalBookedHours)</span>
                                 </div>
-                                <div class="queue-customer">@(item.PerformanceDescriptionSummary ?? item.IssueSummary)</div>
+                                @{
+                                    var techPreview = wb.TechnicianQueuePreviews?.GetValueOrDefault(item.AdminCaseKey)
+                                        ?? item.PerformanceDescriptionSummary;
+                                }
+                                @if (!string.IsNullOrWhiteSpace(techPreview))
+                                {
+                                    <div class="queue-customer text-truncate" title="@techPreview">“@techPreview”</div>
+                                }
+                                else
+                                {
+                                    <div class="queue-customer text-muted">@item.IssueSummary</div>
+                                }
                                 <div class="queue-case-bottom">
                                     <span class="queue-status">@PayrollGuidedDecisions.AdminStatusLabel(item.WorkflowStatus)</span>
                                     @{
@@ -177,8 +188,6 @@ else
                     {
                         <div class="border rounded p-2 mb-2">
                             <div class="fw-semibold">@FmtTime(row.Start)–@FmtTime(row.End) · @FmtHours(row.AtlHours)</div>
-                            <div class="small">Omschrijving: @(string.IsNullOrWhiteSpace(row.Description) ? "—" : row.Description)</div>
-                            <div class="small">Memo: @(string.IsNullOrWhiteSpace(row.Memo) ? "—" : row.Memo)</div>
                             <div class="small text-muted">
                                 <span>@(row.ProjectDisplayLabel ?? "Project 300")</span>
                                 @if (!string.IsNullOrWhiteSpace(row.BonNr)) { <span class="ms-2">BON @row.BonNr</span> }
@@ -194,7 +203,56 @@ else
                 </section>
 
                 <section class="mb-3">
-                    <h3 class="h6 text-uppercase text-muted">B. Planning</h3>
+                    <h3 class="h6 text-uppercase text-muted">B. Uitleg technieker</h3>
+                    @{
+                        var tech = detail.TechnicianContext;
+                    }
+                    @if (tech is null || !tech.HasAnyTechnicianText)
+                    {
+                        <div class="small text-muted">@PayrollProject300CaseDetail.NoTechnicianRemarkMessage</div>
+                    }
+                    else
+                    {
+                        @if (!string.IsNullOrWhiteSpace(tech.BonTechnicianRemark))
+                        {
+                            <div class="border-start border-3 border-primary ps-2 mb-2">
+                                <div class="small text-uppercase text-muted fw-semibold">Techniekeropmerking BON@(string.IsNullOrWhiteSpace(tech.BonNr) ? "" : $" · {tech.BonNr}")</div>
+                                <div class="small" style="white-space: pre-wrap;">@tech.BonTechnicianRemark</div>
+                            </div>
+                        }
+                        @foreach (var remark in tech.PerformanceRemarks)
+                        {
+                            var hasPrest = remark.PrestOmschr is not null || remark.PrestMemo is not null;
+                            if (!hasPrest && tech.PerformanceRemarks.Count <= 1)
+                            {
+                                continue;
+                            }
+
+                            <div class="mb-2">
+                                @if (tech.PerformanceRemarks.Count > 1)
+                                {
+                                    <div class="small fw-semibold">@FmtTime(remark.Start)–@FmtTime(remark.End) · @FmtHours(remark.AtlHours) · #@remark.PerformanceId</div>
+                                }
+                                @if (remark.PrestOmschr is not null)
+                                {
+                                    <div class="small"><span class="text-muted">Opmerking bij geboekte uren:</span> @remark.PrestOmschr</div>
+                                }
+                                @if (remark.ShowPrestMemo && remark.PrestMemo is not null)
+                                {
+                                    <div class="small"><span class="text-muted">Memo bij geboekte uren:</span> @remark.PrestMemo</div>
+                                }
+                                @if (!hasPrest)
+                                {
+                                    <div class="small text-muted">Geen prest-opmerking op deze regel.</div>
+                                }
+                            </div>
+                        }
+                    }
+                    <div class="form-text">Bronnen: BON.MEMO (interventie) · PROJ_Prest.OMSCHR / MEMO (urenregel). Niet hetzelfde als admin-toelichting hieronder.</div>
+                </section>
+
+                <section class="mb-3">
+                    <h3 class="h6 text-uppercase text-muted">C. Planning</h3>
                     <div class="mb-2"><strong>Matching reservatie:</strong> @detail.MatchingReservationLabel</div>
                     <div class="small text-muted mb-1">Planning die dag (context — valideert 300 niet):</div>
                     @if (detail.DayPlanningRows.Count == 0)
@@ -213,7 +271,7 @@ else
                 </section>
 
                 <section class="mb-3">
-                    <h3 class="h6 text-uppercase text-muted">C. GPS / dagverloop</h3>
+                    <h3 class="h6 text-uppercase text-muted">D. GPS / dagverloop</h3>
                     <div id="gps-panel"
                          data-admin-case-key="@selected.AdminCaseKey"
                          data-loading="@(detail.GpsContext.IsLoading ? "true" : "false")">
@@ -239,7 +297,7 @@ else
                 </section>
 
                 <section class="mb-3">
-                    <h3 class="h6 text-uppercase text-muted">D. Andere prestaties</h3>
+                    <h3 class="h6 text-uppercase text-muted">E. Naburige prestaties</h3>
                     @if (detail.NeighborTimelineRows.Count == 0)
                     {
                         <div class="small text-muted">Geen naburige prestaties.</div>
@@ -261,7 +319,7 @@ else
                 </section>
 
                 <section class="mb-3" id="decision-card">
-                    <h3 class="h6 text-uppercase text-muted">E. Beslissing</h3>
+                    <h3 class="h6 text-uppercase text-muted">F. Beslissing / correctie</h3>
                     <div class="d-flex flex-wrap gap-2 mb-2" id="wb-decisions" data-admin-case-key="@selected.AdminCaseKey">
                         @foreach (var choice in selected.Choices)
                         {
@@ -272,12 +330,13 @@ else
                                     data-label="@choice.Label">@choice.Label</button>
                         }
                     </div>
-                    <input class="form-control form-control-sm mb-2" id="wb-comment" placeholder="Optionele / verplichte toelichting" value="@(selected.ReviewComment ?? "")" />
+                    <label class="form-label small mb-1" for="wb-comment">Admin-toelichting (TimeControl — schrijft niet terug naar BON)</label>
+                    <input class="form-control form-control-sm mb-2 border-warning-subtle" id="wb-comment" placeholder="Admin review comment (niet naar technieker/BON)" value="@(selected.ReviewComment ?? "")" />
                     <div class="small text-danger d-none" id="wb-decide-error"></div>
                 </section>
 
                 <section class="mb-3 d-none" id="correction-panel">
-                    <h3 class="h6 text-uppercase text-muted">F. Correctie</h3>
+                    <h3 class="h6 text-uppercase text-muted">Correctievoorstel</h3>
                     <p class="small">Admin-ingegeven VAN/TOT → PayrollAction-voorstel. Geen auto-GPS-target. Execution blijft uit. Per PerformanceId apart.</p>
                     @foreach (var target in detail.CorrectionTargets.Where(item => item.CorrectionCapability != PayrollProject300CorrectionCapability.ZeroDeleteUnavailable))
                     {

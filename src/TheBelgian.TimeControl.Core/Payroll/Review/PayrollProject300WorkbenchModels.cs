@@ -9,7 +9,8 @@ public sealed record PayrollProject300WorkbenchPage(
     IReadOnlyList<PayrollAdminCase> Cases,
     string? SelectedKey,
     PayrollProject300CaseDetail? Detail,
-    PayrollProject300WorkbenchMetrics Metrics);
+    PayrollProject300WorkbenchMetrics Metrics,
+    IReadOnlyDictionary<string, string>? TechnicianQueuePreviews = null);
 
 public sealed record PayrollProject300CaseDetail(
     PayrollAdminCase AdminCase,
@@ -19,13 +20,39 @@ public sealed record PayrollProject300CaseDetail(
     IReadOnlyList<PayrollProject300TimelineRow> NeighborTimelineRows,
     PayrollProject300GpsContext GpsContext,
     IReadOnlyList<PayrollProject300CorrectionTarget> CorrectionTargets,
-    IReadOnlyList<string> TechnicalCollapsedNotes)
+    IReadOnlyList<string> TechnicalCollapsedNotes,
+    PayrollProject300TechnicianContext? TechnicianContext = null)
 {
     public const string GpsNeverValidatesNote =
         "GPS is enkel context en valideert Project 300 nooit automatisch.";
 
+    public const string NoTechnicianRemarkMessage = "Geen opmerking van technieker gevonden.";
+
     public decimal TotalAtlHours => BookedRows.Sum(item => item.AtlHours);
 }
+
+/// <summary>
+/// Distinct technician-facing text sources. Never merges BON.MEMO with PROJ_Prest fields.
+/// </summary>
+public sealed record PayrollProject300TechnicianContext(
+    string? BonTechnicianRemark,
+    string? BonNr,
+    string BonRemarkSourceField,
+    IReadOnlyList<PayrollProject300PerformanceRemark> PerformanceRemarks,
+    bool HasAnyTechnicianText)
+{
+    public const string BonMemoSourceField = "BON.MEMO";
+}
+
+public sealed record PayrollProject300PerformanceRemark(
+    long PerformanceId,
+    DateTimeOffset? Start,
+    DateTimeOffset? End,
+    decimal AtlHours,
+    string? PrestOmschr,
+    string? PrestMemo,
+    bool ShowPrestMemo);
+
 
 public sealed record PayrollProject300BookedRow(
     long PerformanceId,

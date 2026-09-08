@@ -26,6 +26,7 @@ internal sealed class PayrollProject300WorkbenchService(
     PayrollProject300GpsContextCache gpsContextCache,
     PayrollProject300DaySourceCache daySourceCache,
     PayrollProject300QueueCache queueCache,
+    PayrollProject300BonMemoCache bonMemoCache,
     PayrollProject300HfdCache hfdCache,
     IDbContextFactory<TimeControlDbContext> contextFactory,
     IOptions<PayrollShadowOptions> shadowOptions,
@@ -58,6 +59,7 @@ internal sealed class PayrollProject300WorkbenchService(
 
         if (selected is null)
         {
+            var emptyPreviews = await BuildQueuePreviewsAsync(cases, cancellationToken);
             return new PayrollProject300WorkbenchPage(
                 year,
                 month,
@@ -65,10 +67,12 @@ internal sealed class PayrollProject300WorkbenchService(
                 cases,
                 null,
                 null,
-                new PayrollProject300WorkbenchMetrics(0, 0, 0, GpsDeferred: true));
+                new PayrollProject300WorkbenchMetrics(0, 0, 0, GpsDeferred: true),
+                emptyPreviews);
         }
 
         var detailBundle = await LoadCoreDetailAsync(selected, cancellationToken);
+        var previews = await BuildQueuePreviewsAsync(cases, cancellationToken);
         return new PayrollProject300WorkbenchPage(
             year,
             month,
@@ -76,7 +80,8 @@ internal sealed class PayrollProject300WorkbenchService(
             cases,
             selected.AdminCaseKey,
             detailBundle.Detail,
-            detailBundle.Metrics);
+            detailBundle.Metrics,
+            previews);
     }
 
     public async Task<PayrollProject300GpsLoadResult> GetGpsContextAsync(
@@ -389,13 +394,21 @@ internal sealed class PayrollProject300WorkbenchService(
 
         StandbyGpsDayEvidence? cachedGps = null;
         var cacheHit = gpsCache.TryGet(adminCase.ResourceId, adminCase.Date, out cachedGps, out var hit) && hit;
+
+        var bonNr = probe.BookedRows
+            .Select(item => item.BonNr)
+            .FirstOrDefault(item => !string.IsNullOrWhiteSpace(item))
+            ?? adminCase.BonNr;
+        var bonMemo = await ResolveBonMemoAsync(bonNr, cancellationToken);
+
         var detail = PayrollProject300WorkbenchBuilder.BuildDetail(
             adminCase,
             performances,
             planning,
             cacheHit ? cachedGps : null,
             gpsPending: !cacheHit,
-            activities);
+            activities,
+            bonMemo);
 
         if (cacheHit && !detail.GpsContext.IsLoading)
         {
@@ -409,6 +422,83 @@ internal sealed class PayrollProject300WorkbenchService(
             GpsDeferred: !cacheHit,
             GpsCacheHit: cacheHit);
         return (detail, metrics);
+    }
+
+    private async Task<IReadOnlyDictionary<string, string>> BuildQueuePreviewsAsync(
+        IReadOnlyList<PayrollAdminCase> cases,
+        CancellationToken cancellationToken)
+    {
+        var bonNrs = cases
+            .Select(item => item.BonNr)
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Select(item => item!.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        await EnsureBonMemosCachedAsync(bonNrs, cancellationToken);
+
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var item in cases)
+        {
+            string? bonMemo = null;
+            if (!string.IsNullOrWhiteSpace(item.BonNr))
+            {
+                bonMemoCache.TryGet(item.BonNr, out bonMemo);
+            }
+
+            var prestDesc = item.PerformanceDescriptionSummary
+                ?? item.Performances.Select(p => p.PerformanceDescription).FirstOrDefault(t => !string.IsNullOrWhiteSpace(t));
+            var prestMemo = item.Performances.Select(p => p.PerformanceMemo).FirstOrDefault(t => !string.IsNullOrWhiteSpace(t));
+            var preview = PayrollProject300WorkbenchBuilder.BuildQueueTechnicianPreview(
+                prestDesc,
+                prestMemo,
+                bonMemo);
+            if (preview is not null)
+            {
+                map[item.AdminCaseKey] = preview;
+            }
+        }
+
+        return map;
+    }
+
+    private async Task<string?> ResolveBonMemoAsync(string? bonNr, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(bonNr))
+        {
+            return null;
+        }
+
+        if (bonMemoCache.TryGet(bonNr, out var cached))
+        {
+            return cached;
+        }
+
+        await EnsureBonMemosCachedAsync([bonNr.Trim()], cancellationToken);
+        return bonMemoCache.TryGet(bonNr, out var memo) ? memo : null;
+    }
+
+    private async Task EnsureBonMemosCachedAsync(
+        IReadOnlyList<string> bonNumbers,
+        CancellationToken cancellationToken)
+    {
+        var missing = bonNumbers
+            .Where(item => !string.IsNullOrWhiteSpace(item) && !bonMemoCache.TryGet(item, out _))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (missing.Length == 0)
+        {
+            return;
+        }
+
+        var loaded = await plenionReader.ReadBonTechnicianMemosAsync(missing, cancellationToken);
+        bonMemoCache.SetMany(loaded);
+        foreach (var bonNr in missing)
+        {
+            if (!loaded.ContainsKey(bonNr))
+            {
+                bonMemoCache.Set(bonNr, null);
+            }
+        }
     }
 
     private async Task<(IReadOnlyList<NormalizedPerformanceEntry> Performances, IReadOnlyList<PayrollPlanningReservation> Planning)>

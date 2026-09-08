@@ -395,6 +395,124 @@ public sealed class PayrollProject300WorkbenchTests
     }
 
     [Fact]
+    public void TechnicianContext_SurfacesDistinctBonAndPrestSources()
+    {
+        var admin = AdminCase(101, 1m);
+        var day = new[]
+        {
+            Performance(101, "08:00", "09:00", 1m, description: "prest omschr", memo: "prest memo"),
+        };
+
+        var detail = PayrollProject300WorkbenchBuilder.BuildDetail(
+            admin,
+            day,
+            [],
+            gps: null,
+            bonTechnicianRemark: "BON technieker memo");
+
+        var tech = detail.TechnicianContext;
+        Assert.NotNull(tech);
+        Assert.True(tech!.HasAnyTechnicianText);
+        Assert.Equal("BON technieker memo", tech.BonTechnicianRemark);
+        Assert.Equal(PayrollProject300TechnicianContext.BonMemoSourceField, tech.BonRemarkSourceField);
+        var row = Assert.Single(tech.PerformanceRemarks);
+        Assert.Equal("prest omschr", row.PrestOmschr);
+        Assert.Equal("prest memo", row.PrestMemo);
+        Assert.True(row.ShowPrestMemo);
+        Assert.Contains(detail.TechnicalCollapsedNotes, note => note.Contains("BON.MEMO", StringComparison.Ordinal));
+        Assert.Contains(detail.TechnicalCollapsedNotes, note => note.Contains("PROJ_Prest.OMSCHR", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TechnicianContext_DedupesIdenticalPrestOmschrAndMemo()
+    {
+        var admin = AdminCase(101, 1m);
+        var day = new[]
+        {
+            Performance(101, "08:00", "09:00", 1m, description: "zelfde tekst", memo: "zelfde tekst"),
+        };
+
+        var tech = PayrollProject300WorkbenchBuilder.BuildTechnicianContext(day, bonTechnicianRemark: null);
+        var row = Assert.Single(tech.PerformanceRemarks);
+        Assert.Equal("zelfde tekst", row.PrestOmschr);
+        Assert.False(row.ShowPrestMemo);
+    }
+
+    [Fact]
+    public void TechnicianContext_MultiPerformance_KeepsRemarksPerPerformanceId()
+    {
+        var findings = new[]
+        {
+            Finding("a", 1, 0.33m),
+            Finding("b", 2, 1.5m),
+        };
+        var admin = Assert.Single(PayrollAdminCaseBuilder.Build(
+            PayrollReviewCaseBuilder.Build(findings, Emp("10", "Dimitri"), [])));
+        var day = new[]
+        {
+            Performance(1, "14:00", "14:20", 0.33m, description: "eerste", memo: null),
+            Performance(2, "14:20", "15:50", 1.5m, description: "tweede", memo: "memo-2"),
+        };
+
+        var tech = PayrollProject300WorkbenchBuilder.BuildTechnicianContext(
+            day,
+            bonTechnicianRemark: "Ophalen materiaal",
+            fallbackBonNr: "26601932");
+
+        Assert.Equal("Ophalen materiaal", tech.BonTechnicianRemark);
+        Assert.Equal(2, tech.PerformanceRemarks.Count);
+        Assert.Equal(1, tech.PerformanceRemarks[0].PerformanceId);
+        Assert.Equal("eerste", tech.PerformanceRemarks[0].PrestOmschr);
+        Assert.Equal(2, tech.PerformanceRemarks[1].PerformanceId);
+        Assert.Equal("tweede", tech.PerformanceRemarks[1].PrestOmschr);
+        Assert.Equal("memo-2", tech.PerformanceRemarks[1].PrestMemo);
+    }
+
+    [Fact]
+    public void TechnicianContext_Empty_HasCleanEmptyState()
+    {
+        var admin = AdminCase(101, 1m);
+        var day = new[] { Performance(101, "08:00", "09:00", 1m) };
+        var detail = PayrollProject300WorkbenchBuilder.BuildDetail(admin, day, [], gps: null, bonTechnicianRemark: null);
+        Assert.False(detail.TechnicianContext!.HasAnyTechnicianText);
+        Assert.Equal(PayrollProject300CaseDetail.NoTechnicianRemarkMessage, PayrollProject300CaseDetail.NoTechnicianRemarkMessage);
+    }
+
+    [Fact]
+    public void QueuePreview_PrefersPrestThenBon_AndTruncates()
+    {
+        Assert.Equal(
+            "kort",
+            PayrollProject300WorkbenchBuilder.BuildQueueTechnicianPreview("kort", null, "bon"));
+        Assert.Equal(
+            "bon tekst",
+            PayrollProject300WorkbenchBuilder.BuildQueueTechnicianPreview(null, null, "bon tekst"));
+        var longText = new string('x', 100);
+        var preview = PayrollProject300WorkbenchBuilder.BuildQueueTechnicianPreview(longText, null, null, maxLength: 20);
+        Assert.NotNull(preview);
+        Assert.True(preview!.Length <= 20);
+        Assert.EndsWith("…", preview);
+    }
+
+    [Fact]
+    public void GpsPending_StillIndependentOfTechnicianContext()
+    {
+        var admin = AdminCase(101, 1m);
+        var day = new[] { Performance(101, "08:00", "09:00", 1m, description: "werk") };
+        var detail = PayrollProject300WorkbenchBuilder.BuildDetail(
+            admin,
+            day,
+            [],
+            gps: null,
+            gpsPending: true,
+            bonTechnicianRemark: "bon");
+
+        Assert.True(detail.GpsContext.IsLoading);
+        Assert.True(detail.TechnicianContext!.HasAnyTechnicianText);
+        Assert.Single(detail.BookedRows);
+    }
+
+    [Fact]
     public void Project300_ChoiceLabels_MatchWorkbenchV3()
     {
         var labels = PayrollGuidedDecisions.ChoicesFor(PayrollReviewCategory.Project300)

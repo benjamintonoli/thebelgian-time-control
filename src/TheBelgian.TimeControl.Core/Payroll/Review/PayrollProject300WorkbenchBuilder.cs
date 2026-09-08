@@ -26,7 +26,8 @@ public static class PayrollProject300WorkbenchBuilder
         IReadOnlyList<PayrollPlanningReservation> dayPlanning,
         StandbyGpsDayEvidence? gps,
         bool gpsPending = false,
-        IReadOnlyDictionary<long, PayrollProject300ResolvedActivity>? activityByPerformanceId = null)
+        IReadOnlyDictionary<long, PayrollProject300ResolvedActivity>? activityByPerformanceId = null,
+        string? bonTechnicianRemark = null)
     {
         ArgumentNullException.ThrowIfNull(adminCase);
         dayPerformances ??= [];
@@ -75,7 +76,8 @@ public static class PayrollProject300WorkbenchBuilder
                 IsLoading: true)
             : BuildGpsContext(selected, gps);
         var corrections = BuildCorrectionTargets(selected, activityByPerformanceId);
-        var technical = BuildTechnicalNotes(adminCase, selected, gps);
+        var technician = BuildTechnicianContext(selected, bonTechnicianRemark, adminCase.BonNr);
+        var technical = BuildTechnicalNotes(adminCase, selected, gps, technician);
 
         return new PayrollProject300CaseDetail(
             AdminCase: adminCase,
@@ -85,7 +87,89 @@ public static class PayrollProject300WorkbenchBuilder
             NeighborTimelineRows: timeline,
             GpsContext: gpsContext,
             CorrectionTargets: corrections,
-            TechnicalCollapsedNotes: technical);
+            TechnicalCollapsedNotes: technical,
+            TechnicianContext: technician);
+    }
+
+    public static PayrollProject300TechnicianContext BuildTechnicianContext(
+        IReadOnlyList<NormalizedPerformanceEntry> selectedPerformances,
+        string? bonTechnicianRemark,
+        string? fallbackBonNr = null)
+    {
+        selectedPerformances ??= [];
+        var bonNr = selectedPerformances
+            .Select(item => item.BonNr)
+            .FirstOrDefault(item => !string.IsNullOrWhiteSpace(item))
+            ?? fallbackBonNr;
+        var bonText = NormalizeTechnicianText(bonTechnicianRemark);
+
+        var remarks = selectedPerformances
+            .OrderBy(item => item.Start)
+            .ThenBy(item => item.SortKey)
+            .Select(item =>
+            {
+                var omschr = NormalizeTechnicianText(item.Description);
+                var memo = NormalizeTechnicianText(item.Memo);
+                var showMemo = memo is not null
+                    && !string.Equals(omschr, memo, StringComparison.OrdinalIgnoreCase);
+                return new PayrollProject300PerformanceRemark(
+                    item.SourceEntryId,
+                    item.Start,
+                    item.End,
+                    item.AtlHoursRaw,
+                    omschr,
+                    memo,
+                    showMemo);
+            })
+            .ToArray();
+
+        var hasAny = bonText is not null
+            || remarks.Any(item => item.PrestOmschr is not null || item.PrestMemo is not null);
+
+        return new PayrollProject300TechnicianContext(
+            BonTechnicianRemark: bonText,
+            BonNr: string.IsNullOrWhiteSpace(bonNr) ? null : bonNr.Trim(),
+            BonRemarkSourceField: PayrollProject300TechnicianContext.BonMemoSourceField,
+            PerformanceRemarks: remarks,
+            HasAnyTechnicianText: hasAny);
+    }
+
+    public static string? BuildQueueTechnicianPreview(
+        string? prestDescription,
+        string? prestMemo,
+        string? bonTechnicianRemark,
+        int maxLength = 72)
+    {
+        var text = NormalizeTechnicianText(prestDescription)
+            ?? NormalizeTechnicianText(prestMemo)
+            ?? NormalizeTechnicianText(bonTechnicianRemark);
+        if (text is null)
+        {
+            return null;
+        }
+
+        if (text.Length <= maxLength)
+        {
+            return text;
+        }
+
+        return text[..(maxLength - 1)].TrimEnd() + "…";
+    }
+
+    public static string? NormalizeTechnicianText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var trimmed = value.Trim();
+        if (trimmed is "—" or "-" or "–")
+        {
+            return null;
+        }
+
+        return trimmed;
     }
 
     /// <summary>
@@ -541,7 +625,8 @@ public static class PayrollProject300WorkbenchBuilder
     private static List<string> BuildTechnicalNotes(
         PayrollAdminCase adminCase,
         NormalizedPerformanceEntry[] selected,
-        StandbyGpsDayEvidence? gps)
+        StandbyGpsDayEvidence? gps,
+        PayrollProject300TechnicianContext? technician = null)
     {
         var notes = new List<string>
         {
@@ -550,7 +635,14 @@ public static class PayrollProject300WorkbenchBuilder
             $"SelectedPerformanceIds={string.Join(',', selected.Select(item => item.SourceEntryId))}",
             PayrollProject300CaseDetail.GpsNeverValidatesNote,
             $"MatchingReservation={MatchingReservationGeen}",
+            "TechnicianPrestText=PROJ_Prest.OMSCHR + PROJ_Prest.MEMO (not merged with BON)",
         };
+
+        if (technician is not null)
+        {
+            notes.Add(
+                $"BonTechnicianRemarkSource={technician.BonRemarkSourceField}; BONNR={technician.BonNr ?? "—"}; present={(technician.BonTechnicianRemark is null ? "no" : "yes")}");
+        }
 
         if (gps is not null)
         {

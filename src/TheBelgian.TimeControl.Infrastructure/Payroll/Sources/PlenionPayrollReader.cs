@@ -302,6 +302,69 @@ public sealed class PlenionPayrollReader(
         return map;
     }
 
+    /// <summary>
+    /// Batched BON.MEMO lookup by BONNR. Proven technician intervention remark source for Project300
+    /// (Dimitri 27/08/2026 BON 26601932). Does not invent TAAKOMSCHRIJVING/MEMO2 semantics.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<string, string?>> ReadBonTechnicianMemosAsync(
+        IReadOnlyCollection<string> bonNumbers,
+        CancellationToken cancellationToken = default)
+    {
+        OfflineOnlyGuard.EnsureLiveAccessAllowed("PlenionODBC");
+        ValidateConfiguration();
+        var distinct = bonNumbers
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Select(item => item.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(item => item, StringComparer.Ordinal)
+            .ToArray();
+        if (distinct.Length == 0)
+        {
+            return new Dictionary<string, string?>(StringComparer.Ordinal);
+        }
+
+        await using var connection = new OdbcConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        var filter = new StringBuilder();
+        for (var i = 0; i < distinct.Length; i++)
+        {
+            if (i > 0)
+            {
+                filter.Append(" OR ");
+            }
+
+            filter.Append("BONNR = ?");
+        }
+
+        var sql = $"""
+            SELECT BONNR, MEMO
+            FROM BON
+            WHERE {filter}
+            """;
+
+        var map = new Dictionary<string, string?>(StringComparer.Ordinal);
+        await using var command = new OdbcCommand(sql, connection);
+        for (var i = 0; i < distinct.Length; i++)
+        {
+            command.Parameters.Add($"bon{i}", OdbcType.VarChar).Value = distinct[i];
+        }
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var bonNr = PlenionPayrollFieldReader.OptionalText(reader["BONNR"]);
+            if (string.IsNullOrWhiteSpace(bonNr))
+            {
+                continue;
+            }
+
+            map[bonNr.Trim()] = PlenionPayrollFieldReader.OptionalText(reader["MEMO"]);
+        }
+
+        return map;
+    }
+
     private void ValidateConfiguration()
     {
         if (string.IsNullOrWhiteSpace(_connectionString))
