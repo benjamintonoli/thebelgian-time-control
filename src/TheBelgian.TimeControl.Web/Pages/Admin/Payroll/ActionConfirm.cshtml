@@ -61,33 +61,46 @@ else
     <div class="row g-3 mb-4">
         <div class="col-md-6">
             <section class="border rounded p-3 h-100">
-                <h2 class="h6">Huidig / bron</h2>
-                <p class="mb-1"><strong>@view.Evidence.Title</strong></p>
-                <p class="mb-1 small">@view.Evidence.Description</p>
-                <p class="mb-1 small text-muted">@view.Evidence.Evidence</p>
+                <h2 class="h6">@(isDelete ? "Huidige prestatie" : "Huidig / bron")</h2>
                 @if (view.DeleteProposal is not null)
                 {
-                    <p class="mb-0 small">
-                        Datum: @PayrollDisplayFormatting.DateWithWeekday(view.DeleteProposal.Date)<br />
-                        Start: @view.DeleteProposal.CurrentStart.ToString("HH:mm") ·
-                        Einde: @view.DeleteProposal.CurrentEnd.ToString("HH:mm") ·
-                        @view.DeleteProposal.AtlHours.ToString("0.##") u<br />
-                        Prestatie #@view.DeleteProposal.PerformanceId ·
-                        Project @(view.DeleteProposal.ProjectLabel ?? view.DeleteProposal.ProjectId) ·
-                        BON @(view.DeleteProposal.BonNr ?? "—")
+                    <p class="mb-1"><strong>@(view.DisplayName ?? view.ResourceId)</strong></p>
+                    <p class="mb-1">@PayrollDisplayFormatting.DateWithWeekday(view.DeleteProposal.Date)</p>
+                    <p class="mb-1">
+                        @view.DeleteProposal.CurrentStart.ToString("HH:mm")–@view.DeleteProposal.CurrentEnd.ToString("HH:mm")
+                        · @view.DeleteProposal.AtlHours.ToString("0.##", System.Globalization.CultureInfo.GetCultureInfo("nl-BE")) u
                     </p>
-                }
-                else if (view.AdjustProposal is not null)
-                {
-                    <p class="mb-0 small">
-                        Start: @view.AdjustProposal.CurrentStart.ToString("HH:mm") ·
-                        Einde: @view.AdjustProposal.CurrentEnd.ToString("HH:mm") ·
-                        Prestatie #@view.AdjustProposal.PerformanceId
+                    <p class="mb-1">
+                        Project @(string.IsNullOrWhiteSpace(view.DeleteProposal.ProjectLabel)
+                            || view.DeleteProposal.ProjectLabel.StartsWith("BON ", StringComparison.Ordinal)
+                            || string.Equals(view.DeleteProposal.ProjectLabel, view.DeleteProposal.BonNr, StringComparison.Ordinal)
+                            ? "300"
+                            : view.DeleteProposal.ProjectLabel)
                     </p>
+                    <p class="mb-1">BON @(view.DeleteProposal.BonNr ?? "—")</p>
+                    <p class="mb-1">Taak: @(string.IsNullOrWhiteSpace(view.DeleteProposal.ExpectedActivityType) ? "—" : view.DeleteProposal.ExpectedActivityType)</p>
+                    @if (!string.IsNullOrWhiteSpace(view.DeleteProposal.PrestOmschr))
+                    {
+                        <p class="mb-1">Omschrijving: @view.DeleteProposal.PrestOmschr</p>
+                    }
+                    <p class="mb-0 small text-muted">PerformanceId @view.DeleteProposal.PerformanceId@(view.DeleteProposal.ExpectedMainTaskExternalId is long taskId ? $" · IDHFDTAAK {taskId}" : "")</p>
                 }
                 else
                 {
-                    <p class="mb-0 small text-muted">Geen bestaande prestatie (create).</p>
+                    <p class="mb-1"><strong>@view.Evidence.Title</strong></p>
+                    <p class="mb-1 small">@view.Evidence.Description</p>
+                    @if (view.AdjustProposal is not null)
+                    {
+                        <p class="mb-0 small">
+                            Start: @view.AdjustProposal.CurrentStart.ToString("HH:mm") ·
+                            Einde: @view.AdjustProposal.CurrentEnd.ToString("HH:mm") ·
+                            Prestatie #@view.AdjustProposal.PerformanceId
+                        </p>
+                    }
+                    else
+                    {
+                        <p class="mb-0 small text-muted">Geen bestaande prestatie (create).</p>
+                    }
                 }
             </section>
         </div>
@@ -101,12 +114,10 @@ else
                         <li>Datum: @PayrollDisplayFormatting.DateWithWeekday(view.DeleteProposal.Date)</li>
                         <li>VAN–TOT: @view.DeleteProposal.CurrentStart.ToString("HH:mm")–@view.DeleteProposal.CurrentEnd.ToString("HH:mm")</li>
                         <li>Uren: @view.DeleteProposal.AtlHours.ToString("0.##")</li>
-                        <li>Dossier/project: @(view.DeleteProposal.ProjectLabel ?? view.DeleteProposal.ProjectId)</li>
-                        <li>Bon: @(view.DeleteProposal.BonNr ?? "—")</li>
-                        <li>Taak: @(view.DeleteProposal.ExpectedMainTaskExternalId?.ToString() ?? "—") · @(view.DeleteProposal.ExpectedActivityType ?? "—")</li>
+                        <li>BON: @(view.DeleteProposal.BonNr ?? "—")</li>
                         @if (!string.IsNullOrWhiteSpace(view.DeleteProposal.PrestOmschr))
                         {
-                            <li>OMSCHR: @view.DeleteProposal.PrestOmschr</li>
+                            <li>Omschrijving: @view.DeleteProposal.PrestOmschr</li>
                         }
                     </ul>
                 }

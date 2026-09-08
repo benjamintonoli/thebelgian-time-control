@@ -156,7 +156,7 @@ public sealed class PayrollDeleteBrowserFlowTests
     }
 
     [Fact]
-    public async Task ActionConfirm_PostExecute_Applied_RedirectsToWorkbench()
+    public async Task ActionConfirm_PostExecute_Applied_RedirectsToWorkbenchWithNextFocus()
     {
         var actionId = Guid.NewGuid();
         var actions = new FakeActions
@@ -169,7 +169,11 @@ public sealed class PayrollDeleteBrowserFlowTests
                 "pws-ref",
                 283272),
         };
-        var page = CreatePage(actions);
+        var workbench = new FakeWorkbench
+        {
+            NextFocus = "admin:Project300:999:20260821:p:49432",
+        };
+        var page = CreatePage(actions, workbench);
         page.ActionId = actionId;
         page.Comment = "Project 300-prestatie foutief aangemaakt.";
 
@@ -181,6 +185,10 @@ public sealed class PayrollDeleteBrowserFlowTests
         Assert.Equal(actionId, actions.LastExecutedActionId);
         Assert.Equal("Project 300-prestatie foutief aangemaakt.", actions.LastComment);
         Assert.Equal("benjamin.tonoli@thebelgian.be", actions.LastActor);
+        Assert.Equal(workbench.NextFocus, redirect.RouteValues?["Focus"]);
+        Assert.Null(redirect.RouteValues?["Search"]);
+        Assert.Equal(PayrollReviewQueueScope.Open, redirect.RouteValues?["Scope"]);
+        Assert.True(workbench.InvalidateCalled);
         Assert.Contains("verwijderd uit Plenion", page.TempData["FlashSuccess"]?.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
@@ -231,12 +239,13 @@ public sealed class PayrollDeleteBrowserFlowTests
         Assert.Equal(1, actions.ExecuteCalls);
     }
 
-    private static ActionConfirmModel CreatePage(FakeActions actions)
+    private static ActionConfirmModel CreatePage(FakeActions actions, FakeWorkbench? workbench = null)
     {
         var http = new DefaultHttpContext();
         var temp = new TempDataDictionary(http, new FakeTempDataProvider());
         var page = new ActionConfirmModel(
             actions,
+            workbench ?? new FakeWorkbench(),
             new FakeUser(),
             Options.Create(new PayrollShadowOptions { Enabled = true, AdminUiEnabled = true }),
             Options.Create(new PayrollActionsOptions
@@ -306,11 +315,11 @@ public sealed class PayrollDeleteBrowserFlowTests
                 "49432",
                 "26601886",
                 14,
-                null,
+                "Werkuren Projecttechnicus",
                 "ophalen badgelezer",
                 null,
                 null,
-                "BON 26601886"));
+                "300"));
     }
 
     private static string FindRepoRoot()
@@ -327,6 +336,124 @@ public sealed class PayrollDeleteBrowserFlowTests
         }
 
         throw new InvalidOperationException("Repo root not found.");
+    }
+
+    [Fact]
+    public void ActionConfirmMarkup_HidesDiagnosticEvidenceForDelete()
+    {
+        var markup = File.ReadAllText(Path.Combine(
+            FindRepoRoot(),
+            "src",
+            "TheBelgian.TimeControl.Web",
+            "Pages",
+            "Admin",
+            "Payroll",
+            "ActionConfirm.cshtml"));
+        Assert.Contains("Huidige prestatie", markup, StringComparison.Ordinal);
+        Assert.Contains("Omschrijving:", markup, StringComparison.Ordinal);
+        Assert.Contains("PerformanceId", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("view.Evidence.Evidence", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Workbench delete-voorstel", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WorkbenchMarkup_EmptyQueueDoesNotSpinForeverOnContextLaden()
+    {
+        var markup = File.ReadAllText(Path.Combine(
+            FindRepoRoot(),
+            "src",
+            "TheBelgian.TimeControl.Web",
+            "Pages",
+            "Admin",
+            "Payroll",
+            "Workbench.cshtml"));
+        Assert.Contains("Geen open case", markup, StringComparison.Ordinal);
+        Assert.Contains("if (currentKey) loadDetail(currentKey);", markup, StringComparison.Ordinal);
+    }
+
+    private sealed class FakeWorkbench : IPayrollProject300WorkbenchService
+    {
+        public string? NextFocus { get; set; }
+        public bool InvalidateCalled { get; private set; }
+
+        public Task<PayrollProject300WorkbenchPage> GetWorkbenchAsync(
+            int year, int month, PayrollReviewQueueFilter filter, string? selectedAdminCaseKey, CancellationToken cancellationToken) =>
+            GetShellAsync(year, month, filter, selectedAdminCaseKey, cancellationToken);
+
+        public Task<PayrollProject300WorkbenchPage> GetShellAsync(
+            int year, int month, PayrollReviewQueueFilter filter, string? selectedAdminCaseKey, CancellationToken cancellationToken)
+        {
+            var emptyCategories = new Dictionary<PayrollReviewCategory, int>();
+            var cases = string.IsNullOrWhiteSpace(NextFocus)
+                ? Array.Empty<PayrollAdminCase>()
+                : new[]
+                {
+                    new PayrollAdminCase(
+                        NextFocus!,
+                        PayrollReviewCategory.Project300,
+                        "999",
+                        "Other",
+                        new DateOnly(2026, 8, 21),
+                        PayrollFindingSeverity.Review,
+                        PayrollFindingStatus.Open,
+                        "q",
+                        "issue",
+                        "fact",
+                        BonNr: null,
+                        ProjectId: "49432",
+                        BookedSummary: null,
+                        PlannedSummary: null,
+                        DifferenceSummary: null,
+                        EvidenceSummary: null,
+                        HybridScenarioNote: null,
+                        FriendlyState: null,
+                        RuleHint: null,
+                        ActionabilityHint: "review",
+                        UnderlyingReviewCaseCount: 1,
+                        UnderlyingPerformanceCount: 1,
+                        TotalBookedHours: 0.5m,
+                        UnderlyingCases: [],
+                        FindingIds: [],
+                        FindingKeys: [],
+                        DecisionCode: null,
+                        DecisionLabel: null,
+                        ReviewComment: null,
+                        ReviewedAtUtc: null,
+                        ReviewedBy: null,
+                        AllowsBulkDisposition: false,
+                        Choices: [],
+                        Performances: []),
+                };
+            return Task.FromResult(new PayrollProject300WorkbenchPage(
+                year,
+                month,
+                new PayrollAdminQueueSummary(0, 0, 0, 0, 0, 0, 0, emptyCategories, emptyCategories, emptyCategories, emptyCategories, emptyCategories),
+                cases,
+                NextFocus,
+                null,
+                new PayrollProject300WorkbenchMetrics(0, 0, 0, GpsDeferred: true)));
+        }
+
+        public Task<PayrollProject300WorkbenchPage> GetCoreDetailAsync(
+            int year, int month, PayrollReviewQueueFilter filter, string? selectedAdminCaseKey, CancellationToken cancellationToken) =>
+            GetShellAsync(year, month, filter, selectedAdminCaseKey, cancellationToken);
+
+        public Task<PayrollProject300GpsLoadResult> GetGpsContextAsync(
+            int year, int month, string adminCaseKey, bool prefetchNext = true, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<PayrollProject300ProposeCorrectionResult> ProposeTimeCorrectionAsync(
+            int year, int month, string adminCaseKey, long performanceId, TimeOnly newStart, TimeOnly newEnd, string reason, string actor, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<PayrollProject300ProposeCorrectionResult> ProposeDeletePerformanceAsync(
+            int year, int month, string adminCaseKey, long performanceId, string reason, string actor, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public PayrollProject300GpsCacheHint GetGpsCacheHint(string resourceId, DateOnly workDate) =>
+            PayrollProject300GpsCacheHint.Unknown;
+
+        public void InvalidateQueueCache(int year, int month) => InvalidateCalled = true;
     }
 
     private sealed class FakeUser : ICurrentUserContext

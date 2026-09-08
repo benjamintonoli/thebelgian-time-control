@@ -168,7 +168,7 @@ internal sealed class PayrollShadowService(
                 "Er bestaat al een shadow-maandsnapshot voor deze periode.");
         }
 
-        var material = await MaterializeSnapshotAsync(context, period, cancellationToken);
+        var material = await MaterializeSnapshotAsync(context, period, limitToResourceIds: null, cancellationToken);
         var now = timeProvider.GetUtcNow();
 
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
@@ -199,7 +199,8 @@ internal sealed class PayrollShadowService(
         int month,
         DateOnly evaluationDate,
         string actor,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyCollection<string>? limitToResourceIds = null)
     {
         EnsureEnabled();
         ValidateActor(actor);
@@ -218,12 +219,20 @@ internal sealed class PayrollShadowService(
         }
 
         var previousStatus = shadowMonth.Status;
-        var material = await MaterializeSnapshotAsync(context, period, cancellationToken);
+        var limitSet = limitToResourceIds is { Count: > 0 }
+            ? limitToResourceIds.ToHashSet(StringComparer.Ordinal)
+            : null;
+        var material = await MaterializeSnapshotAsync(context, period, limitSet, cancellationToken);
 
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
-        var existingEmployees = await context.PayrollShadowEmployeeResults
-            .Where(item => item.ShadowMonthId == shadowMonth.Id)
-            .ToListAsync(cancellationToken);
+        var existingEmployeesQuery = context.PayrollShadowEmployeeResults
+            .Where(item => item.ShadowMonthId == shadowMonth.Id);
+        if (limitSet is not null)
+        {
+            existingEmployeesQuery = existingEmployeesQuery.Where(item => limitSet.Contains(item.ResourceId));
+        }
+
+        var existingEmployees = await existingEmployeesQuery.ToListAsync(cancellationToken);
         var preservedReviews = existingEmployees
             .Where(item => item.ReviewStatus is PayrollEmployeeReviewStatus.Accepted
                 or PayrollEmployeeReviewStatus.NeedsFollowUp)
@@ -237,19 +246,27 @@ internal sealed class PayrollShadowService(
                 StringComparer.Ordinal);
 
         context.PayrollShadowEmployeeResults.RemoveRange(existingEmployees);
-        var existingFindings = await context.PayrollFindingRecords
-            .Where(item => item.ShadowMonthId == shadowMonth.Id)
-            .ToListAsync(cancellationToken);
+        var existingFindingsQuery = context.PayrollFindingRecords
+            .Where(item => item.ShadowMonthId == shadowMonth.Id);
+        if (limitSet is not null)
+        {
+            existingFindingsQuery = existingFindingsQuery.Where(item => limitSet.Contains(item.ResourceId));
+        }
+
+        var existingFindings = await existingFindingsQuery.ToListAsync(cancellationToken);
         context.PayrollFindingRecords.RemoveRange(existingFindings);
 
-        shadowMonth.PeriodStart = period.PeriodStart;
-        shadowMonth.PeriodEnd = period.PeriodEnd;
-        shadowMonth.EvaluationDate = evaluationDate;
-        shadowMonth.Status = previousStatus == PayrollShadowMonthStatus.InReview
-            ? PayrollShadowMonthStatus.InReview
-            : PayrollShadowMonthStatus.ReadyForReview;
-        shadowMonth.CalculationVersion = PayrollShadowConfigurationSnapshot.CurrentCalculationVersion();
-        shadowMonth.ConfigurationSnapshotJson = material.ConfigurationSnapshotJson;
+        if (limitSet is null)
+        {
+            shadowMonth.PeriodStart = period.PeriodStart;
+            shadowMonth.PeriodEnd = period.PeriodEnd;
+            shadowMonth.EvaluationDate = evaluationDate;
+            shadowMonth.Status = previousStatus == PayrollShadowMonthStatus.InReview
+                ? PayrollShadowMonthStatus.InReview
+                : PayrollShadowMonthStatus.ReadyForReview;
+            shadowMonth.CalculationVersion = PayrollShadowConfigurationSnapshot.CurrentCalculationVersion();
+            shadowMonth.ConfigurationSnapshotJson = material.ConfigurationSnapshotJson;
+        }
 
         AddEmployeeResults(context, shadowMonth.Id, material);
         ReplaceFindings(context, shadowMonth.Id, material);
@@ -257,9 +274,14 @@ internal sealed class PayrollShadowService(
 
         if (preservedReviews.Count > 0)
         {
-            var rebuiltEmployees = await context.PayrollShadowEmployeeResults
-                .Where(item => item.ShadowMonthId == shadowMonth.Id)
-                .ToListAsync(cancellationToken);
+            var rebuiltEmployeesQuery = context.PayrollShadowEmployeeResults
+                .Where(item => item.ShadowMonthId == shadowMonth.Id);
+            if (limitSet is not null)
+            {
+                rebuiltEmployeesQuery = rebuiltEmployeesQuery.Where(item => limitSet.Contains(item.ResourceId));
+            }
+
+            var rebuiltEmployees = await rebuiltEmployeesQuery.ToListAsync(cancellationToken);
             foreach (var employee in rebuiltEmployees)
             {
                 if (!preservedReviews.TryGetValue(employee.ResourceId, out var preserved))
@@ -282,13 +304,15 @@ internal sealed class PayrollShadowService(
         await AppendAuditAsync(
             context,
             shadowMonth.Id,
-            null,
+            limitSet is null ? null : string.Join(',', limitSet.OrderBy(item => item, StringComparer.Ordinal)),
             PayrollShadowAuditAction.MonthSnapshotRebuilt,
             actor,
             null,
-            preservedReviews.Count > 0
-                ? $"Non-finalized shadow month rebuilt; preserved {preservedReviews.Count} review decision(s)."
-                : "Non-finalized shadow month rebuilt after roster/eligibility correction.");
+            limitSet is null
+                ? (preservedReviews.Count > 0
+                    ? $"Non-finalized shadow month rebuilt; preserved {preservedReviews.Count} review decision(s)."
+                    : "Non-finalized shadow month rebuilt after roster/eligibility correction.")
+                : $"Targeted shadow rebuild for {limitSet.Count} resource(s); preserved {preservedReviews.Count} review decision(s).");
         await context.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return shadowMonth;
@@ -1286,6 +1310,7 @@ internal sealed class PayrollShadowService(
     private async Task<SnapshotMaterial> MaterializeSnapshotAsync(
         TimeControlDbContext context,
         PayrollPeriodSnapshot period,
+        HashSet<string>? limitToResourceIds,
         CancellationToken cancellationToken)
     {
         var configurations = await LoadConfigurationsAsync(context, cancellationToken);
@@ -1302,6 +1327,13 @@ internal sealed class PayrollShadowService(
             period.PeriodEnd,
             task23ResourceIds,
             configurationDomains);
+        if (limitToResourceIds is not null)
+        {
+            candidates = candidates
+                .Where(item => limitToResourceIds.Contains(item.ResourceId))
+                .ToList();
+        }
+
         var activeCandidates = candidates.Where(item => item.IsActiveForPeriod(period.PeriodStart)).ToList();
         var resourceIds = activeCandidates.Select(item => item.ResourceId).ToArray();
 
@@ -1411,6 +1443,16 @@ internal sealed class PayrollShadowService(
             standbyGps.ApiCallCount,
             standbyGps.Notes,
             includedResourceIds);
+
+        if (limitToResourceIds is not null)
+        {
+            findingsRun = findingsRun with
+            {
+                Findings = findingsRun.Findings
+                    .Where(item => limitToResourceIds.Contains(item.ResourceId))
+                    .ToList(),
+            };
+        }
 
         return new SnapshotMaterial(configurationSnapshotJson, rows, findingsRun);
     }

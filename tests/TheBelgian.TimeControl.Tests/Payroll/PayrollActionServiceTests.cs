@@ -421,6 +421,8 @@ public sealed class PayrollActionServiceTests
         var result = await fx.Service.ExecuteAsync(propose.ActionId.Value, "verwijderen", "tester", default);
         Assert.Equal(PayrollProposedActionStatus.Applied, result.Status);
         Assert.True(fx.Shadow.RebuildCalled);
+        Assert.NotNull(fx.Shadow.LastRebuildLimit);
+        Assert.Contains("100", fx.Shadow.LastRebuildLimit!);
         Assert.False(fx.DeleteClient.LastCommand!.DryRun);
     }
 
@@ -846,11 +848,12 @@ public sealed class PayrollActionServiceTests
     private sealed class FakeShadow : IPayrollShadowService
     {
         public bool RebuildCalled { get; private set; }
+        public IReadOnlyCollection<string>? LastRebuildLimit { get; private set; }
 
-        public Task<PayrollShadowMonth> RebuildSnapshotAsync(
-            int year, int month, DateOnly evaluationDate, string actor, CancellationToken cancellationToken)
+        public Task<PayrollShadowMonth> RebuildSnapshotAsync(int year, int month, DateOnly evaluationDate, string actor, CancellationToken cancellationToken, IReadOnlyCollection<string>? limitToResourceIds = null)
         {
             RebuildCalled = true;
+            LastRebuildLimit = limitToResourceIds;
             return Task.FromResult(new PayrollShadowMonth
             {
                 Id = 1,

@@ -533,7 +533,7 @@ internal sealed class PayrollProject300WorkbenchService(
             prestRemark?.PrestOmschr ?? booked.Description,
             prestRemark?.PrestMemo ?? booked.Memo,
             techRemark,
-            booked.ProjectDisplayLabel);
+            ProjectLabel: "300");
 
         var evidence = new PayrollActionEvidenceSnapshot(
             findingKey,

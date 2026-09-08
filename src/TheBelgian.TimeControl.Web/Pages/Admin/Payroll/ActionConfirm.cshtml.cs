@@ -12,6 +12,7 @@ namespace TheBelgian.TimeControl.Web.Pages.Admin.Payroll;
 
 public sealed class ActionConfirmModel(
     IPayrollActionService payrollActionService,
+    IPayrollProject300WorkbenchService workbenchService,
     ICurrentUserContext currentUser,
     IOptions<PayrollShadowOptions> payrollOptions,
     IOptions<PayrollActionsOptions> actionsOptions,
@@ -86,12 +87,19 @@ public sealed class ActionConfirmModel(
             {
                 var confirmation = await payrollActionService.PrepareConfirmationAsync(ActionId, cancellationToken);
                 TempData["FlashSuccess"] = BuildSuccessMessage(confirmation);
+                workbenchService.InvalidateQueueCache(
+                    confirmation?.Year ?? 0,
+                    confirmation?.Month ?? 0);
+                var nextFocus = await ResolveNextProject300FocusAsync(
+                    confirmation?.Year,
+                    confirmation?.Month,
+                    cancellationToken);
                 return RedirectToPage("./Workbench", new
                 {
                     year = confirmation?.Year,
                     month = confirmation?.Month,
-                    Search = confirmation?.DisplayName ?? confirmation?.ResourceId,
                     Scope = PayrollReviewQueueScope.Open,
+                    Focus = nextFocus,
                 });
             }
 
@@ -140,7 +148,6 @@ public sealed class ActionConfirmModel(
                 {
                     year = confirmation.Year,
                     month = confirmation.Month,
-                    Search = confirmation.DisplayName ?? confirmation.ResourceId,
                     Scope = PayrollReviewQueueScope.Open,
                 });
             }
@@ -154,6 +161,36 @@ public sealed class ActionConfirmModel(
         }
 
         return await OnGetAsync(cancellationToken);
+    }
+
+    private async Task<string?> ResolveNextProject300FocusAsync(
+        int? year,
+        int? month,
+        CancellationToken cancellationToken)
+    {
+        if (year is null or <= 0 || month is null or <= 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            var shell = await workbenchService.GetShellAsync(
+                year.Value,
+                month.Value,
+                new PayrollReviewQueueFilter(
+                    PayrollReviewCategory.Project300,
+                    Scope: PayrollReviewQueueScope.Open),
+                selectedAdminCaseKey: null,
+                cancellationToken);
+            return shell.SelectedKey
+                ?? (shell.Cases.Count > 0 ? shell.Cases[0].AdminCaseKey : null);
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Could not resolve next Project300 focus after action {ActionId}.", ActionId);
+            return null;
+        }
     }
 
     private bool EnsureUiEnabled() =>

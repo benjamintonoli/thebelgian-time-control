@@ -302,7 +302,7 @@ public sealed class PayrollReviewWorkflowUxTests
         public Task<PayrollShadowEmployeeDetail?> GetEmployeeDetailAsync(int year, int month, string resourceId, CancellationToken cancellationToken) => Task.FromResult<PayrollShadowEmployeeDetail?>(null);
         public Task<PayrollRosterPage> GetPayrollRosterAsync(PayrollRosterFilter filter, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<IReadOnlyList<PayrollShadowMonthSummary>> ListMonthsAsync(CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<PayrollShadowMonthSummary>>([]);
-        public Task<PayrollShadowMonth> RebuildSnapshotAsync(int year, int month, DateOnly evaluationDate, string actor, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<PayrollShadowMonth> RebuildSnapshotAsync(int year, int month, DateOnly evaluationDate, string actor, CancellationToken cancellationToken, IReadOnlyCollection<string>? limitToResourceIds = null) => throw new NotSupportedException();
         public Task ResetEligibilityAsync(SetPayrollEligibilityResetRequest request, string actor, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task SetEligibilityAsync(SetPayrollEligibilityRequest request, string actor, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task SetReviewStatusAsync(SetPayrollReviewStatusRequest request, string actor, CancellationToken cancellationToken) => Task.CompletedTask;

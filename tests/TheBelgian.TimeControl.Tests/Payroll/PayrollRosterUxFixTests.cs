@@ -234,8 +234,7 @@ public sealed class PayrollRosterUxFixTests
             int year, int month, DateOnly evaluationDate, string actor, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 
-        public Task<PayrollShadowMonth> RebuildSnapshotAsync(
-            int year, int month, DateOnly evaluationDate, string actor, CancellationToken cancellationToken) =>
+        public Task<PayrollShadowMonth> RebuildSnapshotAsync(int year, int month, DateOnly evaluationDate, string actor, CancellationToken cancellationToken, IReadOnlyCollection<string>? limitToResourceIds = null) =>
             throw new NotSupportedException();
 
         public Task<PayrollMonthPeriodEligibilityInsight> GetPeriodEligibilityInsightAsync(

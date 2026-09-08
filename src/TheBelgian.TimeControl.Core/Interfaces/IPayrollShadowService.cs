@@ -30,13 +30,16 @@ public interface IPayrollShadowService
     /// <summary>
     /// Rebuilds employee results for an existing non-finalized shadow month.
     /// Finalized months cannot be rebuilt.
+    /// When <paramref name="limitToResourceIds"/> is set, only those employees and their findings
+    /// are rematerialized (other employees/findings preserved).
     /// </summary>
     Task<PayrollShadowMonth> RebuildSnapshotAsync(
         int year,
         int month,
         DateOnly evaluationDate,
         string actor,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        IReadOnlyCollection<string>? limitToResourceIds = null);
 
     Task<PayrollMonthPeriodEligibilityInsight> GetPeriodEligibilityInsightAsync(
         int year,

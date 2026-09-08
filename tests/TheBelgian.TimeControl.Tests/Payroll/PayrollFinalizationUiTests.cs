@@ -199,7 +199,7 @@ public sealed class PayrollFinalizationUiTests
         }
 
         public Task<PayrollShadowMonth> CreateSnapshotAsync(int year, int month, DateOnly evaluationDate, string actor, CancellationToken cancellationToken) => throw new NotSupportedException();
-        public Task<PayrollShadowMonth> RebuildSnapshotAsync(int year, int month, DateOnly evaluationDate, string actor, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<PayrollShadowMonth> RebuildSnapshotAsync(int year, int month, DateOnly evaluationDate, string actor, CancellationToken cancellationToken, IReadOnlyCollection<string>? limitToResourceIds = null) => throw new NotSupportedException();
         public Task<PayrollMonthPeriodEligibilityInsight> GetPeriodEligibilityInsightAsync(int year, int month, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<ApplyConfirmedRosterToMonthResult> ApplyConfirmedRosterToMonthAsync(int year, int month, string actor, string? comment, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<IReadOnlyList<PayrollShadowReviewAudit>> GetAuditTrailAsync(int year, int month, string? resourceId, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<PayrollShadowReviewAudit>>([]);

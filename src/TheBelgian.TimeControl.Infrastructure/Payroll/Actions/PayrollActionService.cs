@@ -1147,7 +1147,8 @@ internal sealed class PayrollActionService(
             month.Month,
             month.EvaluationDate,
             actor,
-            cancellationToken);
+            cancellationToken,
+            limitToResourceIds: string.IsNullOrWhiteSpace(action.ResourceId) ? null : [action.ResourceId]);
 
         return new PayrollActionExecutionResult(
             action.ActionId,

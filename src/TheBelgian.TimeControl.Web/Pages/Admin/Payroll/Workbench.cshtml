@@ -408,6 +408,9 @@ else
   else {
     const first = document.querySelector('.queue-case:not(.d-none)');
     if (first?.dataset.adminCaseKey) loadDetail(first.dataset.adminCaseKey);
+    else if (detailHost) {
+      detailHost.innerHTML = '<div class="empty-detail p-4"><h2 class="h5">Geen open case</h2><p class="text-muted mb-0">Selecteer een case in de queue of pas filters aan.</p></div>';
+    }
   }
 })();
 </script>
