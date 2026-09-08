@@ -308,7 +308,14 @@ public sealed class August2026PayrollShadowAcceptanceTests(ITestOutputHelper out
     private static readonly string ProductionRoot = @"C:\Apps\TheBelgian.TimeControl";
     private static readonly DateOnly EvaluationDate = new(2026, 9, 2);
 
+    /// <summary>
+    /// Live-data acceptance against current Plenion ODBC + Power BI August CSV.
+    /// Environment-dependent: can fail when live source diverges from the export
+    /// (known city/km drift) or after controlled live payroll mutations (e.g. Ayrton delete).
+    /// Not a pure unit regression; do not treat as a silent skip.
+    /// </summary>
     [Fact]
+    [Trait("Category", "LiveDataAcceptance")]
     public async Task August2026_RealShadowAcceptance_AgainstIsolatedDb()
     {
         var repoRoot = FindRepoRoot();
