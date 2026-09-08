@@ -6,6 +6,7 @@
     var wb = Model.Workbench;
     var selected = wb?.Detail?.AdminCase;
     var detail = wb?.Detail;
+    var focused = detail?.FocusedContext;
     string FmtTime(DateTimeOffset? value) => value?.ToString("HH:mm") ?? "—";
     string FmtHours(decimal hours) => hours.ToString("0.##", nl) + " u";
     string FmtMinutes(decimal hours)
@@ -36,14 +37,13 @@ else
         </div>
 
         <section class="mb-4">
-            <div class="text-uppercase small text-muted fw-semibold mb-1">Boeking</div>
             <div class="display-6 fs-3 fw-semibold mb-1">PROJECT 300</div>
             @if (detail.BookedRows.Count == 1)
             {
                 var row = detail.BookedRows[0];
                 <div class="fs-4">@FmtTime(row.Start) → @FmtTime(row.End)</div>
-                <div class="text-muted">@FmtMinutes(row.AtlHours) · @FmtHours(row.AtlHours)</div>
-                @if (!string.IsNullOrWhiteSpace(row.BonNr))
+                <div class="text-muted">@FmtMinutes(row.AtlHours)</div>
+                @if (PayrollProject300WorkbenchBuilder.IsMeaningfulBonNr(row.BonNr))
                 {
                     <div class="small text-muted mt-1">BON @row.BonNr</div>
                 }
@@ -65,10 +65,10 @@ else
                     }
                 </ul>
             }
-            <div class="mt-2"><strong>Reservatie voor deze 300-boeking:</strong> @detail.MatchingReservationLabel</div>
+            <div class="mt-2 text-muted">Reservatie: @detail.MatchingReservationLabel</div>
         </section>
 
-        <section class="mb-4">
+        <section class="mb-3">
             <div class="text-uppercase small text-muted fw-semibold mb-2">Uitleg technieker</div>
             @{
                 var tech = detail.TechnicianContext;
@@ -82,7 +82,6 @@ else
                 @if (!string.IsNullOrWhiteSpace(tech.BonTechnicianRemark))
                 {
                     <div class="border-start border-4 border-dark ps-3 mb-2" style="white-space: pre-wrap; font-size: 1.05rem;">@tech.BonTechnicianRemark</div>
-                    <div class="form-text mb-2">Bron: bonopmerking</div>
                 }
                 @foreach (var remark in tech.PerformanceRemarks)
                 {
@@ -98,20 +97,25 @@ else
                         @if (remark.PrestOmschr is not null)
                         {
                             <div>@remark.PrestOmschr</div>
-                            <div class="form-text">Bron: boekingsopmerking</div>
                         }
                         @if (remark.ShowPrestMemo && remark.PrestMemo is not null)
                         {
                             <div class="mt-1">@remark.PrestMemo</div>
-                            <div class="form-text">Bron: boekingsmemo</div>
                         }
                     </div>
                 }
             }
         </section>
 
+        @if (!string.IsNullOrWhiteSpace(focused?.ContextSummary))
+        {
+            <section class="mb-4 p300-context-summary">
+                <div class="text-uppercase small text-muted fw-semibold mb-1">Korte context</div>
+                <p class="mb-0 p300-tl-title">@focused.ContextSummary</p>
+            </section>
+        }
+
         <section class="mb-4">
-            <div class="text-uppercase small text-muted fw-semibold mb-2">Dagverloop</div>
             @if (detail.GpsContext.IsLoading)
             {
                 <div class="small text-muted mb-2" id="gps-inline-status">GPS-context laden…</div>
@@ -119,35 +123,45 @@ else
             <div id="gps-panel" class="d-none"
                  data-admin-case-key="@selected.AdminCaseKey"
                  data-loading="@(detail.GpsContext.IsLoading ? "true" : "false")"></div>
-            @if (detail.DayTimeline is null || detail.DayTimeline.Count == 0)
+
+            @if (focused is null || (focused.Before.Count == 0 && focused.Booking.Count == 0 && focused.After.Count == 0))
             {
-                <div class="text-muted small">Nog geen dagverloop beschikbaar.</div>
+                <div class="text-muted small">Nog geen context beschikbaar.</div>
             }
             else
             {
-                <ul class="list-unstyled p300-day-timeline mb-0" id="p300-day-timeline">
-                    @foreach (var entry in detail.DayTimeline)
-                    {
-                        <li class="d-flex gap-2 py-2 border-bottom p300-tl-row @(entry.IsSelected300 ? "p300-tl-selected" : "")">
-                            <div class="text-nowrap small fw-semibold p300-tl-time" style="min-width: 5.5rem;">
-                                @FmtTime(entry.Start)@if (entry.End is { } e) { <span>–@e.ToString("HH:mm")</span> }
-                            </div>
-                            <div class="p300-tl-body">
-                                <span class="badge p300-badge p300-badge-@entry.Badge.ToLowerInvariant()">@entry.Badge</span>
-                                <span class="p300-tl-title @(entry.IsSelected300 ? "fw-semibold" : "")">@entry.Title</span>
-                                @if (!string.IsNullOrWhiteSpace(entry.Subtitle))
-                                {
-                                    <div class="small p300-tl-sub">@entry.Subtitle</div>
-                                }
-                                @if (!string.IsNullOrWhiteSpace(entry.SecondaryDetail) && entry.Kind == PayrollProject300DayTimelineKind.Gps)
-                                {
-                                    <div class="small p300-tl-secondary">@entry.SecondaryDetail</div>
-                                }
-                            </div>
-                        </li>
-                    }
-                </ul>
+                if (focused.Before.Count > 0)
+                {
+                    <div class="text-uppercase small text-muted fw-semibold mb-1">Voor</div>
+                    ViewData["ListId"] = "p300-before";
+                    <partial name="_Project300Timeline" model="focused.Before" />
+                }
+
+                <div class="text-uppercase small text-muted fw-semibold mb-1 mt-3">300</div>
+                ViewData["ListId"] = "p300-booking";
+                <partial name="_Project300Timeline" model="focused.Booking" />
+
+                if (focused.After.Count > 0)
+                {
+                    <div class="text-uppercase small text-muted fw-semibold mb-1 mt-3">Daarna</div>
+                    ViewData["ListId"] = "p300-after";
+                    <partial name="_Project300Timeline" model="focused.After" />
+                }
             }
+
+            @if (focused is { HasMoreThanFocused: true })
+            {
+                <details class="mt-3 p300-full-day">
+                    <summary class="fw-semibold">Volledige dag tonen</summary>
+                    <div class="mt-2">
+                        @{
+                            ViewData["ListId"] = "p300-full-day";
+                        }
+                        <partial name="_Project300Timeline" model="focused.FullDay" />
+                    </div>
+                </details>
+            }
+
             <p class="small text-muted mt-2 mb-0">@PayrollProject300CaseDetail.GpsNeverValidatesNote</p>
         </section>
 

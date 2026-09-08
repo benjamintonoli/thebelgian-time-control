@@ -81,6 +81,7 @@ public static class PayrollProject300WorkbenchBuilder
         var corrections = BuildCorrectionTargets(selected, activityByPerformanceId);
         var technician = BuildTechnicianContext(selected, bonTechnicianRemark, adminCase.BonNr);
         var dayTimeline = BuildUnifiedDayTimeline(selected, dayPerformances, dayPlanning, gps, gpsPending, knownLocations);
+        var focused = BuildFocusedReviewContext(dayTimeline, selected);
         var technical = includeTechnicalDiagnostics
             ? (IReadOnlyList<string>)BuildTechnicalNotes(adminCase, selected, gps, technician)
             : Array.Empty<string>();
@@ -98,7 +99,8 @@ public static class PayrollProject300WorkbenchBuilder
             TechnicalCollapsedNotes: technical,
             TechnicianContext: technician,
             DayTimeline: dayTimeline,
-            HasSupportedTimeCorrection: hasSupported);
+            HasSupportedTimeCorrection: hasSupported,
+            FocusedContext: focused);
     }
 
     public static IReadOnlyList<PayrollProject300DayTimelineEntry> BuildUnifiedDayTimeline(
@@ -164,8 +166,10 @@ public static class PayrollProject300WorkbenchBuilder
             var is300 = selectedIds.Contains(perf.SourceEntryId);
             var title = is300
                 ? FormatDuration(perf.AtlHoursRaw)
-                : (BuildProjectDisplayLabel(perf.ProjectNumber, perf.ProjectId, perf.BonNr) ?? "Prestatie");
-            var subtitle = NormalizeTechnicianText(perf.Description);
+                : BuildPerformanceTimelineLabel(perf);
+            var subtitle = is300
+                ? NormalizeTechnicianText(perf.Description)
+                : null;
             entries.Add(new PayrollProject300DayTimelineEntry(
                 SortAt: perf.Start!.Value,
                 Start: perf.Start,
@@ -191,6 +195,326 @@ public static class PayrollProject300WorkbenchBuilder
             .ThenBy(item => item.Kind)
             .ThenBy(item => item.Badge, StringComparer.Ordinal)
             .ToArray();
+    }
+
+    /// <summary>
+    /// Concise default review window around Project 300. Full day remains in FullDay.
+    /// </summary>
+    public static PayrollProject300FocusedContext BuildFocusedReviewContext(
+        IReadOnlyList<PayrollProject300DayTimelineEntry> fullDay,
+        IReadOnlyList<NormalizedPerformanceEntry> selectedPerformances)
+    {
+        fullDay ??= [];
+        selectedPerformances ??= [];
+        var ordered = fullDay
+            .OrderBy(item => item.SortAt)
+            .ThenBy(item => item.Kind)
+            .ThenBy(item => item.Badge, StringComparer.Ordinal)
+            .ToArray();
+
+        var starts = selectedPerformances
+            .Where(item => item.Start is not null)
+            .Select(item => item.Start!.Value)
+            .ToArray();
+        var ends = selectedPerformances
+            .Where(item => item.End is not null)
+            .Select(item => item.End!.Value)
+            .ToArray();
+        if (starts.Length == 0 || ends.Length == 0)
+        {
+            var bookingOnly = ordered.Where(item => item.IsSelected300).ToArray();
+            return new PayrollProject300FocusedContext(
+                ContextSummary: null,
+                Before: [],
+                Booking: bookingOnly,
+                After: [],
+                FullDay: ordered,
+                HasMoreThanFocused: ordered.Length > bookingOnly.Length);
+        }
+
+        var windowStart = starts.Min();
+        var windowEnd = ends.Max();
+        var booking = ordered.Where(item => item.IsSelected300).ToArray();
+        var before = BuildFocusedBefore(ordered, windowStart);
+        var after = BuildFocusedAfter(ordered, windowStart, windowEnd, before);
+        var duringGps = ordered
+            .Where(item =>
+                item.Kind == PayrollProject300DayTimelineKind.Gps
+                && !before.Contains(item)
+                && !after.Contains(item)
+                && EventOverlapsWindow(item, windowStart, windowEnd))
+            .ToArray();
+        var bookingSection = booking
+            .Concat(duringGps)
+            .OrderBy(item => item.SortAt)
+            .ThenBy(item => item.Kind)
+            .ToArray();
+
+        var focusedKeys = before.Concat(bookingSection).Concat(after).ToHashSet();
+        var summary = BuildDeterministicContextSummary(before, bookingSection, after, windowStart, windowEnd);
+
+        return new PayrollProject300FocusedContext(
+            ContextSummary: summary,
+            Before: before,
+            Booking: bookingSection,
+            After: after,
+            FullDay: ordered,
+            HasMoreThanFocused: ordered.Any(item => !focusedKeys.Contains(item)));
+    }
+
+    public static string? BuildDeterministicContextSummary(
+        IReadOnlyList<PayrollProject300DayTimelineEntry> before,
+        IReadOnlyList<PayrollProject300DayTimelineEntry> booking,
+        IReadOnlyList<PayrollProject300DayTimelineEntry> after,
+        DateTimeOffset windowStart,
+        DateTimeOffset windowEnd)
+    {
+        var parts = new List<string>();
+        var arrival = before
+            .Concat(booking)
+            .Where(IsGpsArrival)
+            .Where(item => item.SortAt >= windowStart.AddMinutes(-15))
+            .Where(item => item.SortAt <= windowEnd)
+            .OrderBy(item => item.SortAt >= windowStart ? 0 : 1)
+            .ThenBy(item => Math.Abs((item.SortAt - windowStart).TotalMinutes))
+            .FirstOrDefault();
+        if (arrival is null)
+        {
+            // Fallback: last arrival before booking when no near-window arrival exists.
+            arrival = before
+                .Concat(booking)
+                .Where(IsGpsArrival)
+                .Where(item => item.SortAt <= windowStart)
+                .OrderByDescending(item => item.SortAt)
+                .FirstOrDefault();
+        }
+        if (arrival is not null)
+        {
+            var loc = arrival.Locality ?? ExtractLocalityFromTitle(arrival.Title, "Aankomst");
+            parts.Add(
+                loc is null
+                    ? "Aangekomen om " + FormatClock(arrival.SortAt)
+                    : "Aangekomen bij " + loc + " om " + FormatClock(arrival.SortAt));
+        }
+
+        parts.Add("300 geboekt " + FormatClock(windowStart) + "–" + FormatClock(windowEnd));
+
+        var departure = after
+            .Concat(booking)
+            .Where(IsGpsDeparture)
+            .OrderBy(item => item.SortAt)
+            .FirstOrDefault(item => item.SortAt >= windowStart);
+        if (departure is not null)
+        {
+            parts.Add("vertrokken om " + FormatClock(departure.SortAt));
+        }
+
+        var nextArrival = after
+            .Where(IsGpsArrival)
+            .OrderBy(item => item.SortAt)
+            .FirstOrDefault();
+        if (nextArrival is not null)
+        {
+            var loc = nextArrival.Locality ?? ExtractLocalityFromTitle(nextArrival.Title, "Aankomst");
+            parts.Add(
+                loc is null
+                    ? "volgende bestemming om " + FormatClock(nextArrival.SortAt)
+                    : "volgende bestemming " + loc + " om " + FormatClock(nextArrival.SortAt));
+        }
+
+        var sentence = string.Join(" · ", parts) + ".";
+        var nextWork = after.FirstOrDefault(item =>
+            item.Kind is PayrollProject300DayTimelineKind.Planning or PayrollProject300DayTimelineKind.Performance);
+        if (nextWork is not null)
+        {
+            var kind = nextWork.Kind == PayrollProject300DayTimelineKind.Planning
+                ? "Volgende planning"
+                : "Volgende prestatie";
+            var when = nextWork.Start is null
+                ? null
+                : FormatClock(nextWork.Start.Value)
+                  + (nextWork.End is null ? "" : "–" + FormatClock(nextWork.End.Value));
+            sentence += " " + kind + ": " + nextWork.Title
+                + (when is null ? "." : " · " + when + ".");
+        }
+
+        return sentence;
+    }
+
+    private static PayrollProject300DayTimelineEntry[] BuildFocusedBefore(
+        IReadOnlyList<PayrollProject300DayTimelineEntry> ordered,
+        DateTimeOffset windowStart)
+    {
+        var gps = ordered.Where(item => item.Kind == PayrollProject300DayTimelineKind.Gps).ToArray();
+        if (gps.Length == 0)
+        {
+            return [];
+        }
+
+        // Prefer arrival nearest to the booking start (incoming to the 300 context).
+        var arrival = gps
+            .Where(IsGpsArrival)
+            .Where(item => item.SortAt <= windowStart.AddMinutes(45))
+            .OrderBy(item => Math.Abs((item.SortAt - windowStart).TotalMinutes))
+            .ThenByDescending(item => item.SortAt)
+            .FirstOrDefault();
+        if (arrival is null)
+        {
+            return gps
+                .Where(item => item.SortAt < windowStart)
+                .OrderByDescending(item => item.SortAt)
+                .Take(4)
+                .OrderBy(item => item.SortAt)
+                .ToArray();
+        }
+
+        var arrivalIndex = Array.IndexOf(gps, arrival);
+        var startIndex = arrivalIndex;
+        for (var i = arrivalIndex - 1; i >= 0; i--)
+        {
+            var gap = (gps[i + 1].SortAt - (gps[i].End ?? gps[i].SortAt)).TotalMinutes;
+            if (gap > 45)
+            {
+                break;
+            }
+
+            startIndex = i;
+            if (arrivalIndex - startIndex >= 7)
+            {
+                break;
+            }
+        }
+
+        // Keep arrival in VOOR when it is at/near booking start; later during-booking arrivals stay for booking section.
+        var take = arrival.SortAt <= windowStart.AddMinutes(5)
+            ? arrivalIndex - startIndex + 1
+            : Math.Max(0, arrivalIndex - startIndex);
+        return take == 0 ? [] : gps.Skip(startIndex).Take(take).ToArray();
+    }
+
+    private static PayrollProject300DayTimelineEntry[] BuildFocusedAfter(
+        IReadOnlyList<PayrollProject300DayTimelineEntry> ordered,
+        DateTimeOffset windowStart,
+        DateTimeOffset windowEnd,
+        IReadOnlyList<PayrollProject300DayTimelineEntry> before)
+    {
+        var after = new List<PayrollProject300DayTimelineEntry>();
+        var gps = ordered
+            .Where(item => item.Kind == PayrollProject300DayTimelineKind.Gps && !before.Contains(item))
+            .OrderBy(item => item.SortAt)
+            .ToArray();
+
+        var departure = gps
+            .Where(IsGpsDeparture)
+            .Where(item => item.SortAt >= windowStart)
+            .OrderBy(item => item.SortAt)
+            .FirstOrDefault();
+        DateTimeOffset? nextArrivalAt = null;
+        if (departure is not null)
+        {
+            after.Add(departure);
+            var departureIndex = Array.IndexOf(gps, departure);
+            for (var i = departureIndex + 1; i < gps.Length; i++)
+            {
+                var item = gps[i];
+                if (item.Title.Contains("stilstand", StringComparison.OrdinalIgnoreCase)
+                    && item.SortAt < windowEnd
+                    && (item.End ?? item.SortAt) <= windowEnd)
+                {
+                    continue;
+                }
+
+                after.Add(item);
+                if (IsGpsArrival(item))
+                {
+                    nextArrivalAt = item.SortAt;
+                    break;
+                }
+
+                if (after.Count >= 4)
+                {
+                    break;
+                }
+            }
+        }
+
+        var cut = after.Count == 0
+            ? windowEnd
+            : after.Max(item => item.End ?? item.SortAt);
+        var anchor = nextArrivalAt ?? cut;
+
+        // Prefer next planning still active / starting around the immediate post-P300 destination.
+        // Ignore all-day planning that started long before the booking.
+        var nextPlanning = ordered
+            .Where(item => item.Kind == PayrollProject300DayTimelineKind.Planning)
+            .Where(item => (item.End ?? item.SortAt) > windowStart)
+            .Where(item => item.SortAt >= windowStart.AddHours(-1))
+            .Where(item => item.SortAt <= anchor.AddHours(1.5))
+            .OrderBy(item =>
+            {
+                if (item.Start is not null && item.End is not null
+                    && item.Start <= anchor && item.End >= anchor)
+                {
+                    return 0d;
+                }
+
+                return Math.Abs((item.SortAt - anchor).TotalMinutes);
+            })
+            .ThenBy(item => item.SortAt)
+            .FirstOrDefault();
+
+        var nextPerformance = ordered
+            .Where(item => item.Kind == PayrollProject300DayTimelineKind.Performance && !item.IsSelected300)
+            .Where(item => item.SortAt >= windowEnd)
+            .Where(item => item.SortAt <= anchor.AddHours(1))
+            .OrderBy(item => item.SortAt)
+            .FirstOrDefault();
+
+        // Prefer planning over an immediate technical performance when both exist.
+        PayrollProject300DayTimelineEntry? nextWork = nextPlanning ?? nextPerformance;
+        if (nextWork is not null && !after.Contains(nextWork))
+        {
+            after.Add(nextWork with
+            {
+                Subtitle = nextWork.Kind == PayrollProject300DayTimelineKind.Planning
+                    ? "Volgende planning"
+                    : "Volgende prestatie",
+            });
+        }
+
+        return after
+            .OrderBy(item => item.SortAt)
+            .ThenBy(item => item.Kind)
+            .ToArray();
+    }
+
+    private static bool EventOverlapsWindow(
+        PayrollProject300DayTimelineEntry entry,
+        DateTimeOffset windowStart,
+        DateTimeOffset windowEnd)
+    {
+        var start = entry.Start ?? entry.SortAt;
+        var end = entry.End ?? entry.SortAt;
+        return start < windowEnd && end > windowStart;
+    }
+
+    private static bool IsGpsArrival(PayrollProject300DayTimelineEntry entry) =>
+        entry.Kind == PayrollProject300DayTimelineKind.Gps
+        && entry.Title.StartsWith("Aankomst", StringComparison.Ordinal);
+
+    private static bool IsGpsDeparture(PayrollProject300DayTimelineEntry entry) =>
+        entry.Kind == PayrollProject300DayTimelineKind.Gps
+        && entry.Title.StartsWith("Vertrek", StringComparison.Ordinal);
+
+    private static string? ExtractLocalityFromTitle(string title, string prefix)
+    {
+        if (string.IsNullOrWhiteSpace(title) || !title.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var rest = title[prefix.Length..].Trim();
+        return string.IsNullOrWhiteSpace(rest) ? null : rest;
     }
 
     /// <summary>
@@ -284,7 +608,16 @@ public static class PayrollProject300WorkbenchBuilder
             {
                 departureSubtitle = "Vertrek geregistreerd, bestemming niet betrouwbaar beschikbaar";
             }
-            else if (trip.Start >= selectedStart && trip.Start <= selectedEnd)
+            else if (trip.Start >= selectedStart && trip.Start < selectedEnd)
+            {
+                var minsBeforeEnd = Math.Max(
+                    0,
+                    (int)Math.Round((selectedEnd - trip.Start).TotalMinutes, MidpointRounding.AwayFromZero));
+                departureSubtitle = minsBeforeEnd > 0
+                    ? "Vertrek " + minsBeforeEnd + " min vóór einde boeking"
+                    : "Vertrek tijdens 300-boeking";
+            }
+            else if (trip.Start == selectedEnd)
             {
                 departureSubtitle = "Vertrek tijdens 300-boeking";
             }
@@ -548,17 +881,17 @@ public static class PayrollProject300WorkbenchBuilder
     }
 
     /// <summary>
-    /// Human-facing project label: prefer BON, then Project 100/200/300, then project number.
-    /// Avoids raw internal database ids as the primary label.
+    /// Human-facing project label: prefer meaningful BON, then Project 100/200/300, then project number.
+    /// Avoids raw internal database ids and meaningless BON 0 as the primary label.
     /// </summary>
     public static string BuildProjectDisplayLabel(
         int? projectNumber,
         string? projectId = null,
         string? bonNr = null)
     {
-        if (!string.IsNullOrWhiteSpace(bonNr))
+        if (IsMeaningfulBonNr(bonNr))
         {
-            return "BON " + bonNr.Trim();
+            return "BON " + bonNr!.Trim();
         }
 
         if (projectNumber is 100 or 200 or 300)
@@ -581,6 +914,53 @@ public static class PayrollProject300WorkbenchBuilder
         }
 
         return "—";
+    }
+
+    public static bool IsMeaningfulBonNr(string? bonNr)
+    {
+        if (string.IsNullOrWhiteSpace(bonNr))
+        {
+            return false;
+        }
+
+        var trimmed = bonNr.Trim();
+        if (trimmed.All(ch => ch == '0'))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Timeline label for non-selected performances. Never primary-labels as "BON 0".
+    /// </summary>
+    public static string BuildPerformanceTimelineLabel(NormalizedPerformanceEntry performance)
+    {
+        ArgumentNullException.ThrowIfNull(performance);
+        if (IsMeaningfulBonNr(performance.BonNr))
+        {
+            return "BON " + performance.BonNr!.Trim();
+        }
+
+        var description = NormalizeTechnicianText(performance.Description);
+        if (!string.IsNullOrWhiteSpace(description))
+        {
+            return description.Length <= 72 ? description : description[..72].TrimEnd() + "…";
+        }
+
+        var memo = NormalizeTechnicianText(performance.Memo);
+        if (!string.IsNullOrWhiteSpace(memo))
+        {
+            return memo.Length <= 72 ? memo : memo[..72].TrimEnd() + "…";
+        }
+
+        if (performance.ProjectNumber is > 0 and not 300)
+        {
+            return "Project " + performance.ProjectNumber.Value.ToString(CultureInfo.InvariantCulture);
+        }
+
+        return "Andere prestatie";
     }
 
     private static bool LooksLikeRawInternalId(string value) =>

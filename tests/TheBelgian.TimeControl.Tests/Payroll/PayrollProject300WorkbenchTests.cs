@@ -422,11 +422,14 @@ public sealed class PayrollProject300WorkbenchTests
             && item.Title.Contains("Brussel", StringComparison.Ordinal));
         Assert.Contains(chain, item =>
             item.Title == "Vertrek The Belgian — Meise"
-            || (item.Subtitle != null && item.Subtitle.Contains("Vertrek tijdens 300-boeking", StringComparison.Ordinal)));
+            && item.Subtitle != null
+            && (item.Subtitle.Contains("Vertrek", StringComparison.Ordinal)
+                && item.Subtitle.Contains("vóór einde", StringComparison.Ordinal)
+                || item.Subtitle.Contains("Vertrek tijdens", StringComparison.Ordinal)));
         Assert.Contains(chain, item =>
             item.Subtitle != null && (
                 item.Subtitle.Contains("Overlapt", StringComparison.Ordinal)
-                || item.Subtitle.Contains("Vertrek tijdens", StringComparison.Ordinal)
+                || item.Subtitle.Contains("Vertrek", StringComparison.Ordinal)
                 || item.Subtitle.Contains("Aankomst", StringComparison.Ordinal)));
     }
 
@@ -800,6 +803,126 @@ public sealed class PayrollProject300WorkbenchTests
         Assert.False(cache.Has("11", Day));
     }
 
+    [Fact]
+    public void FocusedContext_HidesLaterUnrelatedDayEvents()
+    {
+        var selected = new[] { Performance(200, "08:40", "08:50", 0.17m, description: "ophalen badgelezer") };
+        var day = new[]
+        {
+            selected[0],
+            Performance(201, "09:10", "10:10", 1m, projectNumber: 100, description: null, bonNr: "0"),
+            Performance(202, "11:00", "17:00", 6m, projectNumber: 100, description: null, bonNr: "0"),
+        };
+        var planning = new[]
+        {
+            Reservation(taskTypeId: 26, projectNumber: 501, from: "09:00", to: "10:00", subject: "Parker Hannifin"),
+            Reservation(taskTypeId: 26, projectNumber: 502, from: "12:30", to: "18:30", subject: "Late job"),
+        };
+        var catalog = new KnownLocationCatalog(
+        [
+            new KnownLocationDefinition("The Belgian", "Meise", 50.984487, 4.300723, 120, "Slozenstraat 86"),
+        ]);
+        var gps = new StandbyGpsDayEvidence(
+            "10",
+            Day,
+            true,
+            false,
+            "OBJ",
+            "1-AAA",
+            "Resolved",
+            [
+                new StandbyGpsTripEvidence("t1", At("07:54"), At("08:00"), 5m, 6, "9200 Dendermonde", "9300 Aalst", "OBJ", "1-AAA", 51.03m, 4.10m, 50.94m, 4.04m),
+                new StandbyGpsTripEvidence("t2", At("08:02"), At("08:40"), 20m, 38, "9300 Aalst", "Slozenstraat 86, 1861 Meise", "OBJ", "1-AAA", 50.94m, 4.04m, 50.9845m, 4.3008m),
+                new StandbyGpsTripEvidence("t3", At("08:48"), At("09:08"), 15m, 20, "Slozenstraat 86, 1861 Meise", "2850 Boom", "OBJ", "1-AAA", 50.9845m, 4.3008m, 51.09m, 4.37m),
+                new StandbyGpsTripEvidence("t4", At("10:08"), At("10:57"), 20m, 40, "2850 Boom", "9300 Aalst", "OBJ", "1-AAA", 51.09m, 4.37m, 50.94m, 4.04m),
+            ],
+            "Plate");
+
+        var full = PayrollProject300WorkbenchBuilder.BuildUnifiedDayTimeline(selected, day, planning, gps, knownLocations: catalog);
+        var focused = PayrollProject300WorkbenchBuilder.BuildFocusedReviewContext(full, selected);
+
+        Assert.Contains(focused.Before, item => item.Title.Contains("Dendermonde", StringComparison.Ordinal));
+        Assert.Contains(focused.Before, item => item.Title.Contains("The Belgian", StringComparison.Ordinal));
+        Assert.Contains(focused.Booking, item => item.IsSelected300);
+        Assert.Contains(focused.After, item => item.Title.Contains("Vertrek", StringComparison.Ordinal) && item.Title.Contains("The Belgian", StringComparison.Ordinal));
+        Assert.Contains(focused.After, item => item.Title.Contains("Boom", StringComparison.Ordinal));
+        Assert.Contains(focused.After, item => item.Kind == PayrollProject300DayTimelineKind.Planning && item.Title.Contains("Parker", StringComparison.Ordinal));
+        Assert.DoesNotContain(focused.After, item => item.Title.Contains("Late job", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            focused.Before.Concat(focused.Booking).Concat(focused.After),
+            item => item.Kind == PayrollProject300DayTimelineKind.Performance && item.SortAt >= At("11:00"));
+        Assert.True(focused.HasMoreThanFocused);
+        Assert.Contains(focused.FullDay, item => item.Title.Contains("Late job", StringComparison.Ordinal));
+        Assert.Contains("The Belgian", focused.ContextSummary!, StringComparison.Ordinal);
+        Assert.Contains("Boom", focused.ContextSummary!, StringComparison.Ordinal);
+        Assert.Contains("Parker", focused.ContextSummary!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PerformanceTimelineLabel_RejectsBonZero()
+    {
+        var withZero = Performance(1, "09:00", "10:00", 1m, projectNumber: 100, description: null, bonNr: "0");
+        Assert.Equal("Project 100", PayrollProject300WorkbenchBuilder.BuildPerformanceTimelineLabel(withZero));
+
+        var withDesc = Performance(2, "09:00", "10:00", 1m, projectNumber: 100, description: "Klantwerk", bonNr: "0");
+        Assert.Equal("Klantwerk", PayrollProject300WorkbenchBuilder.BuildPerformanceTimelineLabel(withDesc));
+
+        var bare = Performance(3, "09:00", "10:00", 1m, projectNumber: 300, description: null, bonNr: "0");
+        Assert.Equal("Andere prestatie", PayrollProject300WorkbenchBuilder.BuildPerformanceTimelineLabel(bare));
+
+        Assert.False(PayrollProject300WorkbenchBuilder.IsMeaningfulBonNr("0"));
+        Assert.False(PayrollProject300WorkbenchBuilder.IsMeaningfulBonNr("00"));
+        Assert.True(PayrollProject300WorkbenchBuilder.IsMeaningfulBonNr("26601932"));
+        Assert.Equal("—", PayrollProject300WorkbenchBuilder.BuildProjectDisplayLabel(null, bonNr: "0"));
+    }
+
+    [Fact]
+    public void DepartureDuringBooking_ShowsMinutesBeforeEnd()
+    {
+        var wording = PayrollProject300WorkbenchBuilder.FormatExactOverlapWording(
+            At("08:48"),
+            At("09:08"),
+            At("08:40"),
+            At("08:50"));
+        // Full trip overlap classification may differ; chain builder uses dedicated departure wording.
+        var trips = new[]
+        {
+            new StandbyGpsTripEvidence(
+                "leave",
+                At("08:48"),
+                At("09:08"),
+                10m,
+                20,
+                "Slozenstraat 86, 1861 Meise",
+                "2850 Boom",
+                "OBJ",
+                "1-AAA",
+                50.9845m,
+                4.3008m,
+                51.09m,
+                4.37m),
+        };
+        var catalog = new KnownLocationCatalog(
+        [
+            new KnownLocationDefinition("The Belgian", "Meise", 50.984487, 4.300723, 120, null),
+        ]);
+        var chain = PayrollProject300WorkbenchBuilder.BuildGpsTripChainEntries(trips, At("08:40"), At("08:50"), catalog);
+        var departure = Assert.Single(chain, item => item.Title.StartsWith("Vertrek", StringComparison.Ordinal));
+        Assert.Contains("2 min vóór einde", departure.Subtitle!, StringComparison.Ordinal);
+        Assert.NotNull(wording);
+    }
+
+    [Fact]
+    public void FocusedContext_SummaryOmitsMissingFacts()
+    {
+        var selected = new[] { Performance(1, "10:00", "11:00", 1m) };
+        var full = PayrollProject300WorkbenchBuilder.BuildUnifiedDayTimeline(selected, selected, [], gps: null);
+        var focused = PayrollProject300WorkbenchBuilder.BuildFocusedReviewContext(full, selected);
+        Assert.Contains("300 geboekt 10:00–11:00", focused.ContextSummary!, StringComparison.Ordinal);
+        Assert.DoesNotContain("Aangekomen", focused.ContextSummary!, StringComparison.Ordinal);
+        Assert.DoesNotContain("volgende bestemming", focused.ContextSummary!, StringComparison.Ordinal);
+    }
+
     private static PayrollAdminCase AdminCase(long perfId, decimal booked)
     {
         var finding = Finding("p300", perfId, booked);
@@ -841,7 +964,8 @@ public sealed class PayrollProject300WorkbenchTests
         string? description = null,
         string? memo = null,
         int hfdTaakId = 1,
-        bool isAbsence = false)
+        bool isAbsence = false,
+        string? bonNr = null)
     {
         var startTime = TimeOnly.Parse(start, CultureInfo.InvariantCulture);
         var endTime = TimeOnly.Parse(end, CultureInfo.InvariantCulture);
@@ -860,7 +984,7 @@ public sealed class PayrollProject300WorkbenchTests
             HfdTaakId: hfdTaakId,
             ProjectId: $"P{projectNumber}",
             ProjectNumber: projectNumber,
-            BonNr: null,
+            BonNr: bonNr,
             Description: description,
             Memo: memo,
             Postcode: null,

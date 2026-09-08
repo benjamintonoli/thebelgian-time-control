@@ -25,7 +25,8 @@ public sealed record PayrollProject300CaseDetail(
     IReadOnlyList<string> TechnicalCollapsedNotes,
     PayrollProject300TechnicianContext? TechnicianContext = null,
     IReadOnlyList<PayrollProject300DayTimelineEntry>? DayTimeline = null,
-    bool HasSupportedTimeCorrection = false)
+    bool HasSupportedTimeCorrection = false,
+    PayrollProject300FocusedContext? FocusedContext = null)
 {
     public const string GpsNeverValidatesNote =
         "GPS is enkel context en valideert Project 300 nooit automatisch.";
@@ -34,6 +35,17 @@ public sealed record PayrollProject300CaseDetail(
 
     public decimal TotalAtlHours => BookedRows.Sum(item => item.AtlHours);
 }
+
+/// <summary>
+/// Concise default review window: before / booking / after. FullDay remains available on demand.
+/// </summary>
+public sealed record PayrollProject300FocusedContext(
+    string? ContextSummary,
+    IReadOnlyList<PayrollProject300DayTimelineEntry> Before,
+    IReadOnlyList<PayrollProject300DayTimelineEntry> Booking,
+    IReadOnlyList<PayrollProject300DayTimelineEntry> After,
+    IReadOnlyList<PayrollProject300DayTimelineEntry> FullDay,
+    bool HasMoreThanFocused);
 
 public enum PayrollProject300DayTimelineKind
 {
