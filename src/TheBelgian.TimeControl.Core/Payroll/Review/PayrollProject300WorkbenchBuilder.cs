@@ -77,7 +77,10 @@ public static class PayrollProject300WorkbenchBuilder
             : BuildGpsContext(selected, gps);
         var corrections = BuildCorrectionTargets(selected, activityByPerformanceId);
         var technician = BuildTechnicianContext(selected, bonTechnicianRemark, adminCase.BonNr);
+        var dayTimeline = BuildUnifiedDayTimeline(selected, dayPerformances, dayPlanning, gps, gpsPending);
         var technical = BuildTechnicalNotes(adminCase, selected, gps, technician);
+        var hasSupported = corrections.Any(item =>
+            item.CorrectionCapability == PayrollProject300CorrectionCapability.SupportedVanTot);
 
         return new PayrollProject300CaseDetail(
             AdminCase: adminCase,
@@ -88,7 +91,175 @@ public static class PayrollProject300WorkbenchBuilder
             GpsContext: gpsContext,
             CorrectionTargets: corrections,
             TechnicalCollapsedNotes: technical,
-            TechnicianContext: technician);
+            TechnicianContext: technician,
+            DayTimeline: dayTimeline,
+            HasSupportedTimeCorrection: hasSupported);
+    }
+
+    public static IReadOnlyList<PayrollProject300DayTimelineEntry> BuildUnifiedDayTimeline(
+        IReadOnlyList<NormalizedPerformanceEntry> selectedPerformances,
+        IReadOnlyList<NormalizedPerformanceEntry> dayPerformances,
+        IReadOnlyList<PayrollPlanningReservation> dayPlanning,
+        StandbyGpsDayEvidence? gps,
+        bool gpsPending = false)
+    {
+        selectedPerformances ??= [];
+        dayPerformances ??= [];
+        dayPlanning ??= [];
+        var entries = new List<PayrollProject300DayTimelineEntry>();
+        var selectedIds = selectedPerformances.Select(item => item.SourceEntryId).ToHashSet();
+
+        var starts = selectedPerformances
+            .Where(item => item.Start is not null)
+            .Select(item => item.Start!.Value)
+            .ToArray();
+        var ends = selectedPerformances
+            .Where(item => item.End is not null)
+            .Select(item => item.End!.Value)
+            .ToArray();
+        DateTimeOffset? windowStart = starts.Length == 0 ? null : starts.Min();
+        DateTimeOffset? windowEnd = ends.Length == 0 ? null : ends.Max();
+
+        foreach (var plan in dayPlanning.Where(item => item.Classification != PayrollPlanningClassification.Absence))
+        {
+            DateOnly date = default;
+            if (selectedPerformances.Count > 0)
+            {
+                date = selectedPerformances[0].Date;
+            }
+            else if (dayPerformances.Count > 0)
+            {
+                date = dayPerformances[0].Date;
+            }
+
+            if (date == default || plan.TimeFrom is null)
+            {
+                continue;
+            }
+
+            var start = new DateTimeOffset(date.ToDateTime(plan.TimeFrom.Value), TimeSpan.Zero);
+            var end = plan.TimeTo is null
+                ? (DateTimeOffset?)null
+                : new DateTimeOffset(date.ToDateTime(plan.TimeTo.Value), TimeSpan.Zero);
+            entries.Add(new PayrollProject300DayTimelineEntry(
+                SortAt: start,
+                Start: start,
+                End: end,
+                Kind: PayrollProject300DayTimelineKind.Planning,
+                Badge: "PLANNING",
+                Title: BuildPlanningLabel(plan),
+                Subtitle: null,
+                IsSelected300: false));
+        }
+
+        foreach (var perf in dayPerformances.Where(item => !item.IsCalendarSynthetic && !item.IsAbsence && item.Start is not null))
+        {
+            var is300 = selectedIds.Contains(perf.SourceEntryId);
+            var title = is300
+                ? FormatDuration(perf.AtlHoursRaw)
+                : (BuildProjectDisplayLabel(perf.ProjectNumber, perf.ProjectId, perf.BonNr) ?? "Prestatie");
+            var subtitle = NormalizeTechnicianText(perf.Description);
+            entries.Add(new PayrollProject300DayTimelineEntry(
+                SortAt: perf.Start!.Value,
+                Start: perf.Start,
+                End: perf.End,
+                Kind: is300 ? PayrollProject300DayTimelineKind.Project300 : PayrollProject300DayTimelineKind.Performance,
+                Badge: is300 ? "300" : "PRESTATIE",
+                Title: title,
+                Subtitle: subtitle,
+                IsSelected300: is300));
+        }
+
+        if (!gpsPending && gps is { HasVehicleMapping: true } && gps.Trips.Count > 0 && windowStart is not null && windowEnd is not null)
+        {
+            var ws = windowStart.Value;
+            var we = windowEnd.Value;
+            var rangeStart = ws.AddHours(-2);
+            var rangeEnd = we.AddHours(2);
+            foreach (var trip in gps.Trips.Where(t => t.Start < rangeEnd && t.End > rangeStart).OrderBy(t => t.Start))
+            {
+                if (trip.End <= ws)
+                {
+                    var loc = ExtractLocality(FirstAddress(trip.EndAddress, trip.StartAddress));
+                    entries.Add(new PayrollProject300DayTimelineEntry(
+                        SortAt: trip.Start,
+                        Start: trip.Start,
+                        End: trip.End,
+                        Kind: PayrollProject300DayTimelineKind.Gps,
+                        Badge: "GPS",
+                        Title: loc ?? "stilstand",
+                        Subtitle: "stilstand",
+                        IsSelected300: false,
+                        Locality: loc,
+                        SecondaryDetail: FirstAddress(trip.EndAddress, trip.StartAddress),
+                        GpsRelation: "Before"));
+                }
+                else if (trip.Start < we && trip.End > ws)
+                {
+                    var relation = ClassifyGpsOverlap(trip.Start, trip.End, ws, we);
+                    var loc = ExtractLocality(FirstAddress(trip.StartAddress, trip.EndAddress));
+                    var title = relation switch
+                    {
+                        "Overlap" => loc is null ? "Overlapt 300-tijd" : loc,
+                        "Departure" => loc is null ? "Vertrek tijdens 300-tijd" : "vertrek " + loc,
+                        _ => loc ?? "tijdens 300",
+                    };
+                    entries.Add(new PayrollProject300DayTimelineEntry(
+                        SortAt: trip.Start,
+                        Start: trip.Start,
+                        End: trip.End,
+                        Kind: PayrollProject300DayTimelineKind.Gps,
+                        Badge: "GPS",
+                        Title: title,
+                        Subtitle: relation switch
+                        {
+                            "Overlap" => "Overlapt 300-tijd",
+                            "Departure" => "Vertrek tijdens 300-tijd",
+                            _ => "tijdens 300-tijd",
+                        },
+                        IsSelected300: false,
+                        Locality: loc,
+                        SecondaryDetail: FirstAddress(trip.StartAddress, trip.EndAddress),
+                        GpsRelation: relation));
+                }
+                else if (trip.Start >= we)
+                {
+                    var startLoc = ExtractLocality(trip.StartAddress);
+                    var endLoc = ExtractLocality(trip.EndAddress);
+                    entries.Add(new PayrollProject300DayTimelineEntry(
+                        SortAt: trip.Start,
+                        Start: trip.Start,
+                        End: trip.End,
+                        Kind: PayrollProject300DayTimelineKind.Gps,
+                        Badge: "GPS",
+                        Title: endLoc is null ? "vertrek" : $"vertrek → {endLoc}",
+                        Subtitle: startLoc is null ? null : "van " + startLoc,
+                        IsSelected300: false,
+                        Locality: endLoc ?? startLoc,
+                        SecondaryDetail: FirstAddress(trip.StartAddress, trip.EndAddress),
+                        GpsRelation: "After"));
+                    break; // first meaningful after
+                }
+            }
+        }
+
+        return entries
+            .OrderBy(item => item.SortAt)
+            .ThenBy(item => item.Kind)
+            .ToArray();
+    }
+
+    private static string FormatDuration(decimal atlHours)
+    {
+        var minutes = (int)Math.Round(atlHours * 60m, MidpointRounding.AwayFromZero);
+        if (minutes < 60)
+        {
+            return minutes + " min";
+        }
+
+        var h = minutes / 60;
+        var m = minutes % 60;
+        return m == 0 ? h + " u" : h + " u " + m + " min";
     }
 
     public static PayrollProject300TechnicianContext BuildTechnicianContext(
@@ -372,7 +543,7 @@ public static class PayrollProject300WorkbenchBuilder
         foreach (var during in candidates.Where(trip =>
                      trip.Start < selectedEnd && trip.End > selectedStart))
         {
-            events.Add(BuildDuringEvent(during));
+            events.Add(BuildDuringEvent(during, selectedStart, selectedEnd));
         }
 
         var after = candidates
@@ -424,27 +595,104 @@ public static class PayrollProject300WorkbenchBuilder
             Phase: "Before");
     }
 
-    private static PayrollProject300GpsEvent BuildDuringEvent(StandbyGpsTripEvidence trip)
+    private static PayrollProject300GpsEvent BuildDuringEvent(
+        StandbyGpsTripEvidence trip,
+        DateTimeOffset selectedStart,
+        DateTimeOffset selectedEnd)
     {
         var location = FirstAddress(trip.StartAddress, trip.EndAddress);
-        var detailParts = new List<string>();
-        if (!string.IsNullOrWhiteSpace(location))
+        var relation = ClassifyGpsOverlap(trip.Start, trip.End, selectedStart, selectedEnd);
+        var locality = ExtractLocality(location);
+        var label = relation switch
         {
-            detailParts.Add("Locatie: " + location);
-        }
+            "Overlap" => string.IsNullOrWhiteSpace(locality)
+                ? "Overlapt 300-tijd"
+                : "Overlapt 300-tijd · " + locality,
+            "Departure" => string.IsNullOrWhiteSpace(locality)
+                ? "Vertrek tijdens 300-tijd"
+                : "Vertrek tijdens 300-tijd · " + locality,
+            _ => string.IsNullOrWhiteSpace(locality)
+                ? "Tijdens 300-tijd"
+                : "Tijdens 300-tijd · " + locality,
+        };
 
-        var baseDetail = BuildTripDetail(trip, includeAddresses: false);
-        if (!string.IsNullOrWhiteSpace(baseDetail))
+        var detailParts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(location) && !string.Equals(location, locality, StringComparison.OrdinalIgnoreCase))
         {
-            detailParts.Add(baseDetail);
+            detailParts.Add(location);
         }
 
         return new PayrollProject300GpsEvent(
             At: trip.Start,
             End: trip.End,
-            Label: "Tijdens geboekte 300-tijd",
+            Label: label,
             Detail: detailParts.Count == 0 ? null : string.Join(" · ", detailParts),
-            Phase: "During");
+            Phase: relation == "Overlap" || relation == "Departure" ? relation : "During");
+    }
+
+    /// <summary>
+    /// Full / partial overlap vs booked window. Partial → Overlap/Departure wording.
+    /// </summary>
+    public static string ClassifyGpsOverlap(
+        DateTimeOffset tripStart,
+        DateTimeOffset tripEnd,
+        DateTimeOffset selectedStart,
+        DateTimeOffset selectedEnd)
+    {
+        var overlapStart = tripStart > selectedStart ? tripStart : selectedStart;
+        var overlapEnd = tripEnd < selectedEnd ? tripEnd : selectedEnd;
+        if (overlapEnd <= overlapStart)
+        {
+            return "None";
+        }
+
+        var overlapMinutes = (overlapEnd - overlapStart).TotalMinutes;
+        var tripMinutes = Math.Max(1, (tripEnd - tripStart).TotalMinutes);
+        var windowMinutes = Math.Max(1, (selectedEnd - selectedStart).TotalMinutes);
+        var coversMostOfTrip = overlapMinutes >= tripMinutes * 0.8;
+        var coversMostOfWindow = overlapMinutes >= windowMinutes * 0.8;
+        if (coversMostOfTrip || coversMostOfWindow)
+        {
+            return "During";
+        }
+
+        if (tripStart >= selectedStart && tripStart < selectedEnd && tripEnd > selectedEnd)
+        {
+            return "Departure";
+        }
+
+        return "Overlap";
+    }
+
+    public static string? ExtractLocality(string? addressOrLabel)
+    {
+        if (string.IsNullOrWhiteSpace(addressOrLabel))
+        {
+            return null;
+        }
+
+        var text = addressOrLabel.Trim();
+        // Prefer Belgian postcode locality: "1785 Merchtem"
+        var match = System.Text.RegularExpressions.Regex.Match(
+            text,
+            @"\b\d{4}\s+([A-Za-zÀ-ÿ'’\-]+(?:\s+[A-Za-zÀ-ÿ'’\-]+){0,3})\b");
+        if (match.Success)
+        {
+            return match.Groups[1].Value.Trim().TrimEnd(',', '.');
+        }
+
+        var parts = text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length >= 2)
+        {
+            var candidate = parts[^2];
+            candidate = System.Text.RegularExpressions.Regex.Replace(candidate, @"^\d{4}\s+", "").Trim();
+            if (!string.IsNullOrWhiteSpace(candidate) && candidate.Length <= 40)
+            {
+                return candidate;
+            }
+        }
+
+        return text.Length <= 32 ? text : null;
     }
 
     private static IEnumerable<PayrollProject300GpsEvent> BuildAfterEvents(StandbyGpsTripEvidence trip)

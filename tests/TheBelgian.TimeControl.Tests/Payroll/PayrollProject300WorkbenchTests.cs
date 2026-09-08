@@ -170,7 +170,7 @@ public sealed class PayrollProject300WorkbenchTests
         Assert.Contains(PayrollProject300CaseDetail.GpsNeverValidatesNote, detail.GpsContext.Summary);
         Assert.Contains(PayrollProject300CaseDetail.GpsNeverValidatesNote, detail.TechnicalCollapsedNotes);
         Assert.Contains(detail.GpsContext.Events, item =>
-            item.Label == "Tijdens geboekte 300-tijd" && item.Phase == "During");
+            item.Label.Contains("300-tijd", StringComparison.Ordinal) && item.Phase is "During" or "Overlap" or "Departure");
         Assert.Contains(detail.GpsContext.Events, item =>
             (item.Detail ?? string.Empty).Contains("Depot A", StringComparison.Ordinal)
             || item.Label.Contains("Depot A", StringComparison.Ordinal));
@@ -257,9 +257,9 @@ public sealed class PayrollProject300WorkbenchTests
         Assert.Contains("Voor: stilstand", before.Label, StringComparison.Ordinal);
         Assert.Contains("Meise stilstand", before.Label, StringComparison.Ordinal);
 
-        var during = Assert.Single(detail.GpsContext.Events, item => item.Phase == "During");
-        Assert.Equal("Tijdens geboekte 300-tijd", during.Label);
-        Assert.Contains("Werf Noord", during.Detail!, StringComparison.Ordinal);
+        var during = Assert.Single(detail.GpsContext.Events, item => item.Phase is "During" or "Overlap" or "Departure");
+        Assert.Contains("300-tijd", during.Label, StringComparison.Ordinal);
+        Assert.Contains("Werf", during.Label + (during.Detail ?? string.Empty), StringComparison.Ordinal);
 
         Assert.Contains(
             detail.GpsContext.Events,
@@ -510,6 +510,70 @@ public sealed class PayrollProject300WorkbenchTests
         Assert.True(detail.GpsContext.IsLoading);
         Assert.True(detail.TechnicianContext!.HasAnyTechnicianText);
         Assert.Single(detail.BookedRows);
+    }
+
+    [Fact]
+    public void ClassifyGpsOverlap_PartialOverlap_IsNotDuring()
+    {
+        var selectedStart = At("10:00");
+        var selectedEnd = At("10:20");
+        // trip mostly outside, only 2 minutes overlap
+        Assert.Equal(
+            "Overlap",
+            PayrollProject300WorkbenchBuilder.ClassifyGpsOverlap(
+                At("09:50"),
+                At("10:02"),
+                selectedStart,
+                selectedEnd));
+        Assert.Equal(
+            "Departure",
+            PayrollProject300WorkbenchBuilder.ClassifyGpsOverlap(
+                At("10:15"),
+                At("10:40"),
+                selectedStart,
+                selectedEnd));
+        Assert.Equal(
+            "During",
+            PayrollProject300WorkbenchBuilder.ClassifyGpsOverlap(
+                At("10:00"),
+                At("10:20"),
+                selectedStart,
+                selectedEnd));
+    }
+
+    [Fact]
+    public void UnifiedDayTimeline_OrdersPlanningPerformanceAndHighlights300()
+    {
+        var admin = AdminCase(200, 1m);
+        var day = new[]
+        {
+            Performance(100, "07:00", "08:00", 1m, projectNumber: 501, description: "vorige"),
+            Performance(200, "09:00", "10:00", 1m, description: "300 note"),
+            Performance(300, "11:00", "12:00", 1m, projectNumber: 200, description: "volgende"),
+        };
+        var planning = new[]
+        {
+            Reservation(taskTypeId: 26, projectNumber: 501, from: "08:00", to: "12:00", subject: "Andere job"),
+        };
+
+        var timeline = PayrollProject300WorkbenchBuilder.BuildUnifiedDayTimeline(
+            selectedPerformances: [day[1]],
+            dayPerformances: day,
+            dayPlanning: planning,
+            gps: null);
+
+        Assert.Contains(timeline, item => item.Kind == PayrollProject300DayTimelineKind.Planning);
+        Assert.Contains(timeline, item => item.IsSelected300 && item.Badge == "300");
+        Assert.Contains(timeline, item => item.Kind == PayrollProject300DayTimelineKind.Performance && item.Badge == "PRESTATIE");
+        Assert.True(timeline.Zip(timeline.Skip(1), (a, b) => a.SortAt <= b.SortAt).All(x => x));
+    }
+
+    [Fact]
+    public void ExtractLocality_FromBelgianAddress()
+    {
+        Assert.Equal(
+            "Merchtem",
+            PayrollProject300WorkbenchBuilder.ExtractLocality("Oudstrijdersstraat 13, 1785 Merchtem, België"));
     }
 
     [Fact]

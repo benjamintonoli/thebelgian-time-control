@@ -12,7 +12,17 @@ public interface IPayrollProject300WorkbenchService
         CancellationToken cancellationToken);
 
     /// <summary>
-    /// Core detail without PowerFleet (GPS deferred). Use <see cref="GetGpsContextAsync"/> separately.
+    /// Left queue shell without blocking on month Plenion batch / detail.
+    /// </summary>
+    Task<PayrollProject300WorkbenchPage> GetShellAsync(
+        int year,
+        int month,
+        PayrollReviewQueueFilter filter,
+        string? selectedAdminCaseKey,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Core detail without PowerFleet (GPS deferred). Uses month-batch context after warm.
     /// </summary>
     Task<PayrollProject300WorkbenchPage> GetCoreDetailAsync(
         int year,
@@ -41,9 +51,6 @@ public interface IPayrollProject300WorkbenchService
 
     PayrollProject300GpsCacheHint GetGpsCacheHint(string resourceId, DateOnly workDate);
 
-    /// <summary>
-    /// Drop short-lived admin-queue cache after decisions/proposals so the left pane stays fresh.
-    /// </summary>
     void InvalidateQueueCache(int year, int month);
 }
 

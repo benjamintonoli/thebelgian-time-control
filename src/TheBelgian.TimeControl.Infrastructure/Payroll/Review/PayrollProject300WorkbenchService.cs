@@ -27,6 +27,7 @@ internal sealed class PayrollProject300WorkbenchService(
     PayrollProject300DaySourceCache daySourceCache,
     PayrollProject300QueueCache queueCache,
     PayrollProject300BonMemoCache bonMemoCache,
+    PayrollProject300MonthContextCache monthContextCache,
     PayrollProject300HfdCache hfdCache,
     IDbContextFactory<TimeControlDbContext> contextFactory,
     IOptions<PayrollShadowOptions> shadowOptions,
@@ -35,6 +36,8 @@ internal sealed class PayrollProject300WorkbenchService(
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly ConcurrentDictionary<string, byte> _prefetchInFlight = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, Task<(StandbyGpsDayEvidence? Evidence, bool CacheHit, int ApiCalls)>> _gpsFlights =
+        new(StringComparer.Ordinal);
 
     public Task<PayrollProject300WorkbenchPage> GetWorkbenchAsync(
         int year,
@@ -43,6 +46,34 @@ internal sealed class PayrollProject300WorkbenchService(
         string? selectedAdminCaseKey,
         CancellationToken cancellationToken) =>
         GetCoreDetailAsync(year, month, filter, selectedAdminCaseKey, cancellationToken);
+
+    public async Task<PayrollProject300WorkbenchPage> GetShellAsync(
+        int year,
+        int month,
+        PayrollReviewQueueFilter filter,
+        string? selectedAdminCaseKey,
+        CancellationToken cancellationToken)
+    {
+        EnsureEnabled();
+        var scopedFilter = filter with { Category = PayrollReviewCategory.Project300 };
+        var queue = await GetAdminQueueCachedAsync(year, month, scopedFilter, cancellationToken);
+        var cases = queue.AdminCases;
+        var selected = ResolveSelected(cases, selectedAdminCaseKey);
+        var previews = await BuildQueuePreviewsAsync(cases, warmBonFromMonth: false, cancellationToken);
+        var revision = await BuildRevisionKeyAsync(year, month, cancellationToken);
+        var ready = revision is not null && monthContextCache.TryGet(revision, out _);
+        return new PayrollProject300WorkbenchPage(
+            year,
+            month,
+            queue.AdminSummary,
+            cases,
+            selected?.AdminCaseKey,
+            Detail: null,
+            new PayrollProject300WorkbenchMetrics(0, 0, 0, GpsDeferred: true, MonthContextHit: ready),
+            previews,
+            MonthContextPending: !ready,
+            MonthContextReady: ready);
+    }
 
     public async Task<PayrollProject300WorkbenchPage> GetCoreDetailAsync(
         int year,
@@ -56,10 +87,11 @@ internal sealed class PayrollProject300WorkbenchService(
         var queue = await GetAdminQueueCachedAsync(year, month, scopedFilter, cancellationToken);
         var cases = queue.AdminCases;
         var selected = ResolveSelected(cases, selectedAdminCaseKey);
+        var monthContext = await EnsureMonthContextAsync(year, month, cases, cancellationToken);
+        var previews = await BuildQueuePreviewsAsync(cases, warmBonFromMonth: true, cancellationToken);
 
         if (selected is null)
         {
-            var emptyPreviews = await BuildQueuePreviewsAsync(cases, cancellationToken);
             return new PayrollProject300WorkbenchPage(
                 year,
                 month,
@@ -67,12 +99,22 @@ internal sealed class PayrollProject300WorkbenchService(
                 cases,
                 null,
                 null,
-                new PayrollProject300WorkbenchMetrics(0, 0, 0, GpsDeferred: true),
-                emptyPreviews);
+                new PayrollProject300WorkbenchMetrics(
+                    monthContext.Metrics.PerformanceQueries,
+                    monthContext.Metrics.PlanningQueries,
+                    0,
+                    GpsDeferred: true,
+                    MonthContextHit: monthContext.Metrics.BuildMilliseconds == 0,
+                    BonQueries: monthContext.Metrics.BonQueries,
+                    MonthContextBuildMs: monthContext.Metrics.BuildMilliseconds),
+                previews,
+                MonthContextPending: false,
+                MonthContextReady: true);
         }
 
-        var detailBundle = await LoadCoreDetailAsync(selected, cancellationToken);
-        var previews = await BuildQueuePreviewsAsync(cases, cancellationToken);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var detailBundle = await LoadCoreDetailAsync(selected, monthContext, cancellationToken);
+        sw.Stop();
         return new PayrollProject300WorkbenchPage(
             year,
             month,
@@ -80,8 +122,18 @@ internal sealed class PayrollProject300WorkbenchService(
             cases,
             selected.AdminCaseKey,
             detailBundle.Detail,
-            detailBundle.Metrics,
-            previews);
+            detailBundle.Metrics with
+            {
+                MonthContextHit = monthContext.Metrics.BuildMilliseconds == 0,
+                MonthContextBuildMs = monthContext.Metrics.BuildMilliseconds,
+                SelectionBuildMs = sw.ElapsedMilliseconds,
+                PlenionPerformanceQueries = monthContext.Metrics.PerformanceQueries,
+                PlenionPlanningQueries = monthContext.Metrics.PlanningQueries,
+                BonQueries = monthContext.Metrics.BonQueries,
+            },
+            previews,
+            MonthContextPending: false,
+            MonthContextReady: true);
     }
 
     public async Task<PayrollProject300GpsLoadResult> GetGpsContextAsync(
@@ -193,7 +245,11 @@ internal sealed class PayrollProject300WorkbenchService(
         return PayrollProject300GpsCacheHint.Available;
     }
 
-    public void InvalidateQueueCache(int year, int month) => queueCache.InvalidateMonth(year, month);
+    public void InvalidateQueueCache(int year, int month)
+    {
+        queueCache.InvalidateMonth(year, month);
+        monthContextCache.InvalidateMonth(year, month);
+    }
 
     public async Task<PayrollProject300ProposeCorrectionResult> ProposeTimeCorrectionAsync(
         int year,
@@ -359,12 +415,17 @@ internal sealed class PayrollProject300WorkbenchService(
 
     private async Task<(PayrollProject300CaseDetail Detail, PayrollProject300WorkbenchMetrics Metrics)> LoadCoreDetailAsync(
         PayrollAdminCase adminCase,
+        PayrollProject300MonthContext monthContext,
         CancellationToken cancellationToken)
     {
-        var (performances, planning) = await LoadDaySourcesAsync(
-            adminCase.ResourceId,
-            adminCase.Date,
-            cancellationToken);
+        if (!monthContext.TryGetDay(adminCase.ResourceId, adminCase.Date, out var day))
+        {
+            day = new DaySources([], []);
+        }
+
+        var performances = day.Performances;
+        var planning = day.Planning;
+        daySourceCache.Set(adminCase.ResourceId, adminCase.Date, performances, planning);
 
         var hfdById = await GetHfdDefinitionsAsync(cancellationToken);
         var activities = new Dictionary<long, PayrollProject300ResolvedActivity>();
@@ -399,7 +460,16 @@ internal sealed class PayrollProject300WorkbenchService(
             .Select(item => item.BonNr)
             .FirstOrDefault(item => !string.IsNullOrWhiteSpace(item))
             ?? adminCase.BonNr;
-        var bonMemo = await ResolveBonMemoAsync(bonNr, cancellationToken);
+        string? bonMemo = null;
+        if (!string.IsNullOrWhiteSpace(bonNr)
+            && monthContext.BonMemosByBonNr.TryGetValue(bonNr.Trim(), out var fromMonth))
+        {
+            bonMemo = fromMonth;
+        }
+        else
+        {
+            bonMemo = await ResolveBonMemoAsync(bonNr, cancellationToken);
+        }
 
         var detail = PayrollProject300WorkbenchBuilder.BuildDetail(
             adminCase,
@@ -416,18 +486,214 @@ internal sealed class PayrollProject300WorkbenchService(
         }
 
         var metrics = new PayrollProject300WorkbenchMetrics(
-            1,
-            1,
+            0,
+            0,
             PowerFleetApiCalls: 0,
             GpsDeferred: !cacheHit,
-            GpsCacheHit: cacheHit);
+            GpsCacheHit: cacheHit,
+            MonthContextHit: true);
         return (detail, metrics);
+    }
+
+    private async Task<PayrollProject300MonthContext> EnsureMonthContextAsync(
+        int year,
+        int month,
+        IReadOnlyList<PayrollAdminCase> cases,
+        CancellationToken cancellationToken)
+    {
+        var revision = await BuildRevisionKeyAsync(year, month, cancellationToken)
+            ?? $"{year:0000}|{month:00}|norev";
+        if (monthContextCache.TryGet(revision, out var cached) && cached is not null)
+        {
+            return cached with
+            {
+                Metrics = cached.Metrics with
+                {
+                    PerformanceQueries = 0,
+                    PlanningQueries = 0,
+                    BonQueries = 0,
+                    BuildMilliseconds = 0,
+                },
+            };
+        }
+
+        var gate = monthContextCache.GetBuildLock(revision);
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            if (monthContextCache.TryGet(revision, out cached) && cached is not null)
+            {
+                return cached with
+                {
+                    Metrics = cached.Metrics with
+                    {
+                        PerformanceQueries = 0,
+                        PlanningQueries = 0,
+                        BonQueries = 0,
+                        BuildMilliseconds = 0,
+                    },
+                };
+            }
+
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var resourceIds = cases
+                .Select(item => item.ResourceId)
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(item => item, StringComparer.Ordinal)
+                .ToArray();
+            var periodStart = new DateOnly(year, month, 1);
+            var periodEnd = periodStart.AddMonths(1).AddDays(-1);
+            if (cases.Count > 0)
+            {
+                periodStart = cases.Min(item => item.Date);
+                periodEnd = cases.Max(item => item.Date);
+            }
+
+            IReadOnlyList<NormalizedPerformanceEntry> performances = [];
+            IReadOnlyList<PayrollPlanningReservation> planning = [];
+            var perfQueries = 0;
+            var planQueries = 0;
+            if (resourceIds.Length > 0)
+            {
+                performances = await performanceSource.ReadPerformancesAsync(
+                    periodStart,
+                    periodEnd,
+                    resourceIds,
+                    cancellationToken);
+                perfQueries = 1;
+                planning = await planningSource.ReadWorkReservationsAsync(
+                    periodStart,
+                    periodEnd,
+                    resourceIds,
+                    cancellationToken);
+                planQueries = 1;
+            }
+
+            var days = new Dictionary<string, DaySources>(StringComparer.Ordinal);
+            foreach (var group in performances.GroupBy(item => PayrollProject300MonthContext.DayKey(item.ResourceId, item.Date)))
+            {
+                days[group.Key] = new DaySources(group.ToArray(), []);
+            }
+
+            foreach (var group in planning.GroupBy(item => PayrollProject300MonthContext.DayKey(item.ResourceId, item.Date)))
+            {
+                if (days.TryGetValue(group.Key, out var existing))
+                {
+                    days[group.Key] = existing with { Planning = group.ToArray() };
+                }
+                else
+                {
+                    days[group.Key] = new DaySources([], group.ToArray());
+                }
+            }
+
+            foreach (var item in cases)
+            {
+                var key = PayrollProject300MonthContext.DayKey(item.ResourceId, item.Date);
+                if (!days.TryGetValue(key, out var daySources))
+                {
+                    daySources = new DaySources([], []);
+                    days[key] = daySources;
+                }
+
+                daySourceCache.Set(item.ResourceId, item.Date, daySources.Performances, daySources.Planning);
+            }
+
+            var bonNrs = cases
+                .Select(item => item.BonNr)
+                .Concat(performances.Select(item => item.BonNr))
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Select(item => item!.Trim())
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            var bonMemos = await plenionReader.ReadBonTechnicianMemosAsync(bonNrs, cancellationToken);
+            bonMemoCache.SetMany(bonMemos);
+            foreach (var bonNr in bonNrs)
+            {
+                if (!bonMemos.ContainsKey(bonNr))
+                {
+                    bonMemoCache.Set(bonNr, null);
+                }
+            }
+
+            sw.Stop();
+            var context = new PayrollProject300MonthContext(
+                year,
+                month,
+                revision,
+                periodStart,
+                periodEnd,
+                days,
+                bonMemos,
+                new PayrollProject300MonthContextMetrics(
+                    perfQueries,
+                    planQueries,
+                    BonQueries: bonNrs.Length == 0 ? 0 : 1,
+                    ResourceCount: resourceIds.Length,
+                    DayCount: days.Count,
+                    BuildMilliseconds: sw.ElapsedMilliseconds));
+            monthContextCache.Set(revision, context);
+            logger.LogInformation(
+                "Project300 month context built {Year}-{Month:00} resources={Resources} days={Days} ms={Ms} perfQ={PerfQ} planQ={PlanQ} bonQ={BonQ}",
+                year,
+                month,
+                resourceIds.Length,
+                days.Count,
+                sw.ElapsedMilliseconds,
+                perfQueries,
+                planQueries,
+                context.Metrics.BonQueries);
+            return context;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private async Task<string?> BuildRevisionKeyAsync(int year, int month, CancellationToken cancellationToken)
+    {
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var shadow = await context.PayrollShadowMonths.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Year == year && item.Month == month, cancellationToken);
+        if (shadow is null)
+        {
+            return null;
+        }
+
+        var findingStamp = await context.PayrollFindingRecords.AsNoTracking()
+            .Where(item => item.ShadowMonthId == shadow.Id)
+            .GroupBy(_ => 1)
+            .Select(group => new { Count = group.Count(), MaxId = group.Max(item => item.Id) })
+            .FirstOrDefaultAsync(cancellationToken);
+        return $"{year:0000}|{month:00}|{shadow.Id}|{shadow.Status}|{findingStamp?.Count ?? 0}|{findingStamp?.MaxId ?? 0}";
     }
 
     private async Task<IReadOnlyDictionary<string, string>> BuildQueuePreviewsAsync(
         IReadOnlyList<PayrollAdminCase> cases,
+        bool warmBonFromMonth,
         CancellationToken cancellationToken)
     {
+        if (!warmBonFromMonth)
+        {
+            // Shell path: use finding evidence only — no Plenion.
+            var light = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var item in cases)
+            {
+                var prestDesc = item.PerformanceDescriptionSummary
+                    ?? item.Performances.Select(p => p.PerformanceDescription).FirstOrDefault(t => !string.IsNullOrWhiteSpace(t));
+                var prestMemo = item.Performances.Select(p => p.PerformanceMemo).FirstOrDefault(t => !string.IsNullOrWhiteSpace(t));
+                var preview = PayrollProject300WorkbenchBuilder.BuildQueueTechnicianPreview(prestDesc, prestMemo, null);
+                if (preview is not null)
+                {
+                    light[item.AdminCaseKey] = preview;
+                }
+            }
+
+            return light;
+        }
+
         var bonNrs = cases
             .Select(item => item.BonNr)
             .Where(item => !string.IsNullOrWhiteSpace(item))
@@ -544,51 +810,129 @@ internal sealed class PayrollProject300WorkbenchService(
         IReadOnlyList<PayrollAdminCase> cases,
         PayrollAdminCase selected)
     {
-        var prefetchKey = FindNextUnresolvedKey(cases, selected.AdminCaseKey);
-        if (prefetchKey is null)
+        var started = 0;
+        string? firstKey = null;
+        foreach (var next in FindNextUnresolvedCases(cases, selected.AdminCaseKey, take: 2))
         {
-            return (null, false);
+            firstKey ??= next.AdminCaseKey;
+            if (gpsCache.Has(next.ResourceId, next.Date)
+                || gpsContextCache.TryGet(next.AdminCaseKey, out _))
+            {
+                continue;
+            }
+
+            var flightKey = Key(next.ResourceId, next.Date);
+            if (!_prefetchInFlight.TryAdd(flightKey, 0))
+            {
+                continue;
+            }
+
+            started++;
+            var prefetchResourceId = next.ResourceId;
+            var prefetchName = next.DisplayName ?? next.ResourceId;
+            var prefetchDate = next.Date;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await LoadGpsDayAsync(
+                        prefetchResourceId,
+                        prefetchName,
+                        prefetchDate,
+                        CancellationToken.None);
+                }
+                catch (Exception exception)
+                {
+                    logger.LogDebug(
+                        exception,
+                        "GPS prefetch failed for {ResourceId} {Date}",
+                        prefetchResourceId,
+                        prefetchDate);
+                }
+                finally
+                {
+                    _prefetchInFlight.TryRemove(Key(prefetchResourceId, prefetchDate), out _);
+                }
+            }, CancellationToken.None);
         }
 
-        var next = FindCase(cases, prefetchKey);
-        if (next is null
-            || gpsCache.Has(next.ResourceId, next.Date)
-            || !_prefetchInFlight.TryAdd(Key(next.ResourceId, next.Date), 0))
-        {
-            return (prefetchKey, false);
-        }
-
-        var prefetchResourceId = next.ResourceId;
-        var prefetchName = next.DisplayName ?? next.ResourceId;
-        var prefetchDate = next.Date;
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await LoadGpsDayAsync(
-                    prefetchResourceId,
-                    prefetchName,
-                    prefetchDate,
-                    CancellationToken.None);
-            }
-            catch (Exception exception)
-            {
-                logger.LogDebug(
-                    exception,
-                    "GPS prefetch failed for {ResourceId} {Date}",
-                    prefetchResourceId,
-                    prefetchDate);
-            }
-            finally
-            {
-                _prefetchInFlight.TryRemove(Key(prefetchResourceId, prefetchDate), out _);
-            }
-        }, CancellationToken.None);
-
-        return (prefetchKey, true);
+        return (firstKey, started > 0);
     }
 
-    private async Task<(StandbyGpsDayEvidence? Evidence, bool CacheHit, int ApiCalls)> LoadGpsDayAsync(
+    private static List<PayrollAdminCase> FindNextUnresolvedCases(
+        IReadOnlyList<PayrollAdminCase> cases,
+        string currentKey,
+        int take)
+    {
+        var list = new List<PayrollAdminCase>();
+        var seenCurrent = false;
+        foreach (var item in cases)
+        {
+            if (string.Equals(item.AdminCaseKey, currentKey, StringComparison.Ordinal))
+            {
+                seenCurrent = true;
+                continue;
+            }
+
+            if (seenCurrent && PayrollReviewCategories.IsUnresolved(item.WorkflowStatus))
+            {
+                list.Add(item);
+                if (list.Count >= take)
+                {
+                    return list;
+                }
+            }
+        }
+
+        foreach (var item in cases)
+        {
+            if (list.Count >= take)
+            {
+                break;
+            }
+
+            if (!string.Equals(item.AdminCaseKey, currentKey, StringComparison.Ordinal)
+                && PayrollReviewCategories.IsUnresolved(item.WorkflowStatus)
+                && list.All(existing => !string.Equals(existing.AdminCaseKey, item.AdminCaseKey, StringComparison.Ordinal)))
+            {
+                list.Add(item);
+            }
+        }
+
+        return list;
+    }
+
+    private Task<(StandbyGpsDayEvidence? Evidence, bool CacheHit, int ApiCalls)> LoadGpsDayAsync(
+        string resourceId,
+        string displayName,
+        DateOnly date,
+        CancellationToken cancellationToken)
+    {
+        if (gpsCache.TryGet(resourceId, date, out var cached, out var hit) && hit)
+        {
+            return Task.FromResult<(StandbyGpsDayEvidence?, bool, int)>((cached, true, 0));
+        }
+
+        var key = Key(resourceId, date);
+        var flight = _gpsFlights.GetOrAdd(key, _ => LoadGpsDayUncachedAsync(resourceId, displayName, date, cancellationToken));
+        return AwaitFlightAsync(key, flight);
+    }
+
+    private async Task<(StandbyGpsDayEvidence? Evidence, bool CacheHit, int ApiCalls)> AwaitFlightAsync(
+        string key,
+        Task<(StandbyGpsDayEvidence? Evidence, bool CacheHit, int ApiCalls)> flight)
+    {
+        try
+        {
+            return await flight.ConfigureAwait(false);
+        }
+        finally
+        {
+            _gpsFlights.TryRemove(key, out _);
+        }
+    }
+
+    private async Task<(StandbyGpsDayEvidence? Evidence, bool CacheHit, int ApiCalls)> LoadGpsDayUncachedAsync(
         string resourceId,
         string displayName,
         DateOnly date,

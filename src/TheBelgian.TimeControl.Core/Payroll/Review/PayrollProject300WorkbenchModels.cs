@@ -10,7 +10,9 @@ public sealed record PayrollProject300WorkbenchPage(
     string? SelectedKey,
     PayrollProject300CaseDetail? Detail,
     PayrollProject300WorkbenchMetrics Metrics,
-    IReadOnlyDictionary<string, string>? TechnicianQueuePreviews = null);
+    IReadOnlyDictionary<string, string>? TechnicianQueuePreviews = null,
+    bool MonthContextPending = false,
+    bool MonthContextReady = false);
 
 public sealed record PayrollProject300CaseDetail(
     PayrollAdminCase AdminCase,
@@ -21,7 +23,9 @@ public sealed record PayrollProject300CaseDetail(
     PayrollProject300GpsContext GpsContext,
     IReadOnlyList<PayrollProject300CorrectionTarget> CorrectionTargets,
     IReadOnlyList<string> TechnicalCollapsedNotes,
-    PayrollProject300TechnicianContext? TechnicianContext = null)
+    PayrollProject300TechnicianContext? TechnicianContext = null,
+    IReadOnlyList<PayrollProject300DayTimelineEntry>? DayTimeline = null,
+    bool HasSupportedTimeCorrection = false)
 {
     public const string GpsNeverValidatesNote =
         "GPS is enkel context en valideert Project 300 nooit automatisch.";
@@ -30,6 +34,27 @@ public sealed record PayrollProject300CaseDetail(
 
     public decimal TotalAtlHours => BookedRows.Sum(item => item.AtlHours);
 }
+
+public enum PayrollProject300DayTimelineKind
+{
+    Gps = 0,
+    Performance = 1,
+    Project300 = 2,
+    Planning = 3,
+}
+
+public sealed record PayrollProject300DayTimelineEntry(
+    DateTimeOffset SortAt,
+    DateTimeOffset? Start,
+    DateTimeOffset? End,
+    PayrollProject300DayTimelineKind Kind,
+    string Badge,
+    string Title,
+    string? Subtitle,
+    bool IsSelected300,
+    string? Locality = null,
+    string? SecondaryDetail = null,
+    string? GpsRelation = null);
 
 /// <summary>
 /// Distinct technician-facing text sources. Never merges BON.MEMO with PROJ_Prest fields.
@@ -132,7 +157,11 @@ public sealed record PayrollProject300WorkbenchMetrics(
     int PlenionPlanningQueries,
     int PowerFleetApiCalls,
     bool GpsDeferred = false,
-    bool GpsCacheHit = false);
+    bool GpsCacheHit = false,
+    bool MonthContextHit = false,
+    int BonQueries = 0,
+    long? MonthContextBuildMs = null,
+    long? SelectionBuildMs = null);
 
 /// <summary>
 /// Pre-resolved PWS activity for a concrete PerformanceId (no invented ID map).

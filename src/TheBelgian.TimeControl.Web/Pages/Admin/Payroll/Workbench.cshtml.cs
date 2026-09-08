@@ -47,8 +47,39 @@ public sealed class WorkbenchModel(
             return NotFound();
         }
 
-        await LoadAsync(cancellationToken);
+        await LoadShellAsync(cancellationToken);
         return Page();
+    }
+
+    public async Task<IActionResult> OnGetDetailAsync(string? adminCaseKey, CancellationToken cancellationToken)
+    {
+        if (!EnsureUiEnabled())
+        {
+            return NotFound();
+        }
+
+        Workbench = await workbenchService.GetCoreDetailAsync(
+            Year,
+            Month,
+            new PayrollReviewQueueFilter(
+                PayrollReviewCategory.Project300,
+                Search,
+                Sort: Sort,
+                Scope: Scope),
+            string.IsNullOrWhiteSpace(adminCaseKey) ? Focus : adminCaseKey,
+            cancellationToken);
+
+        var hints = new Dictionary<string, PayrollProject300GpsCacheHint>(StringComparer.Ordinal);
+        if (Workbench is not null)
+        {
+            foreach (var item in Workbench.Cases)
+            {
+                hints[item.AdminCaseKey] = workbenchService.GetGpsCacheHint(item.ResourceId, item.Date);
+            }
+        }
+
+        GpsHints = hints;
+        return Partial("_Project300Detail", this);
     }
 
     public async Task<IActionResult> OnPostDecideAsync(CancellationToken cancellationToken)
@@ -241,9 +272,9 @@ public sealed class WorkbenchModel(
         }
     }
 
-    private async Task LoadAsync(CancellationToken cancellationToken)
+    private async Task LoadShellAsync(CancellationToken cancellationToken)
     {
-        Workbench = await workbenchService.GetCoreDetailAsync(
+        Workbench = await workbenchService.GetShellAsync(
             Year,
             Month,
             new PayrollReviewQueueFilter(
@@ -265,6 +296,9 @@ public sealed class WorkbenchModel(
 
         GpsHints = hints;
     }
+
+    private async Task LoadAsync(CancellationToken cancellationToken) =>
+        await LoadShellAsync(cancellationToken);
 
     private bool EnsureUiEnabled() =>
         payrollOptions.Value.Enabled && payrollOptions.Value.AdminUiEnabled;
