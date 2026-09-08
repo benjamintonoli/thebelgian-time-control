@@ -111,16 +111,53 @@ public static class PayrollActionEligibility
     public static string ComputeSourceRevision(
         PayrollActionEvidenceSnapshot evidence,
         PayrollActionCreateProposal? create,
-        PayrollActionAdjustProposal? adjust)
+        PayrollActionAdjustProposal? adjust,
+        PayrollActionDeleteProposal? delete = null)
     {
         var payload = JsonSerializer.Serialize(new
         {
             evidence,
             create,
             adjust,
+            delete,
         }, JsonOptions);
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(payload));
         return Convert.ToHexString(hash);
+    }
+
+    /// <summary>
+    /// Workbench / snapshotted adjust-delete actions validate live Plenion against the stored proposal
+    /// instead of re-running SpecialProjectReviewOnly eligibility (which would mark them Stale).
+    /// Standby adjust keys keep the EvaluateStandbyAdjustGroup path.
+    /// </summary>
+    public static bool IsWorkbenchOrSnapshottedAction(
+        string? findingKey,
+        PayrollProposedActionType actionType,
+        PayrollActionAdjustProposal? adjust = null)
+    {
+        if (actionType == PayrollProposedActionType.DeleteExistingPerformance)
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(findingKey)
+            && findingKey.StartsWith("standby-adjust:", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(findingKey)
+            && (findingKey.StartsWith("p300-adjust:", StringComparison.Ordinal)
+                || findingKey.StartsWith("p300-delete:", StringComparison.Ordinal)
+                || findingKey.StartsWith("p200-adjust:", StringComparison.Ordinal)
+                || findingKey.StartsWith("p200-delete:", StringComparison.Ordinal)))
+        {
+            return true;
+        }
+
+        return actionType == PayrollProposedActionType.AdjustExistingPerformanceTime
+            && adjust is not null
+            && PayrollPwsSupportedActivities.IsSupported(adjust.ExpectedActivityType);
     }
 
     private static PayrollActionEligibilityResult EvaluateCreate(
@@ -629,6 +666,8 @@ public static class PayrollActionEligibility
                 "TimeControl payrollcontrole — ontbrekende prestatie",
             PayrollProposedActionType.AdjustExistingPerformanceTime =>
                 "TimeControl payrollcontrole — correctie wachtdienst",
+            PayrollProposedActionType.DeleteExistingPerformance =>
+                "TimeControl payrollcontrole — prestatie verwijderen",
             _ => "TimeControl payrollcontrole",
         };
 

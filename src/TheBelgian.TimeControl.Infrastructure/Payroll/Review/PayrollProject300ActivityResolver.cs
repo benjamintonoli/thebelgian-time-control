@@ -12,14 +12,6 @@ namespace TheBelgian.TimeControl.Infrastructure.Payroll.Review;
 /// </summary>
 internal static class PayrollProject300ActivityResolver
 {
-    private static readonly HashSet<string> PwsSupported = new(StringComparer.Ordinal)
-    {
-        nameof(PerformanceActivityType.CustomerWork),
-        nameof(PerformanceActivityType.SiteWork),
-        nameof(PerformanceActivityType.OfficeWork),
-        nameof(PerformanceActivityType.WaitingTime),
-    };
-
     public static (string? ActivityType, string? FriendlyTaskName, bool Supported, string Message) Resolve(
         NormalizedPerformanceEntry performance,
         HfdTaakDefinition? hfdTaak)
@@ -65,7 +57,7 @@ internal static class PayrollProject300ActivityResolver
         var classification = PerformanceActivityClassifier.Classify(pilot, performance.ResourceId, null);
         var activity = classification.ActivityType.ToString();
 
-        if (PwsSupported.Contains(activity))
+        if (PayrollPwsSupportedActivities.IsSupported(activity))
         {
             return (
                 activity,

@@ -273,6 +273,18 @@ public static class DependencyInjection
             provider.GetRequiredService<IOptions<TimeControlCorrectionWriteOptions>>().Value.UseMock
                 ? provider.GetRequiredService<MockPlenionPerformanceCreateClient>()
                 : provider.GetRequiredService<HttpPlenionPerformanceCreateClient>());
+        services.AddHttpClient<HttpPlenionPerformanceDeleteClient>((provider, client) =>
+        {
+            var options = provider.GetRequiredService<IOptions<TimeControlCorrectionWriteOptions>>().Value;
+            if (Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out var baseAddress))
+                client.BaseAddress = baseAddress;
+            client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
+        });
+        services.AddScoped<MockPlenionPerformanceDeleteClient>();
+        services.AddScoped<IPlenionPerformanceDeleteClient>(provider =>
+            provider.GetRequiredService<IOptions<TimeControlCorrectionWriteOptions>>().Value.UseMock
+                ? provider.GetRequiredService<MockPlenionPerformanceDeleteClient>()
+                : provider.GetRequiredService<HttpPlenionPerformanceDeleteClient>());
         services.AddScoped<IMonthlyReviewService, MonthlyReviewService>();
         services.AddScoped<PayrollShadowCalculationService>();
         services.AddScoped<IPayrollResourceReader, PlenionPayrollResourceReader>();

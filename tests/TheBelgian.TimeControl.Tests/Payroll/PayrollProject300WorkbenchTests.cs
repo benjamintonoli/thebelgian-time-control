@@ -462,7 +462,7 @@ public sealed class PayrollProject300WorkbenchTests
         Assert.Equal("HFDTAAK 7 (CW: Klantwerk)", supported.FriendlyTaskName);
         Assert.Contains(
             detail.CorrectionTargets,
-            item => item.CorrectionCapability == PayrollProject300CorrectionCapability.ZeroDeleteUnavailable);
+            item => item.CorrectionCapability == PayrollProject300CorrectionCapability.SupportedDelete);
     }
 
     [Fact]
@@ -543,7 +543,7 @@ public sealed class PayrollProject300WorkbenchTests
     }
 
     [Fact]
-    public void ZeroDelete_Unavailable_AlwaysPresent()
+    public void SupportedDelete_AlwaysPresent()
     {
         var admin = AdminCase(101, 1m);
         var day = new[] { Performance(101, "08:00", "09:00", 1m, hfdTaakId: 23) };
@@ -552,9 +552,12 @@ public sealed class PayrollProject300WorkbenchTests
 
         Assert.Contains(
             detail.CorrectionTargets,
-            item => item.CorrectionCapability == PayrollProject300CorrectionCapability.ZeroDeleteUnavailable
-                && item.CapabilityMessage == PayrollProject300WorkbenchBuilder.ZeroDeleteUnavailableMessage
+            item => item.CorrectionCapability == PayrollProject300CorrectionCapability.SupportedDelete
+                && item.CapabilityMessage == PayrollProject300WorkbenchBuilder.SupportedDeleteMessage
                 && item.PerformanceId == 101);
+        Assert.DoesNotContain(
+            detail.CorrectionTargets,
+            item => item.CorrectionCapability == PayrollProject300CorrectionCapability.ZeroDeleteUnavailable);
     }
 
     [Fact]

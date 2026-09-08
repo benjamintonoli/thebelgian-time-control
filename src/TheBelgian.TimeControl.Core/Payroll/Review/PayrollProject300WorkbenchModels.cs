@@ -150,7 +150,9 @@ public enum PayrollProject300CorrectionCapability
 {
     SupportedVanTot = 0,
     UnsupportedActivity = 1,
+    /// <summary>Legacy: previously always appended; prefer <see cref="SupportedDelete"/>.</summary>
     ZeroDeleteUnavailable = 2,
+    SupportedDelete = 3,
 }
 
 public sealed record PayrollProject300CorrectionTarget(

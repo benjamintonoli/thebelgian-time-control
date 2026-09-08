@@ -11,6 +11,15 @@ public sealed class PayrollActionsOptions
     /// </summary>
     public bool ExecutionEnabled { get; set; }
 
+    /// <summary>When true (and ExecutionEnabled), adjust-time actions may execute.</summary>
+    public bool AdjustTimeEnabled { get; set; }
+
+    /// <summary>When true (and ExecutionEnabled), delete-performance actions may execute.</summary>
+    public bool DeletePerformanceEnabled { get; set; }
+
+    /// <summary>When true (and ExecutionEnabled), create-performance actions may execute. Keep false until create contract proven.</summary>
+    public bool CreatePerformanceEnabled { get; set; }
+
     public void Validate()
     {
         if (ExecutionEnabled && !Enabled)

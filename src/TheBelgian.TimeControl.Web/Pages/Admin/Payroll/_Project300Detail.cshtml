@@ -166,26 +166,57 @@ else
         </section>
 
         <section class="mb-3 d-none" id="correction-panel">
-            <div class="text-uppercase small text-muted fw-semibold mb-2">Correctievoorstel</div>
-            <p class="small mb-1">@PayrollDisplayFormatting.DateWithWeekday(selected.Date)</p>
-            <p class="small">Admin-ingegeven VAN/TOT → voorstel. Execution blijft uit.</p>
-            @foreach (var target in detail.CorrectionTargets.Where(item => item.CorrectionCapability != PayrollProject300CorrectionCapability.ZeroDeleteUnavailable))
-            {
-                <div class="border rounded p-2 mb-2 correction-target" data-performance-id="@target.PerformanceId">
-                    <div class="small">@FmtTime(target.CurrentStart)–@FmtTime(target.CurrentEnd) · @FmtHours(target.AtlHours)</div>
-                    <div class="small text-muted mb-2">@target.CapabilityMessage</div>
-                    @if (target.CorrectionCapability == PayrollProject300CorrectionCapability.SupportedVanTot)
-                    {
+            <div class="text-uppercase small text-muted fw-semibold mb-2">Wat is fout?</div>
+            <p class="small mb-2">@PayrollDisplayFormatting.DateWithWeekday(selected.Date)</p>
+            <div class="d-flex flex-wrap gap-2 mb-3" id="wb-fault-kind">
+                <button type="button" class="btn btn-sm btn-outline-primary" id="wb-show-adjust">Tijd aanpassen</button>
+                <button type="button" class="btn btn-sm btn-outline-danger" id="wb-show-delete">Volledige prestatie verwijderen</button>
+            </div>
+
+            <div class="d-none" id="adjust-panel">
+                <div class="text-uppercase small text-muted fw-semibold mb-2">Tijd aanpassen</div>
+                <p class="small">Admin-ingegeven VAN/TOT → voorstel. Uitvoering blijft apart bevestigd.</p>
+                @foreach (var target in detail.CorrectionTargets.Where(item => item.CorrectionCapability == PayrollProject300CorrectionCapability.SupportedVanTot))
+                {
+                    <div class="border rounded p-2 mb-2 correction-target" data-performance-id="@target.PerformanceId">
+                        <div class="small">@FmtTime(target.CurrentStart)–@FmtTime(target.CurrentEnd) · @FmtHours(target.AtlHours)</div>
+                        <div class="small text-muted mb-2">@target.CapabilityMessage</div>
                         <div class="row g-2 align-items-end">
                             <div class="col-auto"><label class="form-label small mb-0">Start</label><input class="form-control form-control-sm corr-start" type="time" value="@FmtTime(target.CurrentStart)" /></div>
                             <div class="col-auto"><label class="form-label small mb-0">Einde</label><input class="form-control form-control-sm corr-end" type="time" value="@FmtTime(target.CurrentEnd)" /></div>
                             <div class="col-md-4"><label class="form-label small mb-0">Reden</label><input class="form-control form-control-sm corr-reason" placeholder="Verplicht" /></div>
-                            <div class="col-auto"><button type="button" class="btn btn-sm btn-warning wb-propose-corr">Correctievoorstel opslaan</button></div>
+                            <div class="col-auto"><button type="button" class="btn btn-sm btn-warning wb-propose-corr">Voorstel controleren</button></div>
                         </div>
-                    }
-                </div>
-            }
-            <div class="alert alert-secondary small mb-0">@PayrollProject300WorkbenchBuilder.ZeroDeleteUnavailableMessage</div>
+                    </div>
+                }
+                @if (!detail.CorrectionTargets.Any(item => item.CorrectionCapability == PayrollProject300CorrectionCapability.SupportedVanTot))
+                {
+                    <div class="alert alert-secondary small mb-0">@PayrollProject300WorkbenchBuilder.UnsupportedActivityMessage</div>
+                }
+            </div>
+
+            <div class="d-none" id="delete-panel">
+                <div class="text-uppercase small text-muted fw-semibold mb-2">Volledige prestatie verwijderen</div>
+                <p class="small text-danger">Verwijdert enkel de urenrij in Plenion (geen cascade). Menselijke bevestiging blijft verplicht.</p>
+                @foreach (var target in detail.CorrectionTargets.Where(item => item.CorrectionCapability == PayrollProject300CorrectionCapability.SupportedDelete))
+                {
+                    var booked = detail.BookedRows.FirstOrDefault(item => item.PerformanceId == target.PerformanceId);
+                    var delRemark = detail.TechnicianContext?.PerformanceRemarks.FirstOrDefault(item => item.PerformanceId == target.PerformanceId);
+                    <div class="border rounded border-danger-subtle p-2 mb-2 delete-target" data-performance-id="@target.PerformanceId">
+                        <div class="small fw-semibold">@PayrollDisplayFormatting.DateWithWeekday(selected.Date) · @FmtTime(target.CurrentStart)–@FmtTime(target.CurrentEnd) · @FmtHours(target.AtlHours)</div>
+                        <div class="small text-muted">BON @(booked?.BonNr ?? "—") · @(booked?.ProjectDisplayLabel ?? "—") · #@target.PerformanceId</div>
+                        @if (!string.IsNullOrWhiteSpace(delRemark?.PrestOmschr))
+                        {
+                            <div class="small">Technieker: @delRemark.PrestOmschr</div>
+                        }
+                        <div class="row g-2 align-items-end mt-2">
+                            <div class="col-md-6"><label class="form-label small mb-0">Reden</label><input class="form-control form-control-sm del-reason" placeholder="Verplicht" /></div>
+                            <div class="col-auto"><button type="button" class="btn btn-sm btn-danger wb-propose-delete">Voorstel controleren</button></div>
+                        </div>
+                    </div>
+                }
+            </div>
+
             <div class="small text-danger d-none" id="wb-corr-error"></div>
             <div class="small text-success d-none" id="wb-corr-ok"></div>
         </section>

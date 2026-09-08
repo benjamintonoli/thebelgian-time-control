@@ -319,6 +319,197 @@ public sealed class PayrollActionServiceTests
         Assert.Contains("WaitingTime", adjust.ProposalSnapshotJson, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Execute_WorkbenchAdjust_DoesNotMarkStale_WhenSourceMatches()
+    {
+        await using var fx = await Fixture.CreateAsync(executionEnabled: true, useMockWrites: true);
+        var date = new DateOnly(2026, 8, 12);
+        var start = new DateTimeOffset(2026, 8, 12, 8, 0, 0, TimeSpan.Zero);
+        var end = new DateTimeOffset(2026, 8, 12, 10, 0, 0, TimeSpan.Zero);
+        var proposedEnd = new DateTimeOffset(2026, 8, 12, 9, 30, 0, TimeSpan.Zero);
+        const long perfId = 271145;
+        fx.PerformanceSource.Rows =
+        [
+            new NormalizedPerformanceEntry(
+                perfId,
+                perfId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                "100",
+                date,
+                start,
+                end,
+                2m,
+                120m,
+                end - start,
+                new PauseNormalizationResult(PauseParseStatus.Missing, null, PauseSourceKind.Unspecified, null),
+                null,
+                7,
+                "300",
+                300,
+                "7788",
+                "omschr",
+                null,
+                null,
+                perfId),
+        ];
+
+        var action = await fx.SeedWorkbenchAdjustAsync(
+            "100",
+            date,
+            perfId,
+            start,
+            end,
+            start,
+            proposedEnd,
+            "CustomerWork",
+            7);
+
+        var result = await fx.Service.ExecuteAsync(action.ActionId, "werkbench correctie", "tester", default);
+        Assert.Equal(PayrollProposedActionStatus.Applied, result.Status);
+        Assert.True(fx.Shadow.RebuildCalled);
+    }
+
+    [Fact]
+    public async Task ProposeAndExecute_Delete_MockSuccess_Applied()
+    {
+        await using var fx = await Fixture.CreateAsync(executionEnabled: true, useMockWrites: true);
+        var date = new DateOnly(2026, 8, 12);
+        var start = new DateTimeOffset(2026, 8, 12, 8, 0, 0, TimeSpan.Zero);
+        var end = new DateTimeOffset(2026, 8, 12, 10, 0, 0, TimeSpan.Zero);
+        const long perfId = 271146;
+        fx.PerformanceSource.Rows =
+        [
+            new NormalizedPerformanceEntry(
+                perfId,
+                perfId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                "100",
+                date,
+                start,
+                end,
+                2m,
+                120m,
+                end - start,
+                new PauseNormalizationResult(PauseParseStatus.Missing, null, PauseSourceKind.Unspecified, null),
+                null,
+                7,
+                "300",
+                300,
+                null,
+                "omschr",
+                null,
+                null,
+                perfId),
+        ];
+
+        var propose = await fx.Service.ProposeDeleteForPerformanceAsync(
+            2026,
+            8,
+            "100",
+            date,
+            perfId,
+            "verwijderen",
+            "tester",
+            PayrollFindingType.Project300WithoutPlanning,
+            expectedActivityType: "CustomerWork");
+        Assert.True(propose.Ok);
+        Assert.NotNull(propose.ActionId);
+
+        var confirmation = await fx.Service.PrepareConfirmationAsync(propose.ActionId!.Value, default);
+        Assert.NotNull(confirmation);
+        Assert.True(confirmation!.CanExecute);
+        Assert.NotNull(confirmation.DeleteProposal);
+
+        var result = await fx.Service.ExecuteAsync(propose.ActionId.Value, "verwijderen", "tester", default);
+        Assert.Equal(PayrollProposedActionStatus.Applied, result.Status);
+        Assert.True(fx.Shadow.RebuildCalled);
+        Assert.False(fx.DeleteClient.LastCommand!.DryRun);
+    }
+
+    [Fact]
+    public async Task PrepareConfirmation_Delete_FamilyFlagOff_CannotExecute()
+    {
+        await using var fx = await Fixture.CreateAsync(
+            executionEnabled: true,
+            useMockWrites: true,
+            deletePerformanceEnabled: false);
+        var date = new DateOnly(2026, 8, 12);
+        var start = new DateTimeOffset(2026, 8, 12, 8, 0, 0, TimeSpan.Zero);
+        var end = new DateTimeOffset(2026, 8, 12, 10, 0, 0, TimeSpan.Zero);
+        const long perfId = 271147;
+        fx.PerformanceSource.Rows =
+        [
+            new NormalizedPerformanceEntry(
+                perfId,
+                perfId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                "100",
+                date,
+                start,
+                end,
+                2m,
+                120m,
+                end - start,
+                new PauseNormalizationResult(PauseParseStatus.Missing, null, PauseSourceKind.Unspecified, null),
+                null,
+                7,
+                "300",
+                300,
+                null,
+                null,
+                null,
+                null,
+                perfId),
+        ];
+
+        var propose = await fx.Service.ProposeDeleteForPerformanceAsync(
+            2026, 8, "100", date, perfId, "reden", "tester",
+            PayrollFindingType.Project300WithoutPlanning);
+        Assert.True(propose.Ok);
+        var confirmation = await fx.Service.PrepareConfirmationAsync(propose.ActionId!.Value, default);
+        Assert.NotNull(confirmation);
+        Assert.False(confirmation!.CanExecute);
+        Assert.Contains("DeletePerformanceEnabled", confirmation.ExecutionGateMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Execute_Delete_FamilyFlagOff_Throws()
+    {
+        await using var fx = await Fixture.CreateAsync(
+            executionEnabled: true,
+            useMockWrites: true,
+            deletePerformanceEnabled: false);
+        var date = new DateOnly(2026, 8, 12);
+        var start = new DateTimeOffset(2026, 8, 12, 8, 0, 0, TimeSpan.Zero);
+        var end = new DateTimeOffset(2026, 8, 12, 10, 0, 0, TimeSpan.Zero);
+        const long perfId = 271148;
+        fx.PerformanceSource.Rows =
+        [
+            new NormalizedPerformanceEntry(
+                perfId,
+                perfId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                "100",
+                date,
+                start,
+                end,
+                2m,
+                120m,
+                end - start,
+                new PauseNormalizationResult(PauseParseStatus.Missing, null, PauseSourceKind.Unspecified, null),
+                null,
+                7,
+                "300",
+                300,
+                null,
+                null,
+                null,
+                null,
+                perfId),
+        ];
+        var propose = await fx.Service.ProposeDeleteForPerformanceAsync(
+            2026, 8, "100", date, perfId, "reden", "tester",
+            PayrollFindingType.Project300WithoutPlanning);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fx.Service.ExecuteAsync(propose.ActionId!.Value, "reden", "tester", default));
+    }
+
     private static NormalizedPerformanceEntry Perf(
         string resourceId,
         DateOnly date,
@@ -358,6 +549,7 @@ public sealed class PayrollActionServiceTests
             FakeShadow shadow,
             FakePerformanceSource performances,
             FakeCreateClient createClient,
+            FakeDeleteClient deleteClient,
             FakeStandbyGpsSource gpsSource)
         {
             _connection = connection;
@@ -366,6 +558,7 @@ public sealed class PayrollActionServiceTests
             Shadow = shadow;
             PerformanceSource = performances;
             CreateClient = createClient;
+            DeleteClient = deleteClient;
             GpsSource = gpsSource;
         }
 
@@ -374,11 +567,15 @@ public sealed class PayrollActionServiceTests
         public FakeShadow Shadow { get; }
         public FakePerformanceSource PerformanceSource { get; }
         public FakeCreateClient CreateClient { get; }
+        public FakeDeleteClient DeleteClient { get; }
         public FakeStandbyGpsSource GpsSource { get; }
 
         public static async Task<Fixture> CreateAsync(
             bool executionEnabled = true,
-            bool useMockWrites = true)
+            bool useMockWrites = true,
+            bool createPerformanceEnabled = true,
+            bool adjustTimeEnabled = true,
+            bool deletePerformanceEnabled = true)
         {
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
@@ -440,6 +637,7 @@ public sealed class PayrollActionServiceTests
             var shadow = new FakeShadow();
             var performances = new FakePerformanceSource();
             var createClient = new FakeCreateClient();
+            var deleteClient = new FakeDeleteClient();
             var gpsSource = new FakeStandbyGpsSource();
             var service = new PayrollActionService(
                 factory,
@@ -448,10 +646,14 @@ public sealed class PayrollActionServiceTests
                 gpsSource,
                 new MockPlenionCorrectionClient(),
                 createClient,
+                deleteClient,
                 Options.Create(new PayrollActionsOptions
                 {
                     Enabled = true,
                     ExecutionEnabled = executionEnabled,
+                    CreatePerformanceEnabled = createPerformanceEnabled,
+                    AdjustTimeEnabled = adjustTimeEnabled,
+                    DeletePerformanceEnabled = deletePerformanceEnabled,
                 }),
                 Options.Create(new PayrollShadowOptions { Enabled = true, AdminUiEnabled = true }),
                 Options.Create(new TimeControlCorrectionWriteOptions
@@ -461,7 +663,7 @@ public sealed class PayrollActionServiceTests
                     BaseUrl = "http://localhost",
                 }),
                 TimeProvider.System);
-            return new Fixture(connection, factory, service, shadow, performances, createClient, gpsSource);
+            return new Fixture(connection, factory, service, shadow, performances, createClient, deleteClient, gpsSource);
         }
 
         public async Task<PayrollFindingRecord> SeedStandbyMismatchAsync(
@@ -574,6 +776,61 @@ public sealed class PayrollActionServiceTests
             return action;
         }
 
+        public async Task<PayrollProposedActionRecord> SeedWorkbenchAdjustAsync(
+            string resourceId,
+            DateOnly date,
+            long performanceId,
+            DateTimeOffset currentStart,
+            DateTimeOffset currentEnd,
+            DateTimeOffset proposedStart,
+            DateTimeOffset proposedEnd,
+            string activityType,
+            long mainTaskId)
+        {
+            await using var context = await Factory.CreateDbContextAsync();
+            var monthId = await context.PayrollShadowMonths.Select(item => item.Id).SingleAsync();
+            var actionKey = $"p300-adjust:{resourceId}:{date:yyyyMMdd}:{performanceId}";
+            var adjust = new PayrollActionAdjustProposal(
+                performanceId,
+                currentStart,
+                currentEnd,
+                proposedStart,
+                proposedEnd,
+                activityType,
+                mainTaskId);
+            var evidence = new PayrollActionEvidenceSnapshot(
+                actionKey,
+                PayrollFindingType.Project300WithoutPlanning,
+                PayrollFindingSeverity.Review,
+                null,
+                "workbench",
+                "Project 300 tijdscorrectie",
+                "test",
+                [performanceId],
+                proposedStart,
+                proposedEnd,
+                (decimal)(proposedEnd - proposedStart).TotalHours,
+                "300",
+                null);
+            var action = new PayrollProposedActionRecord
+            {
+                ActionId = Guid.NewGuid(),
+                ShadowMonthId = monthId,
+                FindingKey = actionKey,
+                ResourceId = resourceId,
+                ActionType = PayrollProposedActionType.AdjustExistingPerformanceTime,
+                Status = PayrollProposedActionStatus.ReadyForApproval,
+                EvidenceSnapshotJson = JsonSerializer.Serialize(evidence),
+                ProposalSnapshotJson = JsonSerializer.Serialize(adjust),
+                SourceRevision = "test",
+                CreatedAtUtc = DateTimeOffset.UtcNow,
+                CreatedBy = "seed",
+            };
+            context.PayrollProposedActionRecords.Add(action);
+            await context.SaveChangesAsync();
+            return action;
+        }
+
         public async ValueTask DisposeAsync() => await _connection.DisposeAsync();
     }
 
@@ -661,5 +918,29 @@ public sealed class PayrollActionServiceTests
                     "success", "ok", "ref", command.IdempotencyKey, 1,
                     command.ResourceId, command.Date, command.Start, command.End,
                     command.ProjectId, command.BonNr, command.MainTaskId));
+    }
+
+    private sealed class FakeDeleteClient : IPlenionPerformanceDeleteClient
+    {
+        public PlenionPerformanceDeleteCommand? LastCommand { get; private set; }
+        public Func<PlenionPerformanceDeleteCommand, PlenionPerformanceDeleteResponse>? ResponseFactory { get; set; }
+
+        public Task<bool> IsAvailableAsync(CancellationToken cancellationToken) => Task.FromResult(true);
+
+        public Task<PlenionPerformanceDeleteResponse> DeleteAsync(
+            PlenionPerformanceDeleteCommand command,
+            CancellationToken cancellationToken)
+        {
+            LastCommand = command;
+            return Task.FromResult(ResponseFactory?.Invoke(command)
+                ?? new PlenionPerformanceDeleteResponse(
+                    "success",
+                    "ok",
+                    "ref-del",
+                    Deleted: true,
+                    AlreadyApplied: false,
+                    DryRun: command.DryRun,
+                    DeletedPerformanceId: command.PerformanceId));
+        }
     }
 }

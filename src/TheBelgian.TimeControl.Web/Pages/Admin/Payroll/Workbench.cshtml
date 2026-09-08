@@ -203,6 +203,8 @@ else
   const token = document.querySelector('#wb-af input[name="__RequestVerificationToken"]')?.value;
   const decideUrl = '@Url.Page("./Workbench", new { year = Model.Year, month = Model.Month, handler = "Decide" })';
   const corrUrl = '@Url.Page("./Workbench", new { year = Model.Year, month = Model.Month, handler = "ProposeCorrection" })';
+  const deleteUrl = '@Url.Page("./Workbench", new { year = Model.Year, month = Model.Month, handler = "ProposeDelete" })';
+  const confirmBase = '@Url.Page("./ActionConfirm")';
   const detailUrl = '@Url.Page("./Workbench", new { year = Model.Year, month = Model.Month, handler = "Detail", Scope = Model.Scope, Search = Model.Search, Sort = Model.Sort })';
   const gpsBase = '@Url.Page("./Workbench", new { year = Model.Year, month = Model.Month, handler = "Gps" })';
   const detailHost = document.getElementById('p300-case-detail');
@@ -284,6 +286,15 @@ else
       });
     });
 
+    document.getElementById('wb-show-adjust')?.addEventListener('click', () => {
+      document.getElementById('adjust-panel')?.classList.remove('d-none');
+      document.getElementById('delete-panel')?.classList.add('d-none');
+    });
+    document.getElementById('wb-show-delete')?.addEventListener('click', () => {
+      document.getElementById('delete-panel')?.classList.remove('d-none');
+      document.getElementById('adjust-panel')?.classList.add('d-none');
+    });
+
     document.querySelectorAll('.wb-propose-corr').forEach(btn => {
       btn.addEventListener('click', async () => {
         const box = btn.closest('.correction-target');
@@ -306,6 +317,41 @@ else
           });
           const payload = await response.json();
           if (!response.ok || !payload.ok) throw new Error(payload.error || 'Mislukt');
+          if (payload.actionId) {
+            window.location.href = confirmBase + (confirmBase.includes('?') ? '&' : '?') + 'actionId=' + encodeURIComponent(payload.actionId);
+            return;
+          }
+          if (ok) { ok.textContent = payload.message || 'Opgeslagen'; ok.classList.remove('d-none'); }
+        } catch (e) {
+          if (err) { err.textContent = e.message || 'Fout'; err.classList.remove('d-none'); }
+        }
+      });
+    });
+
+    document.querySelectorAll('.wb-propose-delete').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const box = btn.closest('.delete-target');
+        const err = document.getElementById('wb-corr-error');
+        const ok = document.getElementById('wb-corr-ok');
+        err?.classList.add('d-none');
+        ok?.classList.add('d-none');
+        try {
+          const body = new URLSearchParams();
+          body.set('AdminCaseKey', document.getElementById('wb-decisions')?.dataset.adminCaseKey);
+          body.set('PerformanceId', box?.dataset.performanceId);
+          body.set('DeleteReason', box?.querySelector('.del-reason')?.value || '');
+          if (token) body.set('__RequestVerificationToken', token);
+          const response = await fetch(deleteUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8', 'RequestVerificationToken': token || '' },
+            body
+          });
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) throw new Error(payload.error || 'Mislukt');
+          if (payload.actionId) {
+            window.location.href = confirmBase + (confirmBase.includes('?') ? '&' : '?') + 'actionId=' + encodeURIComponent(payload.actionId);
+            return;
+          }
           if (ok) { ok.textContent = payload.message || 'Opgeslagen'; ok.classList.remove('d-none'); }
         } catch (e) {
           if (err) { err.textContent = e.message || 'Fout'; err.classList.remove('d-none'); }

@@ -21,6 +21,7 @@ internal sealed class PayrollActionService(
     IPayrollStandbyGpsSource standbyGpsSource,
     IPlenionCorrectionClient correctionClient,
     IPlenionPerformanceCreateClient createClient,
+    IPlenionPerformanceDeleteClient deleteClient,
     IOptions<PayrollActionsOptions> actionsOptions,
     IOptions<PayrollShadowOptions> shadowOptions,
     IOptions<TimeControlCorrectionWriteOptions> writeOptions,
@@ -270,6 +271,9 @@ internal sealed class PayrollActionService(
         var adjust = action.ActionType == PayrollProposedActionType.AdjustExistingPerformanceTime
             ? DeserializeAdjust(action.ProposalSnapshotJson)
             : null;
+        var delete = action.ActionType == PayrollProposedActionType.DeleteExistingPerformance
+            ? DeserializeDelete(action.ProposalSnapshotJson)
+            : null;
 
         var executionEnabled = actionsOptions.Value.ExecutionEnabled;
         string? gateMessage = null;
@@ -288,6 +292,11 @@ internal sealed class PayrollActionService(
         {
             canExecute = false;
             gateMessage = "PlenionWriteService-correcties/writes staan uit.";
+        }
+        else if (!IsFamilyExecuteEnabled(action.ActionType, out var familyGate))
+        {
+            canExecute = false;
+            gateMessage = familyGate;
         }
 
         return new PayrollActionConfirmationView(
@@ -308,7 +317,8 @@ internal sealed class PayrollActionService(
                 : action.Comment,
             executionEnabled,
             canExecute,
-            gateMessage);
+            gateMessage,
+            delete);
     }
 
     public async Task<PayrollActionExecutionResult> ExecuteAsync(
@@ -344,6 +354,11 @@ internal sealed class PayrollActionService(
             throw new InvalidOperationException($"Actie status {action.Status} kan niet worden uitgevoerd.");
         }
 
+        if (!IsFamilyExecuteEnabled(action.ActionType, out var familyGate))
+        {
+            throw new InvalidOperationException(familyGate);
+        }
+
         var month = await context.PayrollShadowMonths
             .SingleAsync(item => item.Id == action.ShadowMonthId, cancellationToken);
         if (month.Status == PayrollShadowMonthStatus.Finalized)
@@ -356,16 +371,126 @@ internal sealed class PayrollActionService(
                 action.ActionId, action.Status, action.BlockReason, null, null);
         }
 
-        var finding = await ResolvePrimaryFindingAsync(context, action, cancellationToken);
-        var employee = await context.PayrollShadowEmployeeResults.AsNoTracking()
-            .SingleOrDefaultAsync(item =>
-                item.ShadowMonthId == action.ShadowMonthId && item.ResourceId == action.ResourceId,
-                cancellationToken);
         var performances = await performanceSource.ReadPerformancesAsync(
             month.PeriodStart,
             month.PeriodEnd,
             [action.ResourceId],
             cancellationToken);
+
+        var storedCreate = action.ActionType == PayrollProposedActionType.CreateMissingPerformance
+            ? DeserializeCreate(action.ProposalSnapshotJson)
+            : null;
+        var storedAdjust = action.ActionType == PayrollProposedActionType.AdjustExistingPerformanceTime
+            ? DeserializeAdjust(action.ProposalSnapshotJson)
+            : null;
+        var storedDelete = action.ActionType == PayrollProposedActionType.DeleteExistingPerformance
+            ? DeserializeDelete(action.ProposalSnapshotJson)
+            : null;
+
+        var isWorkbench = PayrollActionEligibility.IsWorkbenchOrSnapshottedAction(
+            action.FindingKey,
+            action.ActionType,
+            storedAdjust);
+
+        if (action.ActionType == PayrollProposedActionType.DeleteExistingPerformance)
+        {
+            if (storedDelete is null)
+            {
+                MarkStale(action, "Delete-voorstel ontbreekt; nieuw voorstel vereist.");
+                await context.SaveChangesAsync(cancellationToken);
+                return FailResult(action, action.BlockReason!);
+            }
+
+            var liveDelete = performances.FirstOrDefault(item => item.SourceEntryId == storedDelete.PerformanceId);
+            if (liveDelete is null)
+            {
+                MarkStale(action, "Prestatie bestaat niet meer in Plenion; nieuw voorstel vereist.");
+                await context.SaveChangesAsync(cancellationToken);
+                return FailResult(action, action.BlockReason!);
+            }
+
+            if (!MatchesDeleteSnapshot(storedDelete, liveDelete))
+            {
+                MarkStale(action, "Prestatie wijkt af van snapshot (VAN/TOT/dossier); nieuw voorstel vereist.");
+                await context.SaveChangesAsync(cancellationToken);
+                return FailResult(action, action.BlockReason!);
+            }
+
+            var nowDelete = timeProvider.GetUtcNow();
+            action.Status = PayrollProposedActionStatus.Executing;
+            action.Comment = comment.Trim();
+            action.ApprovedAtUtc = nowDelete;
+            action.ApprovedBy = actor;
+            action.UpdatedAtUtc = nowDelete;
+            await context.SaveChangesAsync(cancellationToken);
+
+            try
+            {
+                return await ExecuteDeleteAsync(context, action, month, storedDelete, actor, cancellationToken);
+            }
+            catch (Exception exception)
+            {
+                return await MarkFailedAsync(context, action, actor, exception.Message, cancellationToken);
+            }
+        }
+
+        if (action.ActionType == PayrollProposedActionType.AdjustExistingPerformanceTime && isWorkbench)
+        {
+            if (storedAdjust is null)
+            {
+                MarkStale(action, "Correctievoorstel ontbreekt; nieuw voorstel vereist.");
+                await context.SaveChangesAsync(cancellationToken);
+                return FailResult(action, action.BlockReason!);
+            }
+
+            var liveAdjust = performances.FirstOrDefault(item => item.SourceEntryId == storedAdjust.PerformanceId);
+            if (liveAdjust is null || liveAdjust.Start is null || liveAdjust.End is null)
+            {
+                MarkStale(action, "Prestatie bestaat niet meer in Plenion; nieuw voorstel vereist.");
+                await context.SaveChangesAsync(cancellationToken);
+                return FailResult(action, action.BlockReason!);
+            }
+
+            if (liveAdjust.Start.Value.TimeOfDay != storedAdjust.CurrentStart.TimeOfDay
+                || liveAdjust.End.Value.TimeOfDay != storedAdjust.CurrentEnd.TimeOfDay)
+            {
+                MarkStale(action, "Huidige VAN/TOT wijkt af van snapshot; nieuw voorstel vereist.");
+                await context.SaveChangesAsync(cancellationToken);
+                return FailResult(action, action.BlockReason!);
+            }
+
+            if (storedAdjust.ExpectedMainTaskExternalId is long expectedTask
+                && liveAdjust.HfdTaakId is int liveTask
+                && expectedTask != liveTask)
+            {
+                MarkStale(action, "Taaktype wijkt af van snapshot; nieuw voorstel vereist.");
+                await context.SaveChangesAsync(cancellationToken);
+                return FailResult(action, action.BlockReason!);
+            }
+
+            var nowAdjust = timeProvider.GetUtcNow();
+            action.Status = PayrollProposedActionStatus.Executing;
+            action.Comment = comment.Trim();
+            action.ApprovedAtUtc = nowAdjust;
+            action.ApprovedBy = actor;
+            action.UpdatedAtUtc = nowAdjust;
+            await context.SaveChangesAsync(cancellationToken);
+
+            try
+            {
+                return await ExecuteAdjustAsync(context, action, month, storedAdjust, actor, cancellationToken);
+            }
+            catch (Exception exception)
+            {
+                return await MarkFailedAsync(context, action, actor, exception.Message, cancellationToken);
+            }
+        }
+
+        var finding = await ResolvePrimaryFindingAsync(context, action, cancellationToken);
+        var employee = await context.PayrollShadowEmployeeResults.AsNoTracking()
+            .SingleOrDefaultAsync(item =>
+                item.ShadowMonthId == action.ShadowMonthId && item.ResourceId == action.ResourceId,
+                cancellationToken);
 
         if (finding is null)
         {
@@ -396,23 +521,14 @@ internal sealed class PayrollActionService(
             performances,
             dayTrips,
             monthFindings);
-        PayrollActionCreateProposal? storedCreate = null;
-        PayrollActionAdjustProposal? storedAdjust = null;
-        if (action.ActionType == PayrollProposedActionType.CreateMissingPerformance)
+        if (action.ActionType == PayrollProposedActionType.CreateMissingPerformance
+            && storedCreate is not null)
         {
-            storedCreate = DeserializeCreate(action.ProposalSnapshotJson);
-            if (storedCreate is not null)
+            eligibilityContext = eligibilityContext with
             {
-                eligibilityContext = eligibilityContext with
-                {
-                    ProvenMainTaskId = storedCreate.MainTaskId,
-                    IntervalSemanticsOverride = storedCreate.IntervalSemantics,
-                };
-            }
-        }
-        else
-        {
-            storedAdjust = DeserializeAdjust(action.ProposalSnapshotJson);
+                ProvenMainTaskId = storedCreate.MainTaskId,
+                IntervalSemanticsOverride = storedCreate.IntervalSemantics,
+            };
         }
 
         if (action.ActionType == PayrollProposedActionType.CreateMissingPerformance
@@ -515,6 +631,172 @@ internal sealed class PayrollActionService(
                 action.PwsReference,
                 action.ResultPerformanceId);
         }
+    }
+
+    public async Task<PayrollActionProposeResult> ProposeDeleteForPerformanceAsync(
+        int year,
+        int month,
+        string resourceId,
+        DateOnly workDate,
+        long performanceId,
+        string reason,
+        string actor,
+        PayrollFindingType findingType,
+        string? actionKey = null,
+        string? sourceFindingKey = null,
+        int? sourceFindingId = null,
+        IReadOnlyList<string>? sourceFindingKeys = null,
+        IReadOnlyList<int>? sourceFindingIds = null,
+        string? prestOmschr = null,
+        string? prestMemo = null,
+        string? bonTechnicianRemark = null,
+        string? projectLabel = null,
+        string? expectedActivityType = null,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureActionsEnabled();
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return new PayrollActionProposeResult(false, "Reden is verplicht.", null, null);
+        }
+
+        if (performanceId <= 0)
+        {
+            return new PayrollActionProposeResult(false, "PerformanceId is verplicht.", null, null);
+        }
+
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var shadowMonth = await context.PayrollShadowMonths
+            .SingleOrDefaultAsync(item => item.Year == year && item.Month == month, cancellationToken);
+        if (shadowMonth is null || shadowMonth.Status == PayrollShadowMonthStatus.Finalized)
+        {
+            return new PayrollActionProposeResult(
+                false,
+                shadowMonth is null ? "Shadow-maand niet gevonden." : "Maand is afgesloten.",
+                null,
+                "MonthFinalized");
+        }
+
+        var performances = await performanceSource.ReadPerformancesAsync(
+            shadowMonth.PeriodStart,
+            shadowMonth.PeriodEnd,
+            [resourceId],
+            cancellationToken);
+        var live = performances.FirstOrDefault(item =>
+            item.SourceEntryId == performanceId
+            && string.Equals(item.ResourceId, resourceId, StringComparison.Ordinal)
+            && item.Date == workDate);
+        if (live is null || live.Start is null || live.End is null)
+        {
+            return new PayrollActionProposeResult(
+                false,
+                "Prestatie niet gevonden of zonder VAN/TOT.",
+                null,
+                "IncompleteTarget");
+        }
+
+        if (live.HfdTaakId is null or <= 0)
+        {
+            return new PayrollActionProposeResult(
+                false,
+                "Prestatie heeft geen IDHFDTAAK; delete is niet veilig.",
+                null,
+                "MissingMainTaskId");
+        }
+
+        var projectId = live.ProjectId
+            ?? live.ProjectNumber?.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (string.IsNullOrWhiteSpace(projectId))
+        {
+            return new PayrollActionProposeResult(
+                false,
+                "ProjectId ontbreekt; delete is niet veilig.",
+                null,
+                "IncompleteTarget");
+        }
+
+        var prefix = findingType is PayrollFindingType.Project200WithoutPlanning
+            or PayrollFindingType.Project200ExceedsPlanning
+            ? "p200-delete"
+            : "p300-delete";
+        var resolvedActionKey = string.IsNullOrWhiteSpace(actionKey)
+            ? $"{prefix}:{resourceId}:{workDate:yyyyMMdd}:{performanceId}"
+            : actionKey.Trim();
+
+        var delete = new PayrollActionDeleteProposal(
+            performanceId,
+            workDate,
+            live.Start.Value,
+            live.End.Value,
+            live.AtlHoursRaw,
+            resourceId,
+            projectId.Trim(),
+            string.IsNullOrWhiteSpace(live.BonNr) ? null : live.BonNr.Trim(),
+            live.HfdTaakId,
+            expectedActivityType,
+            prestOmschr ?? live.Description,
+            prestMemo ?? live.Memo,
+            bonTechnicianRemark,
+            projectLabel);
+
+        var evidenceKey = sourceFindingKey ?? resolvedActionKey;
+        var evidence = new PayrollActionEvidenceSnapshot(
+            evidenceKey,
+            findingType,
+            PayrollFindingSeverity.Review,
+            null,
+            $"Delete-voorstel PerformanceId={performanceId}; project={projectId}; OMSCHR={prestOmschr ?? live.Description ?? "—"}.",
+            "Prestatie verwijderen (voorstel)",
+            reason.Trim(),
+            [performanceId],
+            live.Start,
+            live.End,
+            live.AtlHoursRaw,
+            projectId,
+            live.BonNr,
+            sourceFindingKeys ?? (sourceFindingKey is null ? null : [sourceFindingKey]),
+            sourceFindingIds ?? (sourceFindingId is > 0 ? [sourceFindingId.Value] : null));
+
+        var existing = await context.PayrollProposedActionRecords
+            .Where(item => item.ShadowMonthId == shadowMonth.Id && item.FindingKey == resolvedActionKey)
+            .OrderByDescending(item => item.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var now = timeProvider.GetUtcNow();
+        if (existing is null
+            || existing.Status is PayrollProposedActionStatus.Applied
+                or PayrollProposedActionStatus.Cancelled
+                or PayrollProposedActionStatus.Failed)
+        {
+            existing = new PayrollProposedActionRecord
+            {
+                ActionId = Guid.NewGuid(),
+                ShadowMonthId = shadowMonth.Id,
+                FindingKey = resolvedActionKey,
+                FindingId = sourceFindingId is > 0 ? sourceFindingId : null,
+                ResourceId = resourceId,
+                CreatedAtUtc = now,
+                CreatedBy = actor,
+            };
+            context.PayrollProposedActionRecords.Add(existing);
+        }
+
+        existing.ActionType = PayrollProposedActionType.DeleteExistingPerformance;
+        existing.Status = PayrollProposedActionStatus.ReadyForApproval;
+        existing.BlockReason = null;
+        existing.EvidenceSnapshotJson = JsonSerializer.Serialize(evidence, JsonOptions);
+        existing.ProposalSnapshotJson = JsonSerializer.Serialize(delete, JsonOptions);
+        existing.SourceRevision =
+            $"delete:{performanceId}:{live.Start:O}:{live.End:O}:{projectId}:{live.HfdTaakId}";
+        existing.Comment = reason.Trim();
+        existing.UpdatedAtUtc = now;
+        await context.SaveChangesAsync(cancellationToken);
+
+        return new PayrollActionProposeResult(
+            true,
+            "Verwijderingsvoorstel opgeslagen (niet uitgevoerd).",
+            existing.ActionId,
+            null);
     }
 
     public async Task CancelAsync(
@@ -661,6 +943,185 @@ internal sealed class PayrollActionService(
             cancellationToken);
     }
 
+    private async Task<PayrollActionExecutionResult> ExecuteDeleteAsync(
+        TimeControlDbContext context,
+        PayrollProposedActionRecord action,
+        PayrollShadowMonth month,
+        PayrollActionDeleteProposal proposal,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        if (!await deleteClient.IsAvailableAsync(cancellationToken))
+        {
+            return await MarkFailedAsync(context, action, actor,
+                "PlenionWriteService delete-endpoint is niet beschikbaar.", cancellationToken);
+        }
+
+        if (!TryParsePositiveLong(proposal.ResourceId, out var expectedResourceId)
+            || !TryParsePositiveLong(proposal.ProjectId, out var expectedProjectId)
+            || proposal.ExpectedMainTaskExternalId is null or <= 0)
+        {
+            return await MarkFailedAsync(context, action, actor,
+                "Delete-snapshot mist resource/project/taak-id voor PWS-contract.",
+                cancellationToken);
+        }
+
+        long? expectedBonNr = null;
+        if (!string.IsNullOrWhiteSpace(proposal.BonNr)
+            && long.TryParse(proposal.BonNr.Trim(), System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out var bonParsed)
+            && bonParsed > 0)
+        {
+            expectedBonNr = bonParsed;
+        }
+
+        var actionKey = action.ActionId.ToString("N");
+        var command = new PlenionPerformanceDeleteCommand(
+            actionKey,
+            actionKey,
+            DryRun: false,
+            proposal.PerformanceId,
+            expectedResourceId,
+            proposal.Date,
+            expectedProjectId,
+            expectedBonNr,
+            proposal.CurrentStart.TimeOfDay,
+            proposal.CurrentEnd.TimeOfDay,
+            proposal.ExpectedMainTaskExternalId.Value,
+            action.Comment ?? PayrollActionEligibility.DefaultComment(action.ActionType),
+            actor,
+            actionKey);
+
+        var response = await deleteClient.DeleteAsync(command, cancellationToken);
+        if (!IsDeleteSuccessStatus(response))
+        {
+            return await MarkFailedAsync(context, action, actor,
+                response.Message ?? "Delete mislukt.",
+                cancellationToken,
+                response.Reference,
+                proposal.PerformanceId);
+        }
+
+        var performances = await performanceSource.ReadPerformancesAsync(
+            month.PeriodStart,
+            month.PeriodEnd,
+            [action.ResourceId],
+            cancellationToken);
+        var stillPresent = performances.Any(item => item.SourceEntryId == proposal.PerformanceId);
+        if (stillPresent && !writeOptions.Value.UseMock && !response.AlreadyApplied)
+        {
+            return await MarkFailedAsync(context, action, actor,
+                "Delete niet geverifieerd: prestatie bestaat nog in Plenion.",
+                cancellationToken,
+                response.Reference,
+                proposal.PerformanceId);
+        }
+
+        return await MarkAppliedAsync(
+            context,
+            action,
+            month,
+            actor,
+            response.Message,
+            response.Reference,
+            response.DeletedPerformanceId ?? proposal.PerformanceId,
+            cancellationToken);
+    }
+
+    private static bool IsDeleteSuccessStatus(PlenionPerformanceDeleteResponse response) =>
+        response.Deleted
+        || response.AlreadyApplied
+        || string.Equals(response.Status, "success", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(response.Status, "already_applied", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(response.Status, "AlreadyApplied", StringComparison.OrdinalIgnoreCase);
+
+    private static bool MatchesDeleteSnapshot(
+        PayrollActionDeleteProposal snapshot,
+        NormalizedPerformanceEntry live)
+    {
+        if (live.Start is null || live.End is null)
+        {
+            return false;
+        }
+
+        if (live.Start.Value.TimeOfDay != snapshot.CurrentStart.TimeOfDay
+            || live.End.Value.TimeOfDay != snapshot.CurrentEnd.TimeOfDay)
+        {
+            return false;
+        }
+
+        if (snapshot.ExpectedMainTaskExternalId is long expectedTask
+            && live.HfdTaakId is int liveTask
+            && expectedTask != liveTask)
+        {
+            return false;
+        }
+
+        var liveProject = live.ProjectId
+            ?? live.ProjectNumber?.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (!string.Equals(snapshot.ProjectId, liveProject, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var snapBon = string.IsNullOrWhiteSpace(snapshot.BonNr) ? null : snapshot.BonNr.Trim();
+        var liveBon = string.IsNullOrWhiteSpace(live.BonNr) ? null : live.BonNr.Trim();
+        if (snapBon is "0")
+        {
+            snapBon = null;
+        }
+
+        if (liveBon is "0")
+        {
+            liveBon = null;
+        }
+
+        return string.Equals(snapBon, liveBon, StringComparison.Ordinal);
+    }
+
+    private bool IsFamilyExecuteEnabled(PayrollProposedActionType actionType, out string gateMessage)
+    {
+        switch (actionType)
+        {
+            case PayrollProposedActionType.AdjustExistingPerformanceTime:
+                if (!actionsOptions.Value.AdjustTimeEnabled)
+                {
+                    gateMessage = "Uitvoering van tijdscorrecties staat uit (PayrollActions:AdjustTimeEnabled=false).";
+                    return false;
+                }
+
+                break;
+            case PayrollProposedActionType.DeleteExistingPerformance:
+                if (!actionsOptions.Value.DeletePerformanceEnabled)
+                {
+                    gateMessage = "Uitvoering van verwijderen staat uit (PayrollActions:DeletePerformanceEnabled=false).";
+                    return false;
+                }
+
+                break;
+            case PayrollProposedActionType.CreateMissingPerformance:
+                if (!actionsOptions.Value.CreatePerformanceEnabled)
+                {
+                    gateMessage = "Uitvoering van create staat uit (PayrollActions:CreatePerformanceEnabled=false).";
+                    return false;
+                }
+
+                break;
+        }
+
+        gateMessage = string.Empty;
+        return true;
+    }
+
+    private static bool TryParsePositiveLong(string? value, out long parsed)
+    {
+        parsed = 0;
+        return !string.IsNullOrWhiteSpace(value)
+            && long.TryParse(value.Trim(), System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out parsed)
+            && parsed > 0;
+    }
+
     private async Task<PayrollActionExecutionResult> MarkAppliedAsync(
         TimeControlDbContext context,
         PayrollProposedActionRecord action,
@@ -755,7 +1216,9 @@ internal sealed class PayrollActionService(
             ? JsonSerializer.Serialize(eligibility.CreateProposal, JsonOptions)
             : eligibility.AdjustProposal is not null
                 ? JsonSerializer.Serialize(eligibility.AdjustProposal, JsonOptions)
-                : "{}";
+                : eligibility.DeleteProposal is not null
+                    ? JsonSerializer.Serialize(eligibility.DeleteProposal, JsonOptions)
+                    : "{}";
         record.SourceRevision = eligibility.SourceRevision;
         record.UpdatedAtUtc = now;
         if (isNew)
@@ -1104,6 +1567,11 @@ internal sealed class PayrollActionService(
         string.IsNullOrWhiteSpace(json) || json == "{}"
             ? null
             : JsonSerializer.Deserialize<PayrollActionAdjustProposal>(json, JsonOptions);
+
+    private static PayrollActionDeleteProposal? DeserializeDelete(string json) =>
+        string.IsNullOrWhiteSpace(json) || json == "{}"
+            ? null
+            : JsonSerializer.Deserialize<PayrollActionDeleteProposal>(json, JsonOptions);
 
     private static async Task<PayrollShadowMonth> RequireMonthAsync(
         TimeControlDbContext context,

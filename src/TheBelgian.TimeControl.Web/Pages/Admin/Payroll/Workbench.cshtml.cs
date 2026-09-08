@@ -36,6 +36,7 @@ public sealed class WorkbenchModel(
     [BindProperty] public string? NewStart { get; set; }
     [BindProperty] public string? NewEnd { get; set; }
     [BindProperty] public string? CorrectionReason { get; set; }
+    [BindProperty] public string? DeleteReason { get; set; }
 
     public PayrollProject300WorkbenchPage? Workbench { get; private set; }
     public IReadOnlyDictionary<string, PayrollProject300GpsCacheHint> GpsHints { get; private set; } =
@@ -218,6 +219,58 @@ public sealed class WorkbenchModel(
         catch (Exception exception)
         {
             logger.LogWarning(exception, "Workbench propose correction failed.");
+            return new JsonResult(new { ok = false, error = exception.Message })
+            {
+                StatusCode = StatusCodes.Status400BadRequest,
+            };
+        }
+    }
+
+    public async Task<IActionResult> OnPostProposeDeleteAsync(CancellationToken cancellationToken)
+    {
+        if (!EnsureUiEnabled())
+        {
+            return NotFound();
+        }
+
+        try
+        {
+            var propose = await workbenchService.ProposeDeletePerformanceAsync(
+                Year,
+                Month,
+                AdminCaseKey.Trim(),
+                PerformanceId,
+                DeleteReason ?? CorrectionReason ?? string.Empty,
+                RequireActor().AuditIdentity,
+                cancellationToken);
+
+            if (!propose.Ok)
+            {
+                return new JsonResult(new { ok = false, error = propose.Message, blockReason = propose.BlockReason })
+                {
+                    StatusCode = StatusCodes.Status400BadRequest,
+                };
+            }
+
+            await reviewQueueService.SetAdminDecisionAsync(
+                Year,
+                Month,
+                AdminCaseKey.Trim(),
+                PayrollGuidedDecisionCodes.P300HoursWrong,
+                DeleteReason ?? CorrectionReason,
+                RequireActor().AuditIdentity,
+                cancellationToken);
+
+            return new JsonResult(new
+            {
+                ok = true,
+                message = propose.Message,
+                actionId = propose.ActionId,
+            });
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Workbench propose delete failed.");
             return new JsonResult(new { ok = false, error = exception.Message })
             {
                 StatusCode = StatusCodes.Status400BadRequest,

@@ -12,6 +12,8 @@ namespace TheBelgian.TimeControl.Web.Pages.Admin.Payroll;
 
 public sealed class QueueModel(
     IPayrollReviewQueueService reviewQueueService,
+    IPayrollActionService payrollActionService,
+    IOptions<PayrollActionsOptions> actionsOptions,
     ICurrentUserContext currentUser,
     IOptions<PayrollShadowOptions> payrollOptions,
     IOptions<AdminReviewWorkflowOptions> reviewOptions,
@@ -31,8 +33,11 @@ public sealed class QueueModel(
     [BindProperty] public string? Comment { get; set; }
     [BindProperty] public string AdminCaseKey { get; set; } = string.Empty;
     [BindProperty] public string DecisionCode { get; set; } = string.Empty;
+    [BindProperty] public long PerformanceId { get; set; }
+    [BindProperty] public string? DeleteReason { get; set; }
 
     public PayrollAdminQueuePage? Queue { get; private set; }
+    public bool ActionsEnabled => actionsOptions.Value.Enabled;
     public string? Message { get; private set; }
     public string? Error { get; private set; }
 
@@ -148,6 +153,75 @@ public sealed class QueueModel(
             {
                 StatusCode = StatusCodes.Status400BadRequest,
             };
+        }
+    }
+
+    public async Task<IActionResult> OnPostProposeDeleteAsync(CancellationToken cancellationToken)
+    {
+        if (!EnsureUiEnabled() || !actionsOptions.Value.Enabled)
+        {
+            return NotFound();
+        }
+
+        try
+        {
+            await LoadAsync(cancellationToken);
+            var adminCase = Queue?.AdminCases.FirstOrDefault(item =>
+                string.Equals(item.AdminCaseKey, AdminCaseKey.Trim(), StringComparison.Ordinal));
+            if (adminCase is null)
+            {
+                throw new InvalidOperationException("Admin-case niet gevonden.");
+            }
+
+            if (adminCase.Category != PayrollReviewCategory.Project200)
+            {
+                throw new InvalidOperationException("Delete-voorstel via queue is enkel voor Project 200.");
+            }
+
+            if (PerformanceId <= 0)
+            {
+                throw new InvalidOperationException("PerformanceId is verplicht.");
+            }
+
+            var findingType = adminCase.UnderlyingCases
+                .SelectMany(item => item.FindingTypes)
+                .FirstOrDefault(item => item is PayrollFindingType.Project200WithoutPlanning
+                    or PayrollFindingType.Project200ExceedsPlanning);
+            if (findingType == default)
+            {
+                findingType = PayrollFindingType.Project200WithoutPlanning;
+            }
+
+            var propose = await payrollActionService.ProposeDeleteForPerformanceAsync(
+                Year,
+                Month,
+                adminCase.ResourceId,
+                adminCase.Date,
+                PerformanceId,
+                DeleteReason ?? Comment ?? "Project 200 prestatie verwijderen",
+                RequireActor().AuditIdentity,
+                findingType,
+                actionKey: $"p200-delete:{adminCase.ResourceId}:{adminCase.Date:yyyyMMdd}:{PerformanceId}",
+                sourceFindingKey: adminCase.FindingKeys.Count > 0 ? adminCase.FindingKeys[0] : null,
+                sourceFindingId: adminCase.FindingIds.Count > 0 ? adminCase.FindingIds[0] : null,
+                sourceFindingKeys: adminCase.FindingKeys.ToArray(),
+                sourceFindingIds: adminCase.FindingIds.ToArray(),
+                cancellationToken: cancellationToken);
+
+            if (!propose.Ok || propose.ActionId is null)
+            {
+                Error = propose.Message;
+                return Page();
+            }
+
+            return RedirectToPage("./ActionConfirm", new { actionId = propose.ActionId });
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Queue propose delete failed for {AdminCaseKey}.", AdminCaseKey);
+            Error = exception.Message;
+            await LoadAsync(cancellationToken);
+            return Page();
         }
     }
 

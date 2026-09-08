@@ -4,6 +4,7 @@
 @{
     ViewData["Title"] = "Payrollvoorstel controleren";
     var view = Model.View;
+    var isDelete = view?.ActionType == PayrollProposedActionType.DeleteExistingPerformance;
 }
 
 @if (!string.IsNullOrWhiteSpace(Model.Error))
@@ -25,11 +26,24 @@ else
         <a asp-page="./Employee" asp-route-year="@view.Year" asp-route-month="@view.Month" asp-route-resourceId="@view.ResourceId">← Terug naar medewerker</a>
     </p>
 
-    <h1 class="h4 mb-3">Voorstel controleren</h1>
-    <div class="alert alert-warning">
-        <strong>Deze actie wijzigt Plenion.</strong>
-        Geen automatische uitvoering — expliciete goedkeuring is verplicht.
-    </div>
+    @if (isDelete)
+    {
+        <h1 class="h4 mb-3 text-danger">Prestatie definitief verwijderen uit Plenion</h1>
+        <div class="alert alert-danger">
+            <strong>Destructieve actie.</strong>
+            Alleen deze urenprestatie wordt verwijderd.
+            De bon, het project en andere prestaties blijven bestaan.
+            Geen cascade. Geen automatische uitvoering — expliciete goedkeuring is verplicht.
+        </div>
+    }
+    else
+    {
+        <h1 class="h4 mb-3">Voorstel controleren</h1>
+        <div class="alert alert-warning">
+            <strong>Deze actie wijzigt Plenion.</strong>
+            Geen automatische uitvoering — expliciete goedkeuring is verplicht.
+        </div>
+    }
 
     <div class="mb-3">
         <div><strong>Medewerker:</strong> @(view.DisplayName ?? view.ResourceId)</div>
@@ -51,7 +65,19 @@ else
                 <p class="mb-1"><strong>@view.Evidence.Title</strong></p>
                 <p class="mb-1 small">@view.Evidence.Description</p>
                 <p class="mb-1 small text-muted">@view.Evidence.Evidence</p>
-                @if (view.AdjustProposal is not null)
+                @if (view.DeleteProposal is not null)
+                {
+                    <p class="mb-0 small">
+                        Datum: @PayrollDisplayFormatting.DateWithWeekday(view.DeleteProposal.Date)<br />
+                        Start: @view.DeleteProposal.CurrentStart.ToString("HH:mm") ·
+                        Einde: @view.DeleteProposal.CurrentEnd.ToString("HH:mm") ·
+                        @view.DeleteProposal.AtlHours.ToString("0.##") u<br />
+                        Prestatie #@view.DeleteProposal.PerformanceId ·
+                        Project @(view.DeleteProposal.ProjectLabel ?? view.DeleteProposal.ProjectId) ·
+                        BON @(view.DeleteProposal.BonNr ?? "—")
+                    </p>
+                }
+                else if (view.AdjustProposal is not null)
                 {
                     <p class="mb-0 small">
                         Start: @view.AdjustProposal.CurrentStart.ToString("HH:mm") ·
@@ -66,9 +92,25 @@ else
             </section>
         </div>
         <div class="col-md-6">
-            <section class="border rounded p-3 h-100">
+            <section class="border rounded p-3 h-100 @(isDelete ? "border-danger" : "")">
                 <h2 class="h6">Voorstel</h2>
-                @if (view.CreateProposal is not null)
+                @if (view.DeleteProposal is not null)
+                {
+                    <p class="mb-1"><strong>Prestatie definitief verwijderen</strong></p>
+                    <ul class="small mb-0">
+                        <li>Datum: @PayrollDisplayFormatting.DateWithWeekday(view.DeleteProposal.Date)</li>
+                        <li>VAN–TOT: @view.DeleteProposal.CurrentStart.ToString("HH:mm")–@view.DeleteProposal.CurrentEnd.ToString("HH:mm")</li>
+                        <li>Uren: @view.DeleteProposal.AtlHours.ToString("0.##")</li>
+                        <li>Dossier/project: @(view.DeleteProposal.ProjectLabel ?? view.DeleteProposal.ProjectId)</li>
+                        <li>Bon: @(view.DeleteProposal.BonNr ?? "—")</li>
+                        <li>Taak: @(view.DeleteProposal.ExpectedMainTaskExternalId?.ToString() ?? "—") · @(view.DeleteProposal.ExpectedActivityType ?? "—")</li>
+                        @if (!string.IsNullOrWhiteSpace(view.DeleteProposal.PrestOmschr))
+                        {
+                            <li>OMSCHR: @view.DeleteProposal.PrestOmschr</li>
+                        }
+                    </ul>
+                }
+                else if (view.CreateProposal is not null)
                 {
                     <p class="mb-1"><strong>Nieuwe prestatie aanmaken</strong></p>
                     <ul class="small mb-0">
@@ -105,12 +147,24 @@ else
             <textarea class="form-control" asp-for="Comment" rows="3" required></textarea>
         </div>
         <div class="d-flex flex-wrap gap-2">
-            <button type="submit" asp-page-handler="Execute"
-                    class="btn btn-primary"
-                    disabled="@(!view.CanExecute)"
-                    data-confirm="Deze actie wijzigt Plenion. Doorgaan?">
-                Uitvoeren
-            </button>
+            @if (isDelete)
+            {
+                <button type="submit" asp-page-handler="Execute"
+                        class="btn btn-danger"
+                        disabled="@(!view.CanExecute)"
+                        data-confirm="Prestatie definitief verwijderen uit Plenion. Doorgaan?">
+                    Definitief verwijderen
+                </button>
+            }
+            else
+            {
+                <button type="submit" asp-page-handler="Execute"
+                        class="btn btn-primary"
+                        disabled="@(!view.CanExecute)"
+                        data-confirm="Deze actie wijzigt Plenion. Doorgaan?">
+                    Uitvoeren
+                </button>
+            }
             <button type="submit" asp-page-handler="Cancel" class="btn btn-outline-secondary" formnovalidate>
                 Annuleren
             </button>

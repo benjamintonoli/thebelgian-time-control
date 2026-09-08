@@ -20,8 +20,51 @@ public sealed class PayrollActionEligibilityTests
         var options = new PayrollActionsOptions();
         Assert.False(options.Enabled);
         Assert.False(options.ExecutionEnabled);
+        Assert.False(options.AdjustTimeEnabled);
+        Assert.False(options.DeletePerformanceEnabled);
+        Assert.False(options.CreatePerformanceEnabled);
         options.ExecutionEnabled = true;
         Assert.Throws<InvalidOperationException>(() => options.Validate());
+    }
+
+    [Theory]
+    [InlineData("CustomerWork", true)]
+    [InlineData("SiteWork", true)]
+    [InlineData("OfficeWork", true)]
+    [InlineData("WaitingTime", true)]
+    [InlineData("Unknown", false)]
+    [InlineData(null, false)]
+    public void PwsSupportedActivities_RecognizesContractTypes(string? activity, bool expected) =>
+        Assert.Equal(expected, PayrollPwsSupportedActivities.IsSupported(activity));
+
+    [Fact]
+    public void IsWorkbenchOrSnapshottedAction_P300Adjust_True_Standby_False()
+    {
+        Assert.True(PayrollActionEligibility.IsWorkbenchOrSnapshottedAction(
+            "p300-adjust:100:20260805:9",
+            PayrollProposedActionType.AdjustExistingPerformanceTime,
+            new PayrollActionAdjustProposal(
+                9,
+                CurrentStart,
+                CurrentEnd,
+                ProposedStart,
+                ProposedEnd,
+                "CustomerWork",
+                7)));
+        Assert.False(PayrollActionEligibility.IsWorkbenchOrSnapshottedAction(
+            "standby-adjust:100:20260805:9",
+            PayrollProposedActionType.AdjustExistingPerformanceTime,
+            new PayrollActionAdjustProposal(
+                9,
+                CurrentStart,
+                CurrentEnd,
+                ProposedStart,
+                ProposedEnd,
+                "WaitingTime",
+                23)));
+        Assert.True(PayrollActionEligibility.IsWorkbenchOrSnapshottedAction(
+            "p300-delete:100:20260805:9",
+            PayrollProposedActionType.DeleteExistingPerformance));
     }
 
     [Fact]

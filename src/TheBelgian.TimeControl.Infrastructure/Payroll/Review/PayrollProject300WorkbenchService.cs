@@ -426,6 +426,175 @@ internal sealed class PayrollProject300WorkbenchService(
             null);
     }
 
+    public async Task<PayrollProject300ProposeCorrectionResult> ProposeDeletePerformanceAsync(
+        int year,
+        int month,
+        string adminCaseKey,
+        long performanceId,
+        string reason,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        EnsureEnabled();
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return new PayrollProject300ProposeCorrectionResult(false, "Reden is verplicht.", null, null);
+        }
+
+        var page = await GetCoreDetailAsync(
+            year,
+            month,
+            new PayrollReviewQueueFilter(PayrollReviewCategory.Project300, Scope: PayrollReviewQueueScope.All),
+            adminCaseKey,
+            cancellationToken);
+        var detail = page.Detail;
+        if (detail is null)
+        {
+            return new PayrollProject300ProposeCorrectionResult(false, "Admin-case niet gevonden.", null, null);
+        }
+
+        var deleteTarget = detail.CorrectionTargets.FirstOrDefault(item =>
+            item.PerformanceId == performanceId
+            && item.CorrectionCapability == PayrollProject300CorrectionCapability.SupportedDelete);
+        if (deleteTarget is null)
+        {
+            return new PayrollProject300ProposeCorrectionResult(
+                false,
+                "Deze prestatie kan niet via TimeControl verwijderd worden.",
+                null,
+                "UnsupportedDelete");
+        }
+
+        if (deleteTarget.CurrentStart is null || deleteTarget.CurrentEnd is null)
+        {
+            return new PayrollProject300ProposeCorrectionResult(false, "Huidige VAN/TOT ontbreekt.", null, null);
+        }
+
+        var booked = detail.BookedRows.FirstOrDefault(item => item.PerformanceId == performanceId);
+        if (booked is null)
+        {
+            return new PayrollProject300ProposeCorrectionResult(false, "Geboekte prestatie niet gevonden.", null, null);
+        }
+
+        var projectId = booked.ProjectId
+            ?? booked.ProjectNumber?.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (string.IsNullOrWhiteSpace(projectId))
+        {
+            return new PayrollProject300ProposeCorrectionResult(false, "ProjectId ontbreekt.", null, "IncompleteTarget");
+        }
+
+        if (booked.HfdTaakId is null or <= 0)
+        {
+            return new PayrollProject300ProposeCorrectionResult(
+                false,
+                "Prestatie heeft geen IDHFDTAAK; delete is niet veilig.",
+                null,
+                "MissingMainTaskId");
+        }
+
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var shadowMonth = await context.PayrollShadowMonths
+            .SingleOrDefaultAsync(item => item.Year == year && item.Month == month, cancellationToken);
+        if (shadowMonth is null || shadowMonth.Status == PayrollShadowMonthStatus.Finalized)
+        {
+            return new PayrollProject300ProposeCorrectionResult(
+                false,
+                shadowMonth is null ? "Shadow-maand niet gevonden." : "Maand is afgesloten.",
+                null,
+                "MonthFinalized");
+        }
+
+        var date = detail.AdminCase.Date;
+        var findingKey = detail.AdminCase.FindingKeys.Count > 0
+            ? detail.AdminCase.FindingKeys[0]
+            : $"Project300Workbench:{detail.AdminCase.ResourceId}:{date:yyyyMMdd}:{performanceId}";
+        var findingId = detail.AdminCase.FindingIds.Count > 0 ? detail.AdminCase.FindingIds[0] : 0;
+        var actionKey = $"p300-delete:{detail.AdminCase.ResourceId}:{date:yyyyMMdd}:{performanceId}";
+        var techRemark = detail.TechnicianContext?.BonTechnicianRemark;
+        var prestRemark = detail.TechnicianContext?.PerformanceRemarks
+            .FirstOrDefault(item => item.PerformanceId == performanceId);
+
+        var existing = await context.PayrollProposedActionRecords
+            .Where(item => item.ShadowMonthId == shadowMonth.Id && item.FindingKey == actionKey)
+            .OrderByDescending(item => item.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var delete = new PayrollActionDeleteProposal(
+            performanceId,
+            date,
+            deleteTarget.CurrentStart.Value,
+            deleteTarget.CurrentEnd.Value,
+            booked.AtlHours,
+            detail.AdminCase.ResourceId,
+            projectId.Trim(),
+            string.IsNullOrWhiteSpace(booked.BonNr) ? null : booked.BonNr.Trim(),
+            booked.HfdTaakId,
+            deleteTarget.ActivityType,
+            prestRemark?.PrestOmschr ?? booked.Description,
+            prestRemark?.PrestMemo ?? booked.Memo,
+            techRemark,
+            booked.ProjectDisplayLabel);
+
+        var evidence = new PayrollActionEvidenceSnapshot(
+            findingKey,
+            PayrollFindingType.Project300WithoutPlanning,
+            PayrollFindingSeverity.Review,
+            null,
+            $"Workbench delete-voorstel PerformanceId={performanceId}; activity={deleteTarget.ActivityType ?? "—"}; OMSCHR={booked.Description ?? "—"}.",
+            "Project 300 prestatie verwijderen (voorstel)",
+            reason.Trim(),
+            [performanceId],
+            deleteTarget.CurrentStart,
+            deleteTarget.CurrentEnd,
+            booked.AtlHours,
+            projectId,
+            booked.BonNr,
+            detail.AdminCase.FindingKeys.ToArray(),
+            detail.AdminCase.FindingIds.ToArray());
+
+        var now = timeProvider.GetUtcNow();
+        if (existing is null
+            || existing.Status is PayrollProposedActionStatus.Applied
+                or PayrollProposedActionStatus.Cancelled
+                or PayrollProposedActionStatus.Failed)
+        {
+            existing = new PayrollProposedActionRecord
+            {
+                ActionId = Guid.NewGuid(),
+                ShadowMonthId = shadowMonth.Id,
+                FindingKey = actionKey,
+                FindingId = findingId > 0 ? findingId : null,
+                ResourceId = detail.AdminCase.ResourceId,
+                CreatedAtUtc = now,
+                CreatedBy = actor,
+            };
+            context.PayrollProposedActionRecords.Add(existing);
+        }
+
+        existing.ActionType = PayrollProposedActionType.DeleteExistingPerformance;
+        existing.Status = PayrollProposedActionStatus.ReadyForApproval;
+        existing.BlockReason = null;
+        existing.EvidenceSnapshotJson = JsonSerializer.Serialize(evidence, JsonOptions);
+        existing.ProposalSnapshotJson = JsonSerializer.Serialize(delete, JsonOptions);
+        existing.SourceRevision =
+            $"p300-delete:{performanceId}:{deleteTarget.CurrentStart:O}:{deleteTarget.CurrentEnd:O}:{projectId}:{booked.HfdTaakId}";
+        existing.Comment = reason.Trim();
+        existing.UpdatedAtUtc = now;
+
+        await context.SaveChangesAsync(cancellationToken);
+        queueCache.InvalidateMonth(year, month);
+        logger.LogInformation(
+            "Created Project300 delete proposal {ActionId} perf={PerformanceId} (DeletePerformanceEnabled gate applies).",
+            existing.ActionId,
+            performanceId);
+
+        return new PayrollProject300ProposeCorrectionResult(
+            true,
+            "Verwijderingsvoorstel opgeslagen (niet uitgevoerd).",
+            existing.ActionId,
+            null);
+    }
+
     private async Task<(PayrollProject300CaseDetail Detail, PayrollProject300WorkbenchMetrics Metrics)> LoadCoreDetailAsync(
         PayrollAdminCase adminCase,
         PayrollProject300MonthContext monthContext,

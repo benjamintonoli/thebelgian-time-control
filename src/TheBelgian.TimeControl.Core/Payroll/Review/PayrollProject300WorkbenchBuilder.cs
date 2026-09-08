@@ -15,8 +15,9 @@ public static class PayrollProject300WorkbenchBuilder
     public const string GpsLoadingSummary = "GPS-context laden...";
     public const string UnsupportedActivityMessage =
         "Deze prestatie kan nog niet veilig vanuit TimeControl aangepast worden.";
-    public const string ZeroDeleteUnavailableMessage =
-        "Volledig verwijderen/nul zetten is nog niet veilig ondersteund.";
+    public const string SupportedDeleteMessage =
+        "Volledige prestatie verwijderen beschikbaar (menselijke bevestiging verplicht; PlenionWriteService blokkeert bij afhankelijkheden).";
+    public const string ZeroDeleteUnavailableMessage = SupportedDeleteMessage;
 
     private static readonly CultureInfo Belgian = CultureInfo.GetCultureInfo("nl-BE");
 
@@ -1277,8 +1278,8 @@ public static class PayrollProject300WorkbenchBuilder
                         && activityByPerformanceId.TryGetValue(item.SourceEntryId, out var zeroResolved)
                         ? zeroResolved.ActivityType
                         : null,
-                CorrectionCapability: PayrollProject300CorrectionCapability.ZeroDeleteUnavailable,
-                CapabilityMessage: ZeroDeleteUnavailableMessage,
+                CorrectionCapability: PayrollProject300CorrectionCapability.SupportedDelete,
+                CapabilityMessage: SupportedDeleteMessage,
                 FriendlyTaskName: activityByPerformanceId is not null
                     && activityByPerformanceId.TryGetValue(item.SourceEntryId, out var zeroFriendly)
                     ? zeroFriendly.FriendlyTaskName

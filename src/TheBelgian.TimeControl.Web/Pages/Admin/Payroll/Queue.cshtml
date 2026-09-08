@@ -347,6 +347,10 @@ else
                                             <th>Omschrijving</th>
                                             <th>Memo</th>
                                             <th>Planning</th>
+                                            @if (Model.ActionsEnabled && item.Category == PayrollReviewCategory.Project200)
+                                            {
+                                                <th>Actie</th>
+                                            }
                                         </tr>
                                         </thead>
                                         <tbody>
@@ -359,6 +363,18 @@ else
                                                 <td>@(perf.PerformanceDescription ?? "—")</td>
                                                 <td>@(perf.PerformanceMemo ?? "—")</td>
                                                 <td>@(perf.PlanningStatus ?? "—")</td>
+                                                @if (Model.ActionsEnabled && item.Category == PayrollReviewCategory.Project200 && perf.PerformanceId is > 0)
+                                                {
+                                                    <td>
+                                                        <form method="post" asp-page-handler="ProposeDelete" class="d-inline">
+                                                            <input type="hidden" name="AdminCaseKey" value="@item.AdminCaseKey" />
+                                                            <input type="hidden" name="PerformanceId" value="@perf.PerformanceId" />
+                                                            <input type="hidden" name="DeleteReason" value="Project 200 prestatie verwijderen" />
+                                                            <button type="submit" class="btn btn-sm btn-outline-danger"
+                                                                    data-confirm="Verwijderingsvoorstel aanmaken?">Verwijderen</button>
+                                                        </form>
+                                                    </td>
+                                                }
                                             </tr>
                                         }
                                         </tbody>

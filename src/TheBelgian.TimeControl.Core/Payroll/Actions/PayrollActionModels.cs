@@ -36,7 +36,8 @@ public sealed record PayrollActionEligibilityResult(
     PayrollActionCreateProposal? CreateProposal,
     PayrollActionAdjustProposal? AdjustProposal,
     PayrollActionEvidenceSnapshot EvidenceSnapshot,
-    string SourceRevision);
+    string SourceRevision,
+    PayrollActionDeleteProposal? DeleteProposal = null);
 
 public sealed record PayrollActionCreateProposal(
     string ResourceId,
@@ -57,6 +58,22 @@ public sealed record PayrollActionAdjustProposal(
     DateTimeOffset ProposedEnd,
     string? ExpectedActivityType,
     long? ExpectedMainTaskExternalId);
+
+public sealed record PayrollActionDeleteProposal(
+    long PerformanceId,
+    DateOnly Date,
+    DateTimeOffset CurrentStart,
+    DateTimeOffset CurrentEnd,
+    decimal AtlHours,
+    string ResourceId,
+    string ProjectId,
+    string? BonNr,
+    long? ExpectedMainTaskExternalId,
+    string? ExpectedActivityType,
+    string? PrestOmschr,
+    string? PrestMemo,
+    string? BonTechnicianRemark,
+    string? ProjectLabel);
 
 public sealed record PayrollActionEvidenceSnapshot(
     string FindingKey,
@@ -92,7 +109,8 @@ public sealed record PayrollActionConfirmationView(
     string DefaultComment,
     bool ExecutionEnabled,
     bool CanExecute,
-    string? ExecutionGateMessage);
+    string? ExecutionGateMessage,
+    PayrollActionDeleteProposal? DeleteProposal = null);
 
 public sealed record PayrollActionExecutionResult(
     Guid ActionId,
@@ -123,6 +141,24 @@ public sealed class PayrollActionAdjustProposalDto
     public DateTimeOffset ProposedEnd { get; set; }
     public string? ExpectedActivityType { get; set; }
     public long? ExpectedMainTaskExternalId { get; set; }
+}
+
+public sealed class PayrollActionDeleteProposalDto
+{
+    public long PerformanceId { get; set; }
+    public DateOnly Date { get; set; }
+    public DateTimeOffset CurrentStart { get; set; }
+    public DateTimeOffset CurrentEnd { get; set; }
+    public decimal AtlHours { get; set; }
+    public string ResourceId { get; set; } = string.Empty;
+    public string ProjectId { get; set; } = string.Empty;
+    public string? BonNr { get; set; }
+    public long? ExpectedMainTaskExternalId { get; set; }
+    public string? ExpectedActivityType { get; set; }
+    public string? PrestOmschr { get; set; }
+    public string? PrestMemo { get; set; }
+    public string? BonTechnicianRemark { get; set; }
+    public string? ProjectLabel { get; set; }
 }
 
 public sealed class PayrollActionEvidenceSnapshotDto

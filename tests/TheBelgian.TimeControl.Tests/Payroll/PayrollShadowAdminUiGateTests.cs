@@ -165,6 +165,28 @@ public sealed class PayrollShadowAdminUiGateTests
         public Task<IReadOnlyList<PayrollProposedActionRecord>> ProposeFromFindingsAsync(
             int year, int month, string? resourceId, string actor, CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<PayrollProposedActionRecord>>([]);
+
+        public Task<PayrollActionProposeResult> ProposeDeleteForPerformanceAsync(
+            int year,
+            int month,
+            string resourceId,
+            DateOnly workDate,
+            long performanceId,
+            string reason,
+            string actor,
+            PayrollFindingType findingType,
+            string? actionKey = null,
+            string? sourceFindingKey = null,
+            int? sourceFindingId = null,
+            IReadOnlyList<string>? sourceFindingKeys = null,
+            IReadOnlyList<int>? sourceFindingIds = null,
+            string? prestOmschr = null,
+            string? prestMemo = null,
+            string? bonTechnicianRemark = null,
+            string? projectLabel = null,
+            string? expectedActivityType = null,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 
     private sealed class FakeUserContext : ICurrentUserContext

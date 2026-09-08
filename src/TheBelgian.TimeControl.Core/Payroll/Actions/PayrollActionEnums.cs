@@ -4,6 +4,7 @@ public enum PayrollProposedActionType
 {
     CreateMissingPerformance = 1,
     AdjustExistingPerformanceTime = 2,
+    DeleteExistingPerformance = 3,
 }
 
 public enum PayrollProposedActionStatus
@@ -62,4 +63,8 @@ public enum PayrollActionBlockReasonCode
     ConflictingDossierAmbiguity = 24,
     PossiblePhoneThenPhysical = 25,
     RequiresSplitOrProvenBookingMethod = 26,
+    PerformanceHasDependencies = 27,
+    DeleteNotEnabled = 28,
+    AdjustNotEnabled = 29,
+    CreateNotEnabled = 30,
 }

@@ -49,6 +49,15 @@ public interface IPayrollProject300WorkbenchService
         string actor,
         CancellationToken cancellationToken);
 
+    Task<PayrollProject300ProposeCorrectionResult> ProposeDeletePerformanceAsync(
+        int year,
+        int month,
+        string adminCaseKey,
+        long performanceId,
+        string reason,
+        string actor,
+        CancellationToken cancellationToken);
+
     PayrollProject300GpsCacheHint GetGpsCacheHint(string resourceId, DateOnly workDate);
 
     void InvalidateQueueCache(int year, int month);
