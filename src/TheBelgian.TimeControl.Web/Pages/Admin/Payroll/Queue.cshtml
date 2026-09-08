@@ -115,6 +115,13 @@ else
                                    asp-route-year="@Model.Year"
                                    asp-route-month="@Model.Month">Werkblad</a>
                             }
+                            else if (cat == PayrollReviewCategory.Project200 && open + follow > 0)
+                            {
+                                <a class="btn btn-sm btn-primary"
+                                   asp-page="./Project200Workbench"
+                                   asp-route-year="@Model.Year"
+                                   asp-route-month="@Model.Month">Werkblad</a>
+                            }
                             else if (open + follow > 0)
                             {
                                 <a class="btn btn-sm btn-primary" href="@GuidedHref(cat)">Start controle</a>
@@ -123,8 +130,8 @@ else
                             {
                                 <button class="btn btn-sm btn-outline-secondary" type="button" disabled>Start controle</button>
                             }
-                            <a class="btn btn-sm btn-outline-secondary" href="@CategoryHref(cat)">@(cat == PayrollReviewCategory.Project300 ? "Lijst" : "Lijst")</a>
-                            @if (cat == PayrollReviewCategory.Project300)
+                            <a class="btn btn-sm btn-outline-secondary" href="@CategoryHref(cat)">Lijst</a>
+                            @if (cat == PayrollReviewCategory.Project300 || cat == PayrollReviewCategory.Project200)
                             {
                                 <a class="btn btn-sm btn-outline-secondary" href="@GuidedHref(cat)">Guided</a>
                             }

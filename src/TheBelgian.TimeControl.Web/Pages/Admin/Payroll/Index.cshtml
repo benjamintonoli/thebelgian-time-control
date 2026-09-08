@@ -34,6 +34,7 @@
             <a class="btn btn-sm btn-primary" asp-page="./Month" asp-route-year="@canonical.Year" asp-route-month="@canonical.Month">Medewerkers</a>
             <a class="btn btn-sm btn-outline-primary" asp-page="./Queue" asp-route-year="@canonical.Year" asp-route-month="@canonical.Month">Queue / review</a>
             <a class="btn btn-sm btn-outline-primary" asp-page="./Workbench" asp-route-year="@canonical.Year" asp-route-month="@canonical.Month">Project 300 workbench</a>
+            <a class="btn btn-sm btn-outline-primary" asp-page="./Project200Workbench" asp-route-year="@canonical.Year" asp-route-month="@canonical.Month">Project 200 workbench</a>
             <a class="btn btn-sm btn-outline-secondary" asp-page="./Finalize" asp-route-year="@canonical.Year" asp-route-month="@canonical.Month">Afronden / status</a>
         </div>
     </div>
@@ -98,6 +99,7 @@
                         <a class="small" asp-page="./Queue" asp-route-year="@item.Year" asp-route-month="@item.Month">Queue</a>
                         ·
                         <a class="small" asp-page="./Workbench" asp-route-year="@item.Year" asp-route-month="@item.Month">300</a>
+                        <a class="small" asp-page="./Project200Workbench" asp-route-year="@item.Year" asp-route-month="@item.Month">200</a>
                     </td>
                 </tr>
             }

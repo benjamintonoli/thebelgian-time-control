@@ -5,6 +5,7 @@ using TheBelgian.TimeControl.Core.Configuration;
 using TheBelgian.TimeControl.Core.Interfaces;
 using TheBelgian.TimeControl.Core.Models;
 using TheBelgian.TimeControl.Core.Payroll.Actions;
+using TheBelgian.TimeControl.Core.Payroll.Findings;
 using TheBelgian.TimeControl.Core.Payroll.Review;
 using TheBelgian.TimeControl.Infrastructure.Configuration;
 
@@ -12,7 +13,8 @@ namespace TheBelgian.TimeControl.Web.Pages.Admin.Payroll;
 
 public sealed class ActionConfirmModel(
     IPayrollActionService payrollActionService,
-    IPayrollProject300WorkbenchService workbenchService,
+    IPayrollProject300WorkbenchService project300WorkbenchService,
+    IPayrollProject200WorkbenchService project200WorkbenchService,
     ICurrentUserContext currentUser,
     IOptions<PayrollShadowOptions> payrollOptions,
     IOptions<PayrollActionsOptions> actionsOptions,
@@ -87,10 +89,29 @@ public sealed class ActionConfirmModel(
             {
                 var confirmation = await payrollActionService.PrepareConfirmationAsync(ActionId, cancellationToken);
                 TempData["FlashSuccess"] = BuildSuccessMessage(confirmation);
-                workbenchService.InvalidateQueueCache(
+                var isProject200 = IsProject200Action(confirmation);
+                if (isProject200)
+                {
+                    project200WorkbenchService.InvalidateQueueCache(
+                        confirmation?.Year ?? 0,
+                        confirmation?.Month ?? 0);
+                    var nextFocus = await ResolveNextProject200FocusAsync(
+                        confirmation?.Year,
+                        confirmation?.Month,
+                        cancellationToken);
+                    return RedirectToPage("./Project200Workbench", new
+                    {
+                        year = confirmation?.Year,
+                        month = confirmation?.Month,
+                        Scope = PayrollReviewQueueScope.Open,
+                        Focus = nextFocus,
+                    });
+                }
+
+                project300WorkbenchService.InvalidateQueueCache(
                     confirmation?.Year ?? 0,
                     confirmation?.Month ?? 0);
-                var nextFocus = await ResolveNextProject300FocusAsync(
+                var nextProject300Focus = await ResolveNextProject300FocusAsync(
                     confirmation?.Year,
                     confirmation?.Month,
                     cancellationToken);
@@ -99,7 +120,7 @@ public sealed class ActionConfirmModel(
                     year = confirmation?.Year,
                     month = confirmation?.Month,
                     Scope = PayrollReviewQueueScope.Open,
-                    Focus = nextFocus,
+                    Focus = nextProject300Focus,
                 });
             }
 
@@ -144,7 +165,10 @@ public sealed class ActionConfirmModel(
             await payrollActionService.CancelAsync(ActionId, RequireActor().AuditIdentity, cancellationToken);
             if (confirmation is not null)
             {
-                return RedirectToPage("./Workbench", new
+                var workbenchPage = IsProject200Action(confirmation)
+                    ? "./Project200Workbench"
+                    : "./Workbench";
+                return RedirectToPage(workbenchPage, new
                 {
                     year = confirmation.Year,
                     month = confirmation.Month,
@@ -175,7 +199,7 @@ public sealed class ActionConfirmModel(
 
         try
         {
-            var shell = await workbenchService.GetShellAsync(
+            var shell = await project300WorkbenchService.GetShellAsync(
                 year.Value,
                 month.Value,
                 new PayrollReviewQueueFilter(
@@ -191,6 +215,59 @@ public sealed class ActionConfirmModel(
             logger.LogWarning(exception, "Could not resolve next Project300 focus after action {ActionId}.", ActionId);
             return null;
         }
+    }
+
+    private async Task<string?> ResolveNextProject200FocusAsync(
+        int? year,
+        int? month,
+        CancellationToken cancellationToken)
+    {
+        if (year is null or <= 0 || month is null or <= 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            var shell = await project200WorkbenchService.GetShellAsync(
+                year.Value,
+                month.Value,
+                new PayrollReviewQueueFilter(
+                    PayrollReviewCategory.Project200,
+                    Scope: PayrollReviewQueueScope.Open),
+                selectedAdminCaseKey: null,
+                cancellationToken);
+            return shell.SelectedKey
+                ?? (shell.Cases.Count > 0 ? shell.Cases[0].AdminCaseKey : null);
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Could not resolve next Project200 focus after action {ActionId}.", ActionId);
+            return null;
+        }
+    }
+
+    private static bool IsProject200Action(PayrollActionConfirmationView? confirmation)
+    {
+        if (confirmation is null)
+        {
+            return false;
+        }
+
+        var findingKey = confirmation.Evidence.FindingKey ?? string.Empty;
+        if (findingKey.StartsWith("p200-", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (confirmation.Evidence.FindingType is PayrollFindingType.Project200WithoutPlanning
+            or PayrollFindingType.Project200ExceedsPlanning)
+        {
+            return true;
+        }
+
+        var projectLabel = confirmation.DeleteProposal?.ProjectLabel;
+        return string.Equals(projectLabel, "200", StringComparison.Ordinal);
     }
 
     private bool EnsureUiEnabled() =>

@@ -1,0 +1,332 @@
+@model TheBelgian.TimeControl.Web.Pages.Admin.Payroll.Project200WorkbenchModel
+@using System.Globalization
+@using TheBelgian.TimeControl.Core.Payroll.Review
+@{
+    var nl = CultureInfo.GetCultureInfo("nl-BE");
+    var wb = Model.Workbench;
+    var selected = wb?.Detail?.AdminCase;
+    var detail = wb?.Detail;
+    var focused = detail?.FocusedContext;
+    string FmtTime(DateTimeOffset? value) => value?.ToString("HH:mm") ?? "—";
+    string FmtHours(decimal hours) => hours.ToString("0.##", nl) + " u";
+    string FmtMinutes(decimal hours)
+    {
+        var mins = (int)Math.Round(hours * 60m, MidpointRounding.AwayFromZero);
+        if (mins < 60) return mins + " min";
+        var h = mins / 60; var m = mins % 60;
+        return m == 0 ? h + " u" : h + " u " + m;
+    }
+}
+
+@if (detail is null || selected is null)
+{
+    <div class="empty-detail p-4">
+        <h2 class="h5">Context laden…</h2>
+        <p class="text-muted mb-0">Boeking, uitleg en dagverloop worden klaargezet.</p>
+    </div>
+}
+else
+{
+    <div class="p200-detail-body" data-admin-case-key="@selected.AdminCaseKey" data-has-supported="@(detail.HasSupportedTimeCorrection ? "true" : "false")">
+        <div class="d-flex justify-content-between flex-wrap gap-2 mb-3">
+            <div>
+                <h2 class="h4 mb-1">@(selected.DisplayName ?? selected.ResourceId)</h2>
+                <div class="text-muted">@PayrollDisplayFormatting.DateWithWeekday(selected.Date)</div>
+            </div>
+            <span class="badge text-bg-light text-dark border">@PayrollGuidedDecisions.AdminStatusLabel(selected.WorkflowStatus)</span>
+        </div>
+
+        <section class="mb-4">
+            <div class="display-6 fs-3 fw-semibold mb-1">PROJECT 200</div>
+            @{
+                var cmp = detail.PlanningComparison;
+            }
+            @if (cmp is not null)
+            {
+                <div class="mb-3 p-3 border rounded">
+                    <div class="text-uppercase small text-muted fw-semibold mb-1">Geboekt</div>
+                    <div class="fs-5 mb-2">@cmp.BookedSummary</div>
+                    <div class="text-uppercase small text-muted fw-semibold mb-1">Planning</div>
+                    @if (cmp.HasMatchingPlanning)
+                    {
+                        <div class="fs-5 mb-2">@cmp.PlannedSummary</div>
+                        @if (cmp.MatchingCount > 1)
+                        {
+                            <div class="small text-muted mb-2">@cmp.MatchingCount passende reservaties — controleer hieronder.</div>
+                        }
+                        <div class="text-uppercase small text-muted fw-semibold mb-1">Verschil</div>
+                        <div class="fs-5 fw-semibold">@cmp.DifferenceSummary</div>
+                    }
+                    else
+                    {
+                        <div class="fs-5 text-muted">Geen passende planning gevonden</div>
+                    }
+                </div>
+            }
+            @if (detail.BookedRows.Count == 1)
+            {
+                var row = detail.BookedRows[0];
+                @if (PayrollProject200WorkbenchBuilder.IsMeaningfulBonNr(row.BonNr))
+                {
+                    <div class="small text-muted mt-1">BON @row.BonNr</div>
+                }
+                @if (!string.IsNullOrWhiteSpace(row.ProjectDisplayLabel))
+                {
+                    <div class="small text-muted">@row.ProjectDisplayLabel</div>
+                }
+            }
+            else if (detail.BookedRows.Count > 1)
+            {
+                <div class="fs-6">@detail.BookedRows.Count prestaties · totaal @FmtHours(detail.TotalAtlHours)</div>
+                <ul class="list-unstyled mt-2 mb-0">
+                    @foreach (var row in detail.BookedRows)
+                    {
+                        <li class="mb-1">
+                            <strong>@FmtTime(row.Start)–@FmtTime(row.End)</strong>
+                            <span class="text-muted">@FmtMinutes(row.AtlHours)</span>
+                        </li>
+                    }
+                </ul>
+            }
+            @if (detail.DayPlanningRows.Any(item => item.IsMatchingSupport))
+            {
+                <div class="mt-3">
+                    <div class="text-uppercase small text-muted fw-semibold mb-1">Passende reservatie(s)</div>
+                    <ul class="list-unstyled mb-0 small">
+                        @foreach (var plan in detail.DayPlanningRows.Where(item => item.IsMatchingSupport))
+                        {
+                            <li class="mb-1">
+                                <strong>@(plan.TimeFrom?.ToString("HH:mm") ?? "—")–@(plan.TimeTo?.ToString("HH:mm") ?? "—")</strong>
+                                <span class="text-muted">@plan.Label</span>
+                            </li>
+                        }
+                    </ul>
+                </div>
+            }
+        </section>
+
+        <section class="mb-3">
+            <div class="text-uppercase small text-muted fw-semibold mb-2">Uitleg technieker</div>
+            @{
+                var tech = detail.TechnicianContext;
+            }
+            @if (tech is null || !tech.HasAnyTechnicianText)
+            {
+                <div class="text-muted">@PayrollProject200CaseDetail.NoTechnicianRemarkMessage</div>
+            }
+            else
+            {
+                @if (!string.IsNullOrWhiteSpace(tech.BonTechnicianRemark))
+                {
+                    <div class="border-start border-4 border-dark ps-3 mb-2" style="white-space: pre-wrap; font-size: 1.05rem;">@tech.BonTechnicianRemark</div>
+                }
+                @foreach (var remark in tech.PerformanceRemarks)
+                {
+                    if (remark.PrestOmschr is null && !remark.ShowPrestMemo)
+                    {
+                        continue;
+                    }
+                    <div class="mb-2">
+                        @if (tech.PerformanceRemarks.Count > 1)
+                        {
+                            <div class="small fw-semibold">@FmtTime(remark.Start)–@FmtTime(remark.End)</div>
+                        }
+                        @if (remark.PrestOmschr is not null)
+                        {
+                            <div>@remark.PrestOmschr</div>
+                        }
+                        @if (remark.ShowPrestMemo && remark.PrestMemo is not null)
+                        {
+                            <div class="mt-1">@remark.PrestMemo</div>
+                        }
+                    </div>
+                }
+            }
+        </section>
+
+        @if (!string.IsNullOrWhiteSpace(focused?.ContextSummary))
+        {
+            <section class="mb-4 p200-context-summary">
+                <div class="text-uppercase small text-muted fw-semibold mb-1">Korte context</div>
+                <p class="mb-0 p200-tl-title">@focused.ContextSummary</p>
+            </section>
+        }
+
+        <section class="mb-4">
+            @if (detail.GpsContext.IsLoading)
+            {
+                <div class="small text-muted mb-2" id="gps-inline-status">GPS-context laden…</div>
+            }
+            <div id="gps-panel" class="d-none"
+                 data-admin-case-key="@selected.AdminCaseKey"
+                 data-loading="@(detail.GpsContext.IsLoading ? "true" : "false")"></div>
+
+            @if (focused is null || (focused.Before.Count == 0 && focused.Booking.Count == 0 && focused.After.Count == 0))
+            {
+                <div class="text-muted small">Nog geen context beschikbaar.</div>
+            }
+            else
+            {
+                if (focused.Before.Count > 0)
+                {
+                    <div class="text-uppercase small text-muted fw-semibold mb-1">Voor</div>
+                    ViewData["ListId"] = "p200-before";
+                    <partial name="_Project200Timeline" model="focused.Before" />
+                }
+
+                <div class="text-uppercase small text-muted fw-semibold mb-1 mt-3">300</div>
+                ViewData["ListId"] = "p200-booking";
+                <partial name="_Project200Timeline" model="focused.Booking" />
+
+                if (focused.After.Count > 0)
+                {
+                    <div class="text-uppercase small text-muted fw-semibold mb-1 mt-3">Daarna</div>
+                    ViewData["ListId"] = "p200-after";
+                    <partial name="_Project200Timeline" model="focused.After" />
+                }
+            }
+
+            @if (focused is { HasMoreThanFocused: true })
+            {
+                <details class="mt-3 p200-full-day">
+                    <summary class="fw-semibold">Volledige dag tonen</summary>
+                    <div class="mt-2">
+                        @{
+                            ViewData["ListId"] = "p200-full-day";
+                        }
+                        <partial name="_Project200Timeline" model="focused.FullDay" />
+                    </div>
+                </details>
+            }
+
+            <p class="small text-muted mt-2 mb-0">@PayrollProject200CaseDetail.GpsNeverValidatesNote</p>
+        </section>
+
+        <section class="mb-3 d-none" id="correction-panel">
+            <div class="text-uppercase small text-muted fw-semibold mb-2">Wat is fout?</div>
+            <p class="small mb-2">Kies de actie. Admin-toelichting hieronder blijft een aparte review-notitie.</p>
+            <p class="small mb-2">@PayrollDisplayFormatting.DateWithWeekday(selected.Date)</p>
+            <div class="d-flex flex-wrap gap-2 mb-3" id="wb-fault-kind">
+                <button type="button" class="btn btn-sm btn-outline-primary" id="wb-show-adjust">Tijd aanpassen</button>
+                <button type="button" class="btn btn-sm btn-outline-danger" id="wb-show-delete">Prestatie verwijderen</button>
+            </div>
+
+            <div class="d-none" id="adjust-panel">
+                <div class="text-uppercase small text-muted fw-semibold mb-2">Tijd aanpassen</div>
+                <p class="small">Admin-ingegeven VAN/TOT → voorstel. Uitvoering blijft apart bevestigd.</p>
+                @foreach (var target in detail.CorrectionTargets.Where(item => item.CorrectionCapability == PayrollProject200CorrectionCapability.SupportedVanTot))
+                {
+                    var suggestStart = target.SuggestedAdjustStart?.ToString("HH:mm") ?? FmtTime(target.CurrentStart);
+                    var suggestEnd = target.SuggestedAdjustEnd?.ToString("HH:mm") ?? FmtTime(target.CurrentEnd);
+                    <div class="border rounded p-2 mb-2 correction-target" data-performance-id="@target.PerformanceId">
+                        <div class="small mb-1"><strong>Huidig:</strong> @FmtTime(target.CurrentStart)–@FmtTime(target.CurrentEnd) · @FmtHours(target.AtlHours)</div>
+                        @if (detail.PlanningComparison?.HasMatchingPlanning == true && target.SuggestedAdjustStart is not null)
+                        {
+                            <div class="small mb-1"><strong>Planning:</strong> @detail.PlanningComparison.PlannedSummary</div>
+                            <div class="small mb-2"><strong>Voorstel:</strong> @suggestStart–@suggestEnd · Effect: @detail.PlanningComparison.DifferenceSummary</div>
+                        }
+                        <div class="small text-muted mb-2">@target.CapabilityMessage</div>
+                        <div class="row g-2 align-items-end">
+                            <div class="col-auto"><label class="form-label small mb-0">Start</label><input class="form-control form-control-sm corr-start" type="time" value="@suggestStart" /></div>
+                            <div class="col-auto"><label class="form-label small mb-0">Einde</label><input class="form-control form-control-sm corr-end" type="time" value="@suggestEnd" /></div>
+                            <div class="col-md-4"><label class="form-label small mb-0">Reden</label><input class="form-control form-control-sm corr-reason" placeholder="Verplicht" /></div>
+                            <div class="col-auto"><button type="button" class="btn btn-sm btn-warning wb-propose-corr">Voorstel controleren</button></div>
+                        </div>
+                    </div>
+                }
+                @if (!detail.CorrectionTargets.Any(item => item.CorrectionCapability == PayrollProject200CorrectionCapability.SupportedVanTot))
+                {
+                    <div class="alert alert-secondary small mb-0">@PayrollProject200WorkbenchBuilder.UnsupportedActivityMessage</div>
+                }
+            </div>
+
+            @{
+                var deleteTargets = detail.CorrectionTargets
+                    .Where(item => item.CorrectionCapability == PayrollProject200CorrectionCapability.SupportedDelete)
+                    .ToList();
+                var multiDelete = deleteTargets.Count > 1;
+            }
+            <div class="d-none" id="delete-panel">
+                <div class="text-uppercase small text-muted fw-semibold mb-2">Prestatie verwijderen</div>
+                <p class="small text-danger mb-2">
+                    Alleen deze urenprestatie wordt verwijderd. De bon, het project en andere prestaties blijven bestaan.
+                    Bevestiging gebeurt op de volgende pagina.
+                </p>
+                @if (deleteTargets.Count == 0)
+                {
+                    <div class="alert alert-secondary small mb-0">Geen verwijderbare prestatie in deze case.</div>
+                }
+                else if (!multiDelete)
+                {
+                    var target = deleteTargets[0];
+                    var booked = detail.BookedRows.FirstOrDefault(item => item.PerformanceId == target.PerformanceId);
+                    var delRemark = detail.TechnicianContext?.PerformanceRemarks.FirstOrDefault(item => item.PerformanceId == target.PerformanceId);
+                    <div class="border rounded border-danger-subtle p-2 mb-2 delete-target" data-performance-id="@target.PerformanceId">
+                        <div class="small fw-semibold">@FmtTime(target.CurrentStart)–@FmtTime(target.CurrentEnd) · @FmtHours(target.AtlHours)</div>
+                        <div class="small text-muted">BON @(booked?.BonNr ?? "—") · @(booked?.ProjectDisplayLabel ?? "Project 200") · #@target.PerformanceId</div>
+                        @if (!string.IsNullOrWhiteSpace(delRemark?.PrestOmschr) || !string.IsNullOrWhiteSpace(booked?.Description))
+                        {
+                            <div class="small">Technieker: @(delRemark?.PrestOmschr ?? booked?.Description)</div>
+                        }
+                        <div class="mt-2">
+                            <button type="button" class="btn btn-sm btn-danger wb-propose-delete">Prestatie verwijderen</button>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="mb-2" id="delete-multi-list">
+                        @foreach (var target in deleteTargets)
+                        {
+                            var booked = detail.BookedRows.FirstOrDefault(item => item.PerformanceId == target.PerformanceId);
+                            var delRemark = detail.TechnicianContext?.PerformanceRemarks.FirstOrDefault(item => item.PerformanceId == target.PerformanceId);
+                            <label class="border rounded border-danger-subtle p-2 mb-2 d-block delete-target" data-performance-id="@target.PerformanceId">
+                                <input type="radio" name="delete-perf-select" class="form-check-input me-2 delete-perf-radio" value="@target.PerformanceId" />
+                                <span class="small fw-semibold">@FmtTime(target.CurrentStart)–@FmtTime(target.CurrentEnd) · @FmtHours(target.AtlHours)</span>
+                                <span class="small text-muted d-block ms-4">BON @(booked?.BonNr ?? "—") · #@target.PerformanceId</span>
+                                @if (!string.IsNullOrWhiteSpace(delRemark?.PrestOmschr) || !string.IsNullOrWhiteSpace(booked?.Description))
+                                {
+                                    <span class="small d-block ms-4">@(delRemark?.PrestOmschr ?? booked?.Description)</span>
+                                }
+                            </label>
+                        }
+                    </div>
+                    <button type="button" class="btn btn-sm btn-danger" id="wb-propose-delete-selected">Prestatie verwijderen</button>
+                }
+            </div>
+
+            <div class="small text-danger d-none" id="wb-corr-error"></div>
+            <div class="small text-success d-none" id="wb-corr-ok"></div>
+        </section>
+
+        @if (Model.ShowDiagnostics && detail.TechnicalCollapsedNotes.Count > 0)
+        {
+            <details class="small text-muted mb-5">
+                <summary>Technische details (diagnostiek)</summary>
+                <ul class="mb-0">
+                    @foreach (var note in detail.TechnicalCollapsedNotes)
+                    {
+                        <li>@note</li>
+                    }
+                </ul>
+            </details>
+        }
+
+        <div class="p200-sticky-decisions border-top bg-white pt-3 pb-2" id="decision-card">
+            <div class="text-uppercase small text-muted fw-semibold mb-2">Beslissing</div>
+            <div class="d-flex flex-wrap gap-2 mb-2" id="wb-decisions" data-admin-case-key="@selected.AdminCaseKey">
+                @foreach (var choice in selected.Choices)
+                {
+                    <button type="button"
+                            class="btn btn-sm @(choice.DecisionCode == PayrollGuidedDecisionCodes.P200Valid ? "btn-success" : choice.RequiresComment ? "btn-outline-warning" : "btn-outline-primary") wb-decide"
+                            data-decision="@choice.DecisionCode"
+                            data-requires-comment="@(choice.RequiresComment ? "true" : "false")"
+                            data-label="@choice.Label">@choice.Label</button>
+                }
+            </div>
+            <label class="form-label small mb-1" for="wb-comment">Admin-toelichting (TimeControl — schrijft niet terug naar BON)</label>
+            <input class="form-control form-control-sm border-warning-subtle" id="wb-comment" placeholder="Admin review comment" value="@(selected.ReviewComment ?? "")" />
+            <div class="small text-danger d-none" id="wb-decide-error"></div>
+        </div>
+    </div>
+}

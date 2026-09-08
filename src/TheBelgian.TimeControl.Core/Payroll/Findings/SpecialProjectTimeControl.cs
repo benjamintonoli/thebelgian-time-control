@@ -155,7 +155,7 @@ public static class SpecialProjectTimeControl
             .ToList();
     }
 
-    private static List<PayrollPlanningReservation> FindMatchingReservations(
+    public static IReadOnlyList<PayrollPlanningReservation> FindMatchingReservations(
         NormalizedPerformanceEntry performance,
         IReadOnlyList<PayrollPlanningReservation> dayPlanning) =>
         dayPlanning
@@ -257,7 +257,7 @@ public static class SpecialProjectTimeControl
 
     private static string BuildTrainingEvidence(
         NormalizedPerformanceEntry performance,
-        List<PayrollPlanningReservation> matching)
+        IReadOnlyList<PayrollPlanningReservation> matching)
     {
         var sb = new StringBuilder();
         sb.Append(CultureInfo.InvariantCulture, $"PerformanceId={performance.SourceEntryId}; HFDTAAK={performance.HfdTaakId}; ");

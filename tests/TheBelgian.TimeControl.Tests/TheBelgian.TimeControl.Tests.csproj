@@ -7,6 +7,8 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <!-- Default suite is deterministic regression only. Run LiveDataAcceptance explicitly. -->
+    <VSTestTestCaseFilter>Category!=LiveDataAcceptance</VSTestTestCaseFilter>
   </PropertyGroup>
 
   <ItemGroup>

@@ -60,9 +60,10 @@ public static class PayrollGuidedDecisions
         ],
         PayrollReviewCategory.Project200 =>
         [
-            Choice(PayrollGuidedDecisionCodes.P200Valid, "Correct", PayrollFindingStatus.Reviewed, requiresComment: false),
+            Choice(PayrollGuidedDecisionCodes.P200Valid, "Werk was terecht", PayrollFindingStatus.Reviewed, requiresComment: false),
             Choice(PayrollGuidedDecisionCodes.P200PlanningMissing, "Planning ontbreekt", PayrollFindingStatus.NeedsFollowUp, requiresComment: false),
-            Choice(PayrollGuidedDecisionCodes.P200HoursReview, "Uren controleren", PayrollFindingStatus.NeedsFollowUp, requiresComment: false),
+            // Comment optional: opens inline adjust/delete actions; admin note stays separate.
+            Choice(PayrollGuidedDecisionCodes.P200HoursReview, "Uren zijn fout", PayrollFindingStatus.NeedsFollowUp, requiresComment: false),
             Choice(PayrollGuidedDecisionCodes.P200Uncertain, "Onzeker", PayrollFindingStatus.NeedsFollowUp, requiresComment: true),
         ],
         PayrollReviewCategory.Project100 =>

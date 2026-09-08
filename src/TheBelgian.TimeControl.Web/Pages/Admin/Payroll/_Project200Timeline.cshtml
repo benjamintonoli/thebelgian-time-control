@@ -1,0 +1,28 @@
+@model IEnumerable<TheBelgian.TimeControl.Core.Payroll.Review.PayrollProject200DayTimelineEntry>
+@using TheBelgian.TimeControl.Core.Payroll.Review
+@{
+    string FmtTime(DateTimeOffset? value) => value?.ToString("HH:mm") ?? "—";
+    var listId = ViewData["ListId"] as string ?? "p200-timeline";
+}
+<ul class="list-unstyled p200-day-timeline mb-0" id="@listId">
+@foreach (var entry in Model)
+{
+    <li class="d-flex gap-2 py-2 border-bottom p200-tl-row @(entry.IsSelected200 ? "p200-tl-selected" : "")">
+        <div class="text-nowrap small fw-semibold p200-tl-time" style="min-width: 5.5rem;">
+            @FmtTime(entry.Start)@if (entry.End is { } e) { <span>–@e.ToString("HH:mm")</span> }
+        </div>
+        <div class="p200-tl-body">
+            <span class="badge p200-badge p200-badge-@entry.Badge.ToLowerInvariant()">@entry.Badge</span>
+            <span class="p200-tl-title @(entry.IsSelected200 ? "fw-semibold" : "")">@entry.Title</span>
+            @if (!string.IsNullOrWhiteSpace(entry.Subtitle))
+            {
+                <div class="small p200-tl-sub">@entry.Subtitle</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(entry.SecondaryDetail) && entry.Kind == PayrollProject200DayTimelineKind.Gps)
+            {
+                <div class="small p200-tl-secondary">@entry.SecondaryDetail</div>
+            }
+        </div>
+    </li>
+}
+</ul>

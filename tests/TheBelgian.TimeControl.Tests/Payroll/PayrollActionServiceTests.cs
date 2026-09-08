@@ -369,6 +369,64 @@ public sealed class PayrollActionServiceTests
     }
 
     [Fact]
+    public async Task ProposeAndExecute_Project200Delete_UsesGenericDelete_AndTargetedRebuild()
+    {
+        await using var fx = await Fixture.CreateAsync(executionEnabled: true, useMockWrites: true);
+        var date = new DateOnly(2026, 8, 12);
+        var start = new DateTimeOffset(2026, 8, 12, 8, 0, 0, TimeSpan.Zero);
+        var end = new DateTimeOffset(2026, 8, 12, 10, 0, 0, TimeSpan.Zero);
+        const long perfId = 271200;
+        fx.PerformanceSource.Rows =
+        [
+            new NormalizedPerformanceEntry(
+                perfId,
+                perfId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                "100",
+                date,
+                start,
+                end,
+                2m,
+                120m,
+                end - start,
+                new PauseNormalizationResult(PauseParseStatus.Missing, null, PauseSourceKind.Unspecified, null),
+                null,
+                7,
+                "200",
+                200,
+                null,
+                "kantoor",
+                null,
+                null,
+                perfId),
+        ];
+
+        var propose = await fx.Service.ProposeDeleteForPerformanceAsync(
+            2026,
+            8,
+            "100",
+            date,
+            perfId,
+            "verwijderen",
+            "tester",
+            PayrollFindingType.Project200WithoutPlanning,
+            actionKey: $"p200-delete:100:{date:yyyyMMdd}:{perfId}",
+            projectLabel: "200",
+            expectedActivityType: "CustomerWork");
+        Assert.True(propose.Ok);
+        Assert.NotNull(propose.ActionId);
+
+        var confirmation = await fx.Service.PrepareConfirmationAsync(propose.ActionId!.Value, default);
+        Assert.NotNull(confirmation);
+        Assert.Equal("200", confirmation!.DeleteProposal?.ProjectLabel);
+
+        var result = await fx.Service.ExecuteAsync(propose.ActionId.Value, "verwijderen", "tester", default);
+        Assert.Equal(PayrollProposedActionStatus.Applied, result.Status);
+        Assert.True(fx.Shadow.RebuildCalled);
+        Assert.NotNull(fx.Shadow.LastRebuildLimit);
+        Assert.Contains("100", fx.Shadow.LastRebuildLimit!);
+    }
+
+    [Fact]
     public async Task ProposeAndExecute_Delete_MockSuccess_Applied()
     {
         await using var fx = await Fixture.CreateAsync(executionEnabled: true, useMockWrites: true);

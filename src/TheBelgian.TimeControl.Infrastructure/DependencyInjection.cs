@@ -311,6 +311,14 @@ public static class DependencyInjection
         services.AddSingleton<PayrollProject300MonthContextCache>();
         services.AddSingleton<PayrollProject300HfdCache>();
         services.AddScoped<IPayrollProject300WorkbenchService, PayrollProject300WorkbenchService>();
+        services.AddSingleton<PayrollProject200GpsCache>();
+        services.AddSingleton<PayrollProject200GpsContextCache>();
+        services.AddSingleton<PayrollProject200DaySourceCache>();
+        services.AddSingleton<PayrollProject200QueueCache>();
+        services.AddSingleton<PayrollProject200BonMemoCache>();
+        services.AddSingleton<PayrollProject200MonthContextCache>();
+        services.AddSingleton<PayrollProject200HfdCache>();
+        services.AddScoped<IPayrollProject200WorkbenchService, PayrollProject200WorkbenchService>();
         return services;
     }
 
