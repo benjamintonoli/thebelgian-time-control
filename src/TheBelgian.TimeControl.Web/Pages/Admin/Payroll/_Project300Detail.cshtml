@@ -167,10 +167,11 @@ else
 
         <section class="mb-3 d-none" id="correction-panel">
             <div class="text-uppercase small text-muted fw-semibold mb-2">Wat is fout?</div>
+            <p class="small mb-2">Kies de actie. Admin-toelichting hieronder blijft een aparte review-notitie.</p>
             <p class="small mb-2">@PayrollDisplayFormatting.DateWithWeekday(selected.Date)</p>
             <div class="d-flex flex-wrap gap-2 mb-3" id="wb-fault-kind">
                 <button type="button" class="btn btn-sm btn-outline-primary" id="wb-show-adjust">Tijd aanpassen</button>
-                <button type="button" class="btn btn-sm btn-outline-danger" id="wb-show-delete">Volledige prestatie verwijderen</button>
+                <button type="button" class="btn btn-sm btn-outline-danger" id="wb-show-delete">Prestatie verwijderen</button>
             </div>
 
             <div class="d-none" id="adjust-panel">
@@ -195,25 +196,58 @@ else
                 }
             </div>
 
+            @{
+                var deleteTargets = detail.CorrectionTargets
+                    .Where(item => item.CorrectionCapability == PayrollProject300CorrectionCapability.SupportedDelete)
+                    .ToList();
+                var multiDelete = deleteTargets.Count > 1;
+            }
             <div class="d-none" id="delete-panel">
-                <div class="text-uppercase small text-muted fw-semibold mb-2">Volledige prestatie verwijderen</div>
-                <p class="small text-danger">Verwijdert enkel de urenrij in Plenion (geen cascade). Menselijke bevestiging blijft verplicht.</p>
-                @foreach (var target in detail.CorrectionTargets.Where(item => item.CorrectionCapability == PayrollProject300CorrectionCapability.SupportedDelete))
+                <div class="text-uppercase small text-muted fw-semibold mb-2">Prestatie verwijderen</div>
+                <p class="small text-danger mb-2">
+                    Alleen deze urenprestatie wordt verwijderd. De bon, het project en andere prestaties blijven bestaan.
+                    Bevestiging gebeurt op de volgende pagina.
+                </p>
+                @if (deleteTargets.Count == 0)
                 {
+                    <div class="alert alert-secondary small mb-0">Geen verwijderbare prestatie in deze case.</div>
+                }
+                else if (!multiDelete)
+                {
+                    var target = deleteTargets[0];
                     var booked = detail.BookedRows.FirstOrDefault(item => item.PerformanceId == target.PerformanceId);
                     var delRemark = detail.TechnicianContext?.PerformanceRemarks.FirstOrDefault(item => item.PerformanceId == target.PerformanceId);
                     <div class="border rounded border-danger-subtle p-2 mb-2 delete-target" data-performance-id="@target.PerformanceId">
-                        <div class="small fw-semibold">@PayrollDisplayFormatting.DateWithWeekday(selected.Date) · @FmtTime(target.CurrentStart)–@FmtTime(target.CurrentEnd) · @FmtHours(target.AtlHours)</div>
-                        <div class="small text-muted">BON @(booked?.BonNr ?? "—") · @(booked?.ProjectDisplayLabel ?? "—") · #@target.PerformanceId</div>
-                        @if (!string.IsNullOrWhiteSpace(delRemark?.PrestOmschr))
+                        <div class="small fw-semibold">@FmtTime(target.CurrentStart)–@FmtTime(target.CurrentEnd) · @FmtHours(target.AtlHours)</div>
+                        <div class="small text-muted">BON @(booked?.BonNr ?? "—") · @(booked?.ProjectDisplayLabel ?? "Project 300") · #@target.PerformanceId</div>
+                        @if (!string.IsNullOrWhiteSpace(delRemark?.PrestOmschr) || !string.IsNullOrWhiteSpace(booked?.Description))
                         {
-                            <div class="small">Technieker: @delRemark.PrestOmschr</div>
+                            <div class="small">Technieker: @(delRemark?.PrestOmschr ?? booked?.Description)</div>
                         }
-                        <div class="row g-2 align-items-end mt-2">
-                            <div class="col-md-6"><label class="form-label small mb-0">Reden</label><input class="form-control form-control-sm del-reason" placeholder="Verplicht" /></div>
-                            <div class="col-auto"><button type="button" class="btn btn-sm btn-danger wb-propose-delete">Voorstel controleren</button></div>
+                        <div class="mt-2">
+                            <button type="button" class="btn btn-sm btn-danger wb-propose-delete">Prestatie verwijderen</button>
                         </div>
                     </div>
+                }
+                else
+                {
+                    <div class="mb-2" id="delete-multi-list">
+                        @foreach (var target in deleteTargets)
+                        {
+                            var booked = detail.BookedRows.FirstOrDefault(item => item.PerformanceId == target.PerformanceId);
+                            var delRemark = detail.TechnicianContext?.PerformanceRemarks.FirstOrDefault(item => item.PerformanceId == target.PerformanceId);
+                            <label class="border rounded border-danger-subtle p-2 mb-2 d-block delete-target" data-performance-id="@target.PerformanceId">
+                                <input type="radio" name="delete-perf-select" class="form-check-input me-2 delete-perf-radio" value="@target.PerformanceId" />
+                                <span class="small fw-semibold">@FmtTime(target.CurrentStart)–@FmtTime(target.CurrentEnd) · @FmtHours(target.AtlHours)</span>
+                                <span class="small text-muted d-block ms-4">BON @(booked?.BonNr ?? "—") · #@target.PerformanceId</span>
+                                @if (!string.IsNullOrWhiteSpace(delRemark?.PrestOmschr) || !string.IsNullOrWhiteSpace(booked?.Description))
+                                {
+                                    <span class="small d-block ms-4">@(delRemark?.PrestOmschr ?? booked?.Description)</span>
+                                }
+                            </label>
+                        }
+                    </div>
+                    <button type="button" class="btn btn-sm btn-danger" id="wb-propose-delete-selected">Prestatie verwijderen</button>
                 }
             </div>
 

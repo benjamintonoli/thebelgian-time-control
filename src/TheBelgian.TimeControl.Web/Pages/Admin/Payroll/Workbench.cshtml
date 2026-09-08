@@ -234,7 +234,7 @@ else
     history.replaceState(null, '', urlObj.pathname + urlObj.search);
   }
 
-  function wireDetail() {
+    function wireDetail() {
     document.querySelectorAll('.wb-decide').forEach(btn => {
       btn.addEventListener('click', async () => {
         const wrap = document.getElementById('wb-decisions');
@@ -244,6 +244,12 @@ else
         const decisionCode = btn.dataset.decision;
         const requiresComment = btn.dataset.requiresComment === 'true';
         let comment = document.getElementById('wb-comment')?.value?.trim() || '';
+        // Uren zijn fout: open inline actiekeuze — no native browser prompt.
+        if (decisionCode === '@PayrollGuidedDecisionCodes.P300HoursWrong') {
+          document.getElementById('correction-panel')?.classList.remove('d-none');
+          document.getElementById('adjust-panel')?.classList.add('d-none');
+          document.getElementById('delete-panel')?.classList.add('d-none');
+        }
         if (requiresComment && !comment) {
           comment = window.prompt(btn.dataset.label + ' — toelichting:') || '';
           const input = document.getElementById('wb-comment');
@@ -252,9 +258,6 @@ else
         if (requiresComment && !comment.trim()) {
           if (err) { err.textContent = 'Toelichting is verplicht.'; err.classList.remove('d-none'); }
           return;
-        }
-        if (decisionCode === '@PayrollGuidedDecisionCodes.P300HoursWrong') {
-          document.getElementById('correction-panel')?.classList.remove('d-none');
         }
         btn.disabled = true;
         try {
@@ -318,7 +321,7 @@ else
           const payload = await response.json();
           if (!response.ok || !payload.ok) throw new Error(payload.error || 'Mislukt');
           if (payload.actionId) {
-            window.location.href = confirmBase + (confirmBase.includes('?') ? '&' : '?') + 'actionId=' + encodeURIComponent(payload.actionId);
+            window.location.href = confirmBase + (confirmBase.includes('?') ? '&' : '?') + 'ActionId=' + encodeURIComponent(payload.actionId);
             return;
           }
           if (ok) { ok.textContent = payload.message || 'Opgeslagen'; ok.classList.remove('d-none'); }
@@ -328,35 +331,47 @@ else
       });
     });
 
-    document.querySelectorAll('.wb-propose-delete').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const box = btn.closest('.delete-target');
-        const err = document.getElementById('wb-corr-error');
-        const ok = document.getElementById('wb-corr-ok');
-        err?.classList.add('d-none');
-        ok?.classList.add('d-none');
-        try {
-          const body = new URLSearchParams();
-          body.set('AdminCaseKey', document.getElementById('wb-decisions')?.dataset.adminCaseKey);
-          body.set('PerformanceId', box?.dataset.performanceId);
-          body.set('DeleteReason', box?.querySelector('.del-reason')?.value || '');
-          if (token) body.set('__RequestVerificationToken', token);
-          const response = await fetch(deleteUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8', 'RequestVerificationToken': token || '' },
-            body
-          });
-          const payload = await response.json();
-          if (!response.ok || !payload.ok) throw new Error(payload.error || 'Mislukt');
-          if (payload.actionId) {
-            window.location.href = confirmBase + (confirmBase.includes('?') ? '&' : '?') + 'actionId=' + encodeURIComponent(payload.actionId);
-            return;
-          }
-          if (ok) { ok.textContent = payload.message || 'Opgeslagen'; ok.classList.remove('d-none'); }
-        } catch (e) {
-          if (err) { err.textContent = e.message || 'Fout'; err.classList.remove('d-none'); }
+    async function proposeDelete(performanceId) {
+      const err = document.getElementById('wb-corr-error');
+      const ok = document.getElementById('wb-corr-ok');
+      err?.classList.add('d-none');
+      ok?.classList.add('d-none');
+      if (!performanceId) {
+        if (err) { err.textContent = 'Selecteer precies één prestatie.'; err.classList.remove('d-none'); }
+        return;
+      }
+      try {
+        const body = new URLSearchParams();
+        body.set('AdminCaseKey', document.getElementById('wb-decisions')?.dataset.adminCaseKey);
+        body.set('PerformanceId', performanceId);
+        body.set('DeleteReason', 'Prestatie verwijderen (reden op bevestigingspagina).');
+        if (token) body.set('__RequestVerificationToken', token);
+        const response = await fetch(deleteUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8', 'RequestVerificationToken': token || '' },
+          body
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) throw new Error(payload.error || 'Mislukt');
+        if (payload.actionId) {
+          window.location.href = confirmBase + (confirmBase.includes('?') ? '&' : '?') + 'ActionId=' + encodeURIComponent(payload.actionId);
+          return;
         }
+        if (ok) { ok.textContent = payload.message || 'Opgeslagen'; ok.classList.remove('d-none'); }
+      } catch (e) {
+        if (err) { err.textContent = e.message || 'Fout'; err.classList.remove('d-none'); }
+      }
+    }
+
+    document.querySelectorAll('.wb-propose-delete').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const box = btn.closest('.delete-target');
+        proposeDelete(box?.dataset.performanceId);
       });
+    });
+    document.getElementById('wb-propose-delete-selected')?.addEventListener('click', () => {
+      const selected = document.querySelector('input.delete-perf-radio:checked');
+      proposeDelete(selected?.value);
     });
 
     const gpsPanel = document.getElementById('gps-panel');

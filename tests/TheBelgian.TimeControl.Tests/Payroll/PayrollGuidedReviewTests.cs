@@ -93,7 +93,7 @@ public sealed class PayrollGuidedReviewTests
         var planning = PayrollGuidedDecisions.Resolve(PayrollGuidedDecisionCodes.P300PlanningMissing, PayrollReviewCategory.Project300);
         Assert.Equal(PayrollFindingStatus.NeedsFollowUp, planning.ResultStatus);
         var hours = PayrollGuidedDecisions.Resolve(PayrollGuidedDecisionCodes.P300HoursWrong, PayrollReviewCategory.Project300);
-        Assert.True(hours.RequiresComment);
+        Assert.False(hours.RequiresComment);
     }
 
     [Fact]

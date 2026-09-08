@@ -438,7 +438,7 @@ internal sealed class PayrollProject300WorkbenchService(
         EnsureEnabled();
         if (string.IsNullOrWhiteSpace(reason))
         {
-            return new PayrollProject300ProposeCorrectionResult(false, "Reden is verplicht.", null, null);
+            reason = "Prestatie verwijderen (reden op bevestigingspagina).";
         }
 
         var page = await GetCoreDetailAsync(

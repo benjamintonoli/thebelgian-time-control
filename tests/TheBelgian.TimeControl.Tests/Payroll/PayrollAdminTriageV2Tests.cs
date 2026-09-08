@@ -88,7 +88,7 @@ public sealed class PayrollAdminTriageV2Tests
             choices.Select(item => item.Label).ToArray());
         Assert.Equal(PayrollFindingStatus.Reviewed, choices[0].ResultStatus);
         Assert.Equal(PayrollFindingStatus.NeedsFollowUp, choices[2].ResultStatus);
-        Assert.True(choices[2].RequiresComment);
+        Assert.False(choices[2].RequiresComment);
         Assert.True(choices[3].RequiresComment);
     }
 

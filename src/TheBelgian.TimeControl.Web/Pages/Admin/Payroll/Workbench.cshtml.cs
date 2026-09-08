@@ -46,11 +46,19 @@ public sealed class WorkbenchModel(
     public string? Message { get; private set; }
     public string? Error { get; private set; }
 
+    [TempData]
+    public string? FlashSuccess { get; set; }
+
     public async Task<IActionResult> OnGetAsync(CancellationToken cancellationToken)
     {
         if (!EnsureUiEnabled())
         {
             return NotFound();
+        }
+
+        if (!string.IsNullOrWhiteSpace(FlashSuccess))
+        {
+            Message = FlashSuccess;
         }
 
         await LoadShellAsync(cancellationToken);

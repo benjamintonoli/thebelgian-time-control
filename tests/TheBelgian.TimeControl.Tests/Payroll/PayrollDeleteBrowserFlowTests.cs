@@ -1,0 +1,412 @@
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.AspNetCore.Mvc.ViewFeatures;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using TheBelgian.TimeControl.Core.Configuration;
+using TheBelgian.TimeControl.Core.Interfaces;
+using TheBelgian.TimeControl.Core.Models;
+using TheBelgian.TimeControl.Core.Payroll.Actions;
+using TheBelgian.TimeControl.Core.Payroll.Findings;
+using TheBelgian.TimeControl.Core.Payroll.Review;
+using TheBelgian.TimeControl.Infrastructure.Configuration;
+using TheBelgian.TimeControl.Web.Pages.Admin.Payroll;
+
+namespace TheBelgian.TimeControl.Tests.Payroll;
+
+public sealed class PayrollDeleteBrowserFlowTests
+{
+    [Fact]
+    public void ActionConfirmMarkup_PostsActionIdWithExecuteHandler()
+    {
+        var markup = File.ReadAllText(Path.Combine(
+            FindRepoRoot(),
+            "src",
+            "TheBelgian.TimeControl.Web",
+            "Pages",
+            "Admin",
+            "Payroll",
+            "ActionConfirm.cshtml"));
+
+        Assert.Contains("method=\"post\"", markup, StringComparison.Ordinal);
+        Assert.Contains("asp-route-ActionId=\"@Model.ActionId\"", markup, StringComparison.Ordinal);
+        Assert.Contains("asp-for=\"ActionId\"", markup, StringComparison.Ordinal);
+        Assert.Contains("asp-page-handler=\"Execute\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Definitief verwijderen", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("<form method=\"post\" class=\"vstack", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WorkbenchMarkup_HoursWrongUsesInlineActionChoiceWithoutPromptGate()
+    {
+        var workbench = File.ReadAllText(Path.Combine(
+            FindRepoRoot(),
+            "src",
+            "TheBelgian.TimeControl.Web",
+            "Pages",
+            "Admin",
+            "Payroll",
+            "Workbench.cshtml"));
+        var detail = File.ReadAllText(Path.Combine(
+            FindRepoRoot(),
+            "src",
+            "TheBelgian.TimeControl.Web",
+            "Pages",
+            "Admin",
+            "Payroll",
+            "_Project300Detail.cshtml"));
+
+        Assert.Contains("Wat is fout?", detail, StringComparison.Ordinal);
+        Assert.Contains("Tijd aanpassen", detail, StringComparison.Ordinal);
+        Assert.Contains("Prestatie verwijderen", detail, StringComparison.Ordinal);
+        Assert.Contains("wb-show-adjust", detail, StringComparison.Ordinal);
+        Assert.Contains("wb-show-delete", detail, StringComparison.Ordinal);
+        Assert.Contains("wb-propose-delete", detail, StringComparison.Ordinal);
+        Assert.Contains("delete-perf-radio", detail, StringComparison.Ordinal);
+        Assert.Contains("Admin-toelichting (TimeControl — schrijft niet terug naar BON)", detail, StringComparison.Ordinal);
+
+        Assert.Contains("P300HoursWrong", workbench, StringComparison.Ordinal);
+        Assert.Contains("correction-panel", workbench, StringComparison.Ordinal);
+        Assert.Contains("proposeDelete", workbench, StringComparison.Ordinal);
+        Assert.Contains("ActionId=", workbench, StringComparison.Ordinal);
+        // Prompt may remain for other decisions (Onzeker), but hours-wrong opens panel first.
+        Assert.Contains("openCorrection", workbench, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Project300_HoursWrong_DoesNotRequireComment()
+    {
+        var choice = Assert.Single(
+            PayrollGuidedDecisions.ChoicesFor(PayrollReviewCategory.Project300)
+                .Where(item => item.DecisionCode == PayrollGuidedDecisionCodes.P300HoursWrong));
+        Assert.False(choice.RequiresComment);
+        Assert.Contains(
+            PayrollGuidedDecisions.ChoicesFor(PayrollReviewCategory.Project300),
+            item => item.DecisionCode == PayrollGuidedDecisionCodes.P300WorkValid);
+        Assert.Contains(
+            PayrollGuidedDecisions.ChoicesFor(PayrollReviewCategory.Project300),
+            item => item.DecisionCode == PayrollGuidedDecisionCodes.P300PlanningMissing);
+        Assert.Contains(
+            PayrollGuidedDecisions.ChoicesFor(PayrollReviewCategory.Project300),
+            item => item.DecisionCode == PayrollGuidedDecisionCodes.P300Uncertain && item.RequiresComment);
+    }
+
+    [Fact]
+    public async Task ActionConfirm_Get_WithActionId_ReturnsPage()
+    {
+        var actionId = Guid.Parse("f420a912-cdf6-4298-80ae-ba8b0ea6ea41");
+        var actions = new FakeActions
+        {
+            Confirmation = SampleConfirmation(actionId),
+        };
+        var page = CreatePage(actions);
+        page.ActionId = actionId;
+
+        var result = await page.OnGetAsync(default);
+
+        Assert.IsType<PageResult>(result);
+        Assert.NotNull(page.View);
+        Assert.Equal(0, actions.ExecuteCalls);
+    }
+
+    [Fact]
+    public async Task ActionConfirm_Get_WithoutActionId_ReturnsNotFound()
+    {
+        var page = CreatePage(new FakeActions());
+        page.ActionId = Guid.Empty;
+
+        var result = await page.OnGetAsync(default);
+
+        Assert.IsType<NotFoundResult>(result);
+    }
+
+    [Fact]
+    public async Task ActionConfirm_PostExecute_WithoutActionId_DoesNotMutate()
+    {
+        var actions = new FakeActions();
+        var page = CreatePage(actions);
+        page.ActionId = Guid.Empty;
+        page.Comment = "reden";
+
+        var result = await page.OnPostExecuteAsync(default);
+
+        Assert.IsType<PageResult>(result);
+        Assert.Equal(0, actions.ExecuteCalls);
+        Assert.Contains("Actie niet gevonden", page.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ActionConfirm_PostExecute_MissingReason_DoesNotMutate()
+    {
+        var actionId = Guid.NewGuid();
+        var actions = new FakeActions
+        {
+            Confirmation = SampleConfirmation(actionId),
+        };
+        var page = CreatePage(actions);
+        page.ActionId = actionId;
+        page.Comment = "   ";
+
+        var result = await page.OnPostExecuteAsync(default);
+
+        Assert.IsType<PageResult>(result);
+        Assert.Equal(0, actions.ExecuteCalls);
+        Assert.Contains("Reden is verplicht", page.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ActionConfirm_PostExecute_Applied_RedirectsToWorkbench()
+    {
+        var actionId = Guid.NewGuid();
+        var actions = new FakeActions
+        {
+            Confirmation = SampleConfirmation(actionId),
+            ExecuteResult = new PayrollActionExecutionResult(
+                actionId,
+                PayrollProposedActionStatus.Applied,
+                "ok",
+                "pws-ref",
+                283272),
+        };
+        var page = CreatePage(actions);
+        page.ActionId = actionId;
+        page.Comment = "Project 300-prestatie foutief aangemaakt.";
+
+        var result = await page.OnPostExecuteAsync(default);
+
+        var redirect = Assert.IsType<RedirectToPageResult>(result);
+        Assert.Equal("./Workbench", redirect.PageName);
+        Assert.Equal(1, actions.ExecuteCalls);
+        Assert.Equal(actionId, actions.LastExecutedActionId);
+        Assert.Equal("Project 300-prestatie foutief aangemaakt.", actions.LastComment);
+        Assert.Equal("benjamin.tonoli@thebelgian.be", actions.LastActor);
+        Assert.Contains("verwijderd uit Plenion", page.TempData["FlashSuccess"]?.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ActionConfirm_PostExecute_Stale_ShowsSafeError()
+    {
+        var actionId = Guid.NewGuid();
+        var actions = new FakeActions
+        {
+            Confirmation = SampleConfirmation(actionId),
+            ExecuteResult = new PayrollActionExecutionResult(
+                actionId,
+                PayrollProposedActionStatus.Stale,
+                "Prestatie wijkt af van snapshot",
+                null,
+                null),
+        };
+        var page = CreatePage(actions);
+        page.ActionId = actionId;
+        page.Comment = "reden";
+
+        var result = await page.OnPostExecuteAsync(default);
+
+        Assert.IsType<PageResult>(result);
+        Assert.Equal(1, actions.ExecuteCalls);
+        Assert.Contains("ondertussen gewijzigd", page.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ActionConfirm_PostExecute_DuplicateSubmit_DoesNotCallTwiceInOneRequest()
+    {
+        var actionId = Guid.NewGuid();
+        var actions = new FakeActions
+        {
+            Confirmation = SampleConfirmation(actionId),
+            ExecuteResult = new PayrollActionExecutionResult(
+                actionId,
+                PayrollProposedActionStatus.Applied,
+                "ok",
+                null,
+                283272),
+        };
+        var page = CreatePage(actions);
+        page.ActionId = actionId;
+        page.Comment = "reden";
+
+        await page.OnPostExecuteAsync(default);
+        Assert.Equal(1, actions.ExecuteCalls);
+    }
+
+    private static ActionConfirmModel CreatePage(FakeActions actions)
+    {
+        var http = new DefaultHttpContext();
+        var temp = new TempDataDictionary(http, new FakeTempDataProvider());
+        var page = new ActionConfirmModel(
+            actions,
+            new FakeUser(),
+            Options.Create(new PayrollShadowOptions { Enabled = true, AdminUiEnabled = true }),
+            Options.Create(new PayrollActionsOptions
+            {
+                Enabled = true,
+                ExecutionEnabled = true,
+                DeletePerformanceEnabled = true,
+            }),
+            Options.Create(new AdminReviewWorkflowOptions
+            {
+                DefaultReviewer = "benjamin.tonoli@thebelgian.be",
+            }),
+            NullLogger<ActionConfirmModel>.Instance)
+        {
+            PageContext = new PageContext
+            {
+                HttpContext = http,
+            },
+            TempData = temp,
+        };
+        return page;
+    }
+
+    private static PayrollActionConfirmationView SampleConfirmation(Guid actionId)
+    {
+        var start = new DateTimeOffset(2026, 8, 20, 8, 40, 0, TimeSpan.FromHours(2));
+        var end = new DateTimeOffset(2026, 8, 20, 8, 50, 0, TimeSpan.FromHours(2));
+        return new PayrollActionConfirmationView(
+            actionId,
+            1,
+            2026,
+            8,
+            "388",
+            "Ayrton Buyle",
+            PayrollProposedActionType.DeleteExistingPerformance,
+            PayrollProposedActionStatus.ReadyForApproval,
+            null,
+            new PayrollActionEvidenceSnapshot(
+                "Project300WithoutPlanning:388:20260820:283272",
+                PayrollFindingType.Project300WithoutPlanning,
+                PayrollFindingSeverity.Review,
+                null,
+                "evidence",
+                "title",
+                "desc",
+                [283272],
+                start,
+                end,
+                0.1667m,
+                "49432",
+                "26601886",
+                ["Project300WithoutPlanning:388:20260820:283272"],
+                [404]),
+            null,
+            null,
+            "Project 300-prestatie foutief aangemaakt.",
+            true,
+            true,
+            null,
+            new PayrollActionDeleteProposal(
+                283272,
+                new DateOnly(2026, 8, 20),
+                start,
+                end,
+                0.1667m,
+                "388",
+                "49432",
+                "26601886",
+                14,
+                null,
+                "ophalen badgelezer",
+                null,
+                null,
+                "BON 26601886"));
+    }
+
+    private static string FindRepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "TheBelgian.TimeControl.sln")))
+            {
+                return dir.FullName;
+            }
+
+            dir = dir.Parent;
+        }
+
+        throw new InvalidOperationException("Repo root not found.");
+    }
+
+    private sealed class FakeUser : ICurrentUserContext
+    {
+        public AuthenticatedActor? CurrentUser =>
+            new("benjamin.tonoli@thebelgian.be", "cf-sub", "Benjamin Tonoli");
+
+        public AuthenticatedActor RequireActor(string developmentFallbackReviewer) =>
+            CurrentUser!;
+    }
+
+    private sealed class FakeTempDataProvider : ITempDataProvider
+    {
+        private Dictionary<string, object?> _data = new(StringComparer.Ordinal);
+
+        public IDictionary<string, object?> LoadTempData(HttpContext context) => _data;
+
+        public void SaveTempData(HttpContext context, IDictionary<string, object?> values) =>
+            _data = new Dictionary<string, object?>(values, StringComparer.Ordinal);
+    }
+
+    private sealed class FakeActions : IPayrollActionService
+    {
+        public PayrollActionConfirmationView? Confirmation { get; set; }
+        public PayrollActionExecutionResult? ExecuteResult { get; set; }
+        public int ExecuteCalls { get; private set; }
+        public Guid? LastExecutedActionId { get; private set; }
+        public string? LastComment { get; private set; }
+        public string? LastActor { get; private set; }
+
+        public Task<IReadOnlyList<PayrollProposedActionRecord>> ProposeFromFindingsAsync(
+            int year, int month, string? resourceId, string actor, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<PayrollProposedActionRecord>>([]);
+
+        public Task<IReadOnlyList<PayrollProposedActionRecord>> ListActionsAsync(
+            int year, int month, string? resourceId, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<PayrollProposedActionRecord>>([]);
+
+        public Task<PayrollProposedActionRecord?> GetActionAsync(
+            Guid actionId, CancellationToken cancellationToken) =>
+            Task.FromResult<PayrollProposedActionRecord?>(null);
+
+        public Task<PayrollActionConfirmationView?> PrepareConfirmationAsync(
+            Guid actionId, CancellationToken cancellationToken) =>
+            Task.FromResult(Confirmation is null || Confirmation.ActionId != actionId ? null : Confirmation);
+
+        public Task<PayrollActionExecutionResult> ExecuteAsync(
+            Guid actionId, string comment, string actor, CancellationToken cancellationToken)
+        {
+            ExecuteCalls++;
+            LastExecutedActionId = actionId;
+            LastComment = comment;
+            LastActor = actor;
+            return Task.FromResult(ExecuteResult ?? new PayrollActionExecutionResult(
+                actionId, PayrollProposedActionStatus.Failed, "no result", null, null));
+        }
+
+        public Task CancelAsync(Guid actionId, string actor, CancellationToken cancellationToken) =>
+            Task.CompletedTask;
+
+        public Task<PayrollActionProposeResult> ProposeDeleteForPerformanceAsync(
+            int year,
+            int month,
+            string resourceId,
+            DateOnly workDate,
+            long performanceId,
+            string reason,
+            string actor,
+            PayrollFindingType findingType,
+            string? actionKey = null,
+            string? sourceFindingKey = null,
+            int? sourceFindingId = null,
+            IReadOnlyList<string>? sourceFindingKeys = null,
+            IReadOnlyList<int>? sourceFindingIds = null,
+            string? prestOmschr = null,
+            string? prestMemo = null,
+            string? bonTechnicianRemark = null,
+            string? projectLabel = null,
+            string? expectedActivityType = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new PayrollActionProposeResult(false, "n/a", null, null));
+    }
+}

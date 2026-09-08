@@ -141,7 +141,12 @@ else
         </div>
     </div>
 
-    <form method="post" class="vstack gap-3" style="max-width: 40rem;">
+    <form method="post"
+          asp-page="/Admin/Payroll/ActionConfirm"
+          asp-route-ActionId="@Model.ActionId"
+          class="vstack gap-3"
+          style="max-width: 40rem;">
+        <input type="hidden" asp-for="ActionId" />
         <div>
             <label class="form-label" asp-for="Comment">Reden / commentaar</label>
             <textarea class="form-control" asp-for="Comment" rows="3" required></textarea>
@@ -149,7 +154,9 @@ else
         <div class="d-flex flex-wrap gap-2">
             @if (isDelete)
             {
-                <button type="submit" asp-page-handler="Execute"
+                <button type="submit"
+                        asp-page-handler="Execute"
+                        asp-route-ActionId="@Model.ActionId"
                         class="btn btn-danger"
                         disabled="@(!view.CanExecute)"
                         data-confirm="Prestatie definitief verwijderen uit Plenion. Doorgaan?">
@@ -158,14 +165,20 @@ else
             }
             else
             {
-                <button type="submit" asp-page-handler="Execute"
+                <button type="submit"
+                        asp-page-handler="Execute"
+                        asp-route-ActionId="@Model.ActionId"
                         class="btn btn-primary"
                         disabled="@(!view.CanExecute)"
                         data-confirm="Deze actie wijzigt Plenion. Doorgaan?">
                     Uitvoeren
                 </button>
             }
-            <button type="submit" asp-page-handler="Cancel" class="btn btn-outline-secondary" formnovalidate>
+            <button type="submit"
+                    asp-page-handler="Cancel"
+                    asp-route-ActionId="@Model.ActionId"
+                    class="btn btn-outline-secondary"
+                    formnovalidate>
                 Annuleren
             </button>
         </div>

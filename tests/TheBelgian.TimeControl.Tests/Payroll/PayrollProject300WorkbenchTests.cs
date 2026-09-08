@@ -502,14 +502,14 @@ public sealed class PayrollProject300WorkbenchTests
     }
 
     [Fact]
-    public void UrenFout_RequiresComment()
+    public void UrenFout_OpensActionPanelWithoutRequiredComment()
     {
         var choice = PayrollGuidedDecisions.Resolve(
             PayrollGuidedDecisionCodes.P300HoursWrong,
             PayrollReviewCategory.Project300);
         Assert.Equal("Uren zijn fout", choice.Label);
         Assert.Equal(PayrollFindingStatus.NeedsFollowUp, choice.ResultStatus);
-        Assert.True(choice.RequiresComment);
+        Assert.False(choice.RequiresComment);
     }
 
     [Fact]
