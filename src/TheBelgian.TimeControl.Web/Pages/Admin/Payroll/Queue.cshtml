@@ -107,17 +107,28 @@ else
                                     <div class="mt-1 text-muted">@openHours.ToString("0.##", nl) u te beoordelen</div>
                                 }
                             </div>
-                            <div class="d-flex flex-wrap gap-2">
-                                @if (open + follow > 0)
-                                {
-                                    <a class="btn btn-sm btn-primary" href="@GuidedHref(cat)">Start controle</a>
-                                }
-                                else
-                                {
-                                    <button class="btn btn-sm btn-outline-secondary" type="button" disabled>Start controle</button>
-                                }
-                                <a class="btn btn-sm btn-outline-secondary" href="@CategoryHref(cat)">@(cat == PayrollReviewCategory.Project300 ? "Triage-lijst" : "Lijst")</a>
-                            </div>
+                        <div class="d-flex flex-wrap gap-2">
+                            @if (cat == PayrollReviewCategory.Project300 && open + follow > 0)
+                            {
+                                <a class="btn btn-sm btn-primary"
+                                   asp-page="./Workbench"
+                                   asp-route-year="@Model.Year"
+                                   asp-route-month="@Model.Month">Werkblad</a>
+                            }
+                            else if (open + follow > 0)
+                            {
+                                <a class="btn btn-sm btn-primary" href="@GuidedHref(cat)">Start controle</a>
+                            }
+                            else
+                            {
+                                <button class="btn btn-sm btn-outline-secondary" type="button" disabled>Start controle</button>
+                            }
+                            <a class="btn btn-sm btn-outline-secondary" href="@CategoryHref(cat)">@(cat == PayrollReviewCategory.Project300 ? "Lijst" : "Lijst")</a>
+                            @if (cat == PayrollReviewCategory.Project300)
+                            {
+                                <a class="btn btn-sm btn-outline-secondary" href="@GuidedHref(cat)">Guided</a>
+                            }
+                        </div>
                         </div>
                     </div>
                 </div>

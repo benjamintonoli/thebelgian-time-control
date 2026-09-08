@@ -287,6 +287,7 @@ public static class DependencyInjection
         services.AddScoped<IPayrollShadowService, PayrollShadowService>();
         services.AddScoped<IPayrollActionService, PayrollActionService>();
         services.AddScoped<IPayrollReviewQueueService, PayrollReviewQueueService>();
+        services.AddScoped<IPayrollProject300WorkbenchService, PayrollProject300WorkbenchService>();
         return services;
     }
 

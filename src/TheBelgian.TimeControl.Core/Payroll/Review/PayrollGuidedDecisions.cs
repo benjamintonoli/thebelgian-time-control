@@ -54,8 +54,8 @@ public static class PayrollGuidedDecisions
         [
             Choice(PayrollGuidedDecisionCodes.P300WorkValid, "Werk was terecht", PayrollFindingStatus.Reviewed, requiresComment: false),
             Choice(PayrollGuidedDecisionCodes.P300PlanningMissing, "Planning ontbreekt", PayrollFindingStatus.NeedsFollowUp, requiresComment: false),
-            Choice(PayrollGuidedDecisionCodes.P300HoursWrong, "Niet terecht", PayrollFindingStatus.NeedsFollowUp, requiresComment: true),
-            Choice(PayrollGuidedDecisionCodes.P300Uncertain, "Opvolgen", PayrollFindingStatus.NeedsFollowUp, requiresComment: true),
+            Choice(PayrollGuidedDecisionCodes.P300HoursWrong, "Uren zijn fout", PayrollFindingStatus.NeedsFollowUp, requiresComment: true),
+            Choice(PayrollGuidedDecisionCodes.P300Uncertain, "Onzeker", PayrollFindingStatus.NeedsFollowUp, requiresComment: true),
         ],
         PayrollReviewCategory.Project200 =>
         [

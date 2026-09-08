@@ -84,7 +84,7 @@ public sealed class PayrollAdminTriageV2Tests
     {
         var choices = PayrollGuidedDecisions.ChoicesFor(PayrollReviewCategory.Project300);
         Assert.Equal(
-            ["Werk was terecht", "Planning ontbreekt", "Niet terecht", "Opvolgen"],
+            ["Werk was terecht", "Planning ontbreekt", "Uren zijn fout", "Onzeker"],
             choices.Select(item => item.Label).ToArray());
         Assert.Equal(PayrollFindingStatus.Reviewed, choices[0].ResultStatus);
         Assert.Equal(PayrollFindingStatus.NeedsFollowUp, choices[2].ResultStatus);

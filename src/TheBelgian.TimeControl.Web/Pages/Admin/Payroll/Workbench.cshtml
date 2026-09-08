@@ -1,0 +1,429 @@
+@page "/Admin/Payroll/{year:int}/{month:int}/Workbench/Project300"
+@model TheBelgian.TimeControl.Web.Pages.Admin.Payroll.WorkbenchModel
+@using System.Globalization
+@using TheBelgian.TimeControl.Core.Payroll.Findings
+@using TheBelgian.TimeControl.Core.Payroll.Review
+@{
+    ViewData["Title"] = $"300 workbench {Model.Month:00}/{Model.Year}";
+    var wb = Model.Workbench;
+    var nl = CultureInfo.GetCultureInfo("nl-BE");
+    var selected = wb?.Detail?.AdminCase;
+    var detail = wb?.Detail;
+    string ScopeHref(PayrollReviewQueueScope scope) =>
+        Url.Page("./Workbench", new
+        {
+            year = Model.Year,
+            month = Model.Month,
+            Scope = scope,
+            Search = Model.Search,
+            Sort = Model.Sort,
+            Focus = Model.Focus,
+        })!;
+    string CaseHref(string key) =>
+        Url.Page("./Workbench", new
+        {
+            year = Model.Year,
+            month = Model.Month,
+            Scope = Model.Scope,
+            Search = Model.Search,
+            Sort = Model.Sort,
+            Focus = key,
+        })!;
+    string FmtTime(DateTimeOffset? value) => value?.ToString("HH:mm") ?? "—";
+    string FmtHours(decimal hours) => hours.ToString("0.##", nl) + " u";
+}
+
+<div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
+    <div>
+        <div class="text-uppercase small text-muted fw-semibold">Payroll · Project 300</div>
+        <h1 class="h3 mb-1">Review workbench @Model.Month.ToString("00")/@Model.Year</h1>
+        <p class="text-muted mb-0">Master-detail: context → beslissing. GPS valideert 300 nooit automatisch.</p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+        <a class="btn btn-sm btn-dark" asp-page="./Workbench" asp-route-year="@Model.Year" asp-route-month="@Model.Month">Werkblad</a>
+        <a class="btn btn-sm btn-outline-secondary"
+           asp-page="./Queue"
+           asp-route-year="@Model.Year"
+           asp-route-month="@Model.Month"
+           asp-route-Category="Project300"
+           asp-route-ListMode="true">Lijst</a>
+        <a class="btn btn-sm btn-outline-secondary"
+           asp-page="./Guided"
+           asp-route-year="@Model.Year"
+           asp-route-month="@Model.Month"
+           asp-route-category="Project300">Guided</a>
+        <a class="btn btn-sm btn-outline-secondary" asp-page="./Queue" asp-route-year="@Model.Year" asp-route-month="@Model.Month">← Categorieën</a>
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(Model.Message)) { <div class="alert alert-success">@Model.Message</div> }
+@if (!string.IsNullOrWhiteSpace(Model.Error)) { <div class="alert alert-danger">@Model.Error</div> }
+
+@if (wb is null)
+{
+    <div class="alert alert-warning">Shadow-maand niet gevonden.</div>
+}
+else
+{
+    <div class="d-flex flex-wrap gap-2 mb-2 small">
+        <span>AdminCases <strong>@wb.Cases.Count</strong></span>
+        <span class="text-muted">· Open @wb.AdminSummary.UnresolvedAdminByCategory.GetValueOrDefault(PayrollReviewCategory.Project300)</span>
+        <span class="text-muted">· Opvolging @wb.AdminSummary.FollowUpAdminByCategory.GetValueOrDefault(PayrollReviewCategory.Project300)</span>
+        @if (wb.Metrics.PowerFleetApiCalls > 0 || wb.Detail is not null)
+        {
+            <span class="text-muted ms-auto">Plenion perf @wb.Metrics.PlenionPerformanceQueries · planning @wb.Metrics.PlenionPlanningQueries · PowerFleet @wb.Metrics.PowerFleetApiCalls</span>
+        }
+    </div>
+
+    <div class="btn-group btn-group-sm mb-3" role="group">
+        <a class="btn @(Model.Scope == PayrollReviewQueueScope.Open ? "btn-dark" : "btn-outline-secondary")" href="@ScopeHref(PayrollReviewQueueScope.Open)">Te beoordelen</a>
+        <a class="btn @(Model.Scope == PayrollReviewQueueScope.Closed ? "btn-dark" : "btn-outline-secondary")" href="@ScopeHref(PayrollReviewQueueScope.Closed)">Afgehandeld</a>
+        <a class="btn @(Model.Scope == PayrollReviewQueueScope.All ? "btn-dark" : "btn-outline-secondary")" href="@ScopeHref(PayrollReviewQueueScope.All)">Alles</a>
+    </div>
+
+    <form method="get" class="cockpit-filters mb-3">
+        <input type="hidden" name="year" value="@Model.Year" />
+        <input type="hidden" name="month" value="@Model.Month" />
+        <input type="hidden" asp-for="Scope" />
+        <div>
+            <label asp-for="Search">Zoeken</label>
+            <input class="form-control form-control-sm" asp-for="Search" placeholder="Medewerker / BON / project / datum / omschrijving" />
+        </div>
+        <div>
+            <label asp-for="Sort">Sortering</label>
+            <select class="form-select form-select-sm" asp-for="Sort">
+                <option value="default">Ernst / datum</option>
+                <option value="datum">Datum</option>
+                <option value="medewerker">Medewerker A-Z</option>
+                <option value="duur">Duur</option>
+                <option value="status">Status</option>
+            </select>
+        </div>
+        <button class="btn btn-sm btn-dark align-self-end" type="submit">Toepassen</button>
+    </form>
+
+    <form id="wb-af" class="d-none">@Html.AntiForgeryToken()</form>
+
+    <div class="timecontrol-cockpit payroll-p300-workbench">
+        <aside class="review-queue review-queue-sticky" aria-label="Project 300 queue">
+            <div class="queue-title"><strong>300 queue</strong><span>@wb.Cases.Count</span></div>
+            <div class="queue-report-form">
+                <div class="queue-items" id="p300-queue-items">
+                    @foreach (var item in wb.Cases)
+                    {
+                        var active = string.Equals(wb.SelectedKey, item.AdminCaseKey, StringComparison.Ordinal) ? "active" : null;
+                        <article class="queue-case @active" id="queue-case-@item.AdminCaseKey.GetHashCode().ToString("x")" data-admin-case-key="@item.AdminCaseKey">
+                            <a class="queue-case-link" href="@CaseHref(item.AdminCaseKey)" aria-current="@(active is null ? null : "true")">
+                                <div class="queue-case-top">
+                                    <strong>@(item.DisplayName ?? item.ResourceId)</strong>
+                                    <span>@item.Date.ToString("dd/MM")</span>
+                                </div>
+                                <div class="queue-facts">
+                                    <span>@(item.TimeIntervalSummary ?? item.BookedSummary ?? "—")</span>
+                                    <span>@PayrollTriageEvidence.FormatHours(item.TotalBookedHours)</span>
+                                </div>
+                                <div class="queue-customer">@(item.PerformanceDescriptionSummary ?? item.IssueSummary)</div>
+                                <div class="queue-case-bottom">
+                                    <span class="queue-status">@PayrollGuidedDecisions.AdminStatusLabel(item.WorkflowStatus)</span>
+                                </div>
+                            </a>
+                        </article>
+                    }
+                    @if (wb.Cases.Count == 0)
+                    {
+                        <div class="p-3 small text-muted">Geen cases voor deze filters.</div>
+                    }
+                </div>
+            </div>
+        </aside>
+
+        <main class="case-detail" id="p300-case-detail">
+            @if (detail is null || selected is null)
+            {
+                <div class="empty-detail"><h2>Geen case geselecteerd</h2><p>Kies een case links.</p></div>
+            }
+            else
+            {
+                <div class="d-flex justify-content-between flex-wrap gap-2 mb-2">
+                    <div>
+                        <h2 class="h4 mb-1">@(selected.DisplayName ?? selected.ResourceId)</h2>
+                        <div class="text-muted">@selected.Date.ToString("dd/MM/yyyy") · Project 300</div>
+                    </div>
+                    <span class="badge text-bg-light text-dark border">@PayrollGuidedDecisions.AdminStatusLabel(selected.WorkflowStatus)</span>
+                </div>
+                <p class="fw-semibold">@selected.BusinessQuestion</p>
+
+                <section class="mb-3">
+                    <h3 class="h6 text-uppercase text-muted">A. Geboekt</h3>
+                    @if (detail.BookedRows.Count > 1)
+                    {
+                        <div class="mb-1">@detail.BookedRows.Count prestaties · totaal @FmtHours(detail.TotalAtlHours)</div>
+                    }
+                    @foreach (var row in detail.BookedRows)
+                    {
+                        <div class="border rounded p-2 mb-2">
+                            <div class="fw-semibold">@FmtTime(row.Start)–@FmtTime(row.End) · @FmtHours(row.AtlHours)</div>
+                            <div class="small">Omschrijving: @(string.IsNullOrWhiteSpace(row.Description) ? "—" : row.Description)</div>
+                            <div class="small">Memo: @(string.IsNullOrWhiteSpace(row.Memo) ? "—" : row.Memo)</div>
+                            <div class="small text-muted">
+                                @if (!string.IsNullOrWhiteSpace(row.ProjectId)) { <span>Project @row.ProjectId</span> }
+                                @if (!string.IsNullOrWhiteSpace(row.BonNr)) { <span class="ms-2">BON @row.BonNr</span> }
+                                <span class="ms-2">#@row.PerformanceId</span>
+                                @if (row.HfdTaakId is { } hfd) { <span class="ms-2">HFDTAAK @hfd</span> }
+                            </div>
+                        </div>
+                    }
+                    @if (detail.BookedRows.Count == 0)
+                    {
+                        <div class="alert alert-warning small">Bronprestatie niet geladen — toon finding-samenvatting: @(selected.BookedSummary ?? selected.IssueSummary)</div>
+                    }
+                </section>
+
+                <section class="mb-3">
+                    <h3 class="h6 text-uppercase text-muted">B. Planning</h3>
+                    <div class="mb-2"><strong>Matching reservatie:</strong> @detail.MatchingReservationLabel</div>
+                    <div class="small text-muted mb-1">Planning die dag (context — valideert 300 niet):</div>
+                    @if (detail.DayPlanningRows.Count == 0)
+                    {
+                        <div class="small text-muted">Geen andere planning die dag.</div>
+                    }
+                    else
+                    {
+                        <ul class="list-unstyled small mb-0">
+                            @foreach (var plan in detail.DayPlanningRows)
+                            {
+                                <li>@(plan.TimeFrom?.ToString("HH:mm") ?? "—")–@(plan.TimeTo?.ToString("HH:mm") ?? "—") · @plan.Label</li>
+                            }
+                        </ul>
+                    }
+                </section>
+
+                <section class="mb-3">
+                    <h3 class="h6 text-uppercase text-muted">C. GPS / dagverloop</h3>
+                    <p class="small mb-1">@detail.GpsContext.Summary</p>
+                    <p class="small text-muted">@PayrollProject300CaseDetail.GpsNeverValidatesNote</p>
+                    @if (detail.GpsContext.Available && detail.GpsContext.Events.Count > 0)
+                    {
+                        <ul class="list-unstyled small">
+                            @foreach (var ev in detail.GpsContext.Events)
+                            {
+                                <li>
+                                    <strong>@ev.At.ToString("HH:mm")</strong>
+                                    @if (ev.End is { } end) { <span>–@end.ToString("HH:mm")</span> }
+                                    · @ev.Label
+                                    @if (!string.IsNullOrWhiteSpace(ev.Detail)) { <span class="text-muted">— @ev.Detail</span> }
+                                </li>
+                            }
+                        </ul>
+                    }
+                    <details class="small">
+                        <summary>Technische GPS-ids</summary>
+                        <div>Mapping: @detail.GpsContext.MappingKind</div>
+                        <div>ObjectId: @(detail.GpsContext.ObjectIdCollapsed ?? "—")</div>
+                        <div>Trips: @detail.GpsContext.TripsCollapsed.Count</div>
+                    </details>
+                    <div class="small text-muted mt-1">Kaart: geen aparte map-component in TimeControl; timeline hierboven is de GPS-context.</div>
+                </section>
+
+                <section class="mb-3">
+                    <h3 class="h6 text-uppercase text-muted">D. Andere prestaties</h3>
+                    @if (detail.NeighborTimelineRows.Count == 0)
+                    {
+                        <div class="small text-muted">Geen naburige prestaties.</div>
+                    }
+                    else
+                    {
+                        <ul class="list-unstyled small mb-0">
+                            @foreach (var row in detail.NeighborTimelineRows)
+                            {
+                                <li class="@(row.IsSelected300 ? "fw-semibold" : "")">
+                                    @FmtTime(row.Start)–@FmtTime(row.End)
+                                    · @(row.ProjectLabel ?? "—")
+                                    · @(row.Description ?? "—")
+                                    @if (row.IsSelected300) { <span class="text-primary">← geselecteerd</span> }
+                                </li>
+                            }
+                        </ul>
+                    }
+                </section>
+
+                <section class="mb-3" id="decision-card">
+                    <h3 class="h6 text-uppercase text-muted">E. Beslissing</h3>
+                    <div class="d-flex flex-wrap gap-2 mb-2" id="wb-decisions" data-admin-case-key="@selected.AdminCaseKey">
+                        @foreach (var choice in selected.Choices)
+                        {
+                            <button type="button"
+                                    class="btn btn-sm @(choice.DecisionCode == PayrollGuidedDecisionCodes.P300WorkValid ? "btn-success" : choice.RequiresComment ? "btn-outline-warning" : "btn-outline-primary") wb-decide"
+                                    data-decision="@choice.DecisionCode"
+                                    data-requires-comment="@(choice.RequiresComment ? "true" : "false")"
+                                    data-label="@choice.Label">@choice.Label</button>
+                        }
+                    </div>
+                    <input class="form-control form-control-sm mb-2" id="wb-comment" placeholder="Optionele / verplichte toelichting" value="@(selected.ReviewComment ?? "")" />
+                    <div class="small text-danger d-none" id="wb-decide-error"></div>
+                </section>
+
+                <section class="mb-3 d-none" id="correction-panel">
+                    <h3 class="h6 text-uppercase text-muted">F. Correctie</h3>
+                    <p class="small">Alleen bestaande bewezen VAN/TOT-correctie (WaitingTime / HFDTAAK 23). Geen delete/nul. Execution blijft uit.</p>
+                    @foreach (var target in detail.CorrectionTargets.Where(item => item.CorrectionCapability != PayrollProject300CorrectionCapability.ZeroDeleteUnavailable))
+                    {
+                        <div class="border rounded p-2 mb-2 correction-target" data-performance-id="@target.PerformanceId">
+                            <div class="small fw-semibold">#@target.PerformanceId · HFDTAAK @(target.HfdTaakId?.ToString(CultureInfo.InvariantCulture) ?? "—") · @(target.ActivityType ?? "onbekend")</div>
+                            <div class="small">CURRENT @FmtTime(target.CurrentStart)–@FmtTime(target.CurrentEnd) · @FmtHours(target.AtlHours)</div>
+                            <div class="small text-muted mb-2">@target.CapabilityMessage</div>
+                            @if (target.CorrectionCapability == PayrollProject300CorrectionCapability.SupportedVanTot)
+                            {
+                                <div class="row g-2 align-items-end">
+                                    <div class="col-auto"><label class="form-label small mb-0">Nieuw VAN</label><input class="form-control form-control-sm corr-start" type="time" value="@FmtTime(target.CurrentStart)" /></div>
+                                    <div class="col-auto"><label class="form-label small mb-0">Nieuw TOT</label><input class="form-control form-control-sm corr-end" type="time" value="@FmtTime(target.CurrentEnd)" /></div>
+                                    <div class="col-md-4"><label class="form-label small mb-0">Reden</label><input class="form-control form-control-sm corr-reason" placeholder="Verplicht" /></div>
+                                    <div class="col-auto"><button type="button" class="btn btn-sm btn-warning wb-propose-corr">Voorstel opslaan</button></div>
+                                </div>
+                            }
+                        </div>
+                    }
+                    <div class="alert alert-secondary small mb-0">@PayrollProject300WorkbenchBuilder.ZeroDeleteUnavailableMessage</div>
+                    <div class="alert alert-light border small mt-2 mb-0">Planning ontbreekt → planning moet aangevuld/gecorrigeerd worden (geen planning-write).</div>
+                    <div class="small text-danger d-none" id="wb-corr-error"></div>
+                    <div class="small text-success d-none" id="wb-corr-ok"></div>
+                </section>
+
+                <details class="small text-muted">
+                    <summary>Technische evidence</summary>
+                    <ul>
+                        @foreach (var note in detail.TechnicalCollapsedNotes)
+                        {
+                            <li>@note</li>
+                        }
+                        @foreach (var key in selected.FindingKeys)
+                        {
+                            <li>@key</li>
+                        }
+                    </ul>
+                </details>
+            }
+        </main>
+    </div>
+}
+
+@section Scripts {
+<style>
+.payroll-p300-workbench { min-height: 720px; }
+.payroll-p300-workbench .review-queue { width: auto; }
+@@media (min-width: 992px) {
+  .payroll-p300-workbench { grid-template-columns: minmax(280px, 34%) minmax(0, 66%); }
+}
+</style>
+<script>
+(function () {
+  const token = document.querySelector('#wb-af input[name="__RequestVerificationToken"]')?.value;
+  const decideUrl = '@Url.Page("./Workbench", new { year = Model.Year, month = Model.Month, handler = "Decide" })';
+  const corrUrl = '@Url.Page("./Workbench", new { year = Model.Year, month = Model.Month, handler = "ProposeCorrection" })';
+  const caseBase = '@Url.Page("./Workbench", new { year = Model.Year, month = Model.Month, Scope = Model.Scope, Search = Model.Search, Sort = Model.Sort })';
+
+  function goFocus(key) {
+    if (!key) { location.reload(); return; }
+    const url = new URL(caseBase, window.location.origin);
+    url.searchParams.set('Focus', key);
+    window.location.href = url.pathname + url.search;
+  }
+
+  document.querySelectorAll('.wb-decide').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const wrap = document.getElementById('wb-decisions');
+      const err = document.getElementById('wb-decide-error');
+      err?.classList.add('d-none');
+      const adminCaseKey = wrap?.dataset.adminCaseKey;
+      const decisionCode = btn.dataset.decision;
+      const requiresComment = btn.dataset.requiresComment === 'true';
+      let comment = document.getElementById('wb-comment')?.value?.trim() || '';
+      if (requiresComment && !comment) {
+        comment = window.prompt(btn.dataset.label + ' — toelichting:') || '';
+        const input = document.getElementById('wb-comment');
+        if (input) input.value = comment;
+      }
+      if (requiresComment && !comment.trim()) {
+        if (err) { err.textContent = 'Toelichting is verplicht.'; err.classList.remove('d-none'); }
+        return;
+      }
+
+      if (decisionCode === '@PayrollGuidedDecisionCodes.P300HoursWrong') {
+        document.getElementById('correction-panel')?.classList.remove('d-none');
+      }
+
+      btn.disabled = true;
+      try {
+        const body = new URLSearchParams();
+        body.set('AdminCaseKey', adminCaseKey);
+        body.set('DecisionCode', decisionCode);
+        body.set('Comment', comment);
+        if (token) body.set('__RequestVerificationToken', token);
+        const response = await fetch(decideUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8', 'RequestVerificationToken': token || '' },
+          body
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) throw new Error(payload.error || 'Mislukt');
+
+        if (payload.openCorrection) {
+          document.getElementById('correction-panel')?.classList.remove('d-none');
+          btn.disabled = false;
+          return;
+        }
+
+        const article = document.querySelector('.queue-case[data-admin-case-key="' + CSS.escape(adminCaseKey) + '"]');
+        if (article) {
+          const status = article.querySelector('.queue-status');
+          if (status) status.textContent = payload.statusLabel || 'Afgehandeld';
+          if (payload.hideRow) article.classList.add('d-none');
+        }
+        if (payload.nextKey) goFocus(payload.nextKey);
+        else location.reload();
+      } catch (e) {
+        if (err) { err.textContent = e.message || 'Fout'; err.classList.remove('d-none'); }
+        btn.disabled = false;
+      }
+    });
+  });
+
+  document.querySelectorAll('.wb-propose-corr').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const box = btn.closest('.correction-target');
+      const err = document.getElementById('wb-corr-error');
+      const ok = document.getElementById('wb-corr-ok');
+      err?.classList.add('d-none');
+      ok?.classList.add('d-none');
+      const adminCaseKey = document.getElementById('wb-decisions')?.dataset.adminCaseKey;
+      const performanceId = box?.dataset.performanceId;
+      const start = box?.querySelector('.corr-start')?.value;
+      const end = box?.querySelector('.corr-end')?.value;
+      const reason = box?.querySelector('.corr-reason')?.value || '';
+      try {
+        const body = new URLSearchParams();
+        body.set('AdminCaseKey', adminCaseKey);
+        body.set('PerformanceId', performanceId);
+        body.set('NewStart', start);
+        body.set('NewEnd', end);
+        body.set('CorrectionReason', reason);
+        if (token) body.set('__RequestVerificationToken', token);
+        const response = await fetch(corrUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8', 'RequestVerificationToken': token || '' },
+          body
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) throw new Error(payload.error || 'Mislukt');
+        if (ok) { ok.textContent = payload.message || 'Opgeslagen'; ok.classList.remove('d-none'); }
+      } catch (e) {
+        if (err) { err.textContent = e.message || 'Fout'; err.classList.remove('d-none'); }
+      }
+    });
+  });
+
+  const active = document.querySelector('.queue-case.active');
+  active?.scrollIntoView({ block: 'nearest' });
+})();
+</script>
+}

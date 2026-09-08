@@ -76,6 +76,15 @@ public static class PayrollAdminCaseBuilder
                 .OrderByDescending(item => item.Severity)
                 .ThenByDescending(item => item.Date)
                 .ThenBy(item => item.AdminCaseKey, StringComparer.Ordinal),
+            "duur" or "duration" => query
+                .OrderByDescending(item => item.TotalBookedHours ?? 0m)
+                .ThenByDescending(item => item.Date)
+                .ThenBy(item => item.DisplayName ?? item.ResourceId, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(item => item.AdminCaseKey, StringComparer.Ordinal),
+            "status" => query
+                .OrderBy(item => item.WorkflowStatus)
+                .ThenByDescending(item => item.Date)
+                .ThenBy(item => item.AdminCaseKey, StringComparer.Ordinal),
             "categorie" or "category" => query
                 .OrderBy(item => item.Category)
                 .ThenByDescending(item => item.Severity)
