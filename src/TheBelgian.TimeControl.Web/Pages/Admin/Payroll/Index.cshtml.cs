@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using TheBelgian.TimeControl.Core.Configuration;
 using TheBelgian.TimeControl.Core.Interfaces;
 using TheBelgian.TimeControl.Core.Models;
+using TheBelgian.TimeControl.Core.Payroll;
 using TheBelgian.TimeControl.Infrastructure.Configuration;
 
 namespace TheBelgian.TimeControl.Web.Pages.Admin.Payroll;
@@ -19,7 +20,14 @@ public sealed class IndexModel(
     [BindProperty(SupportsGet = true)] public int? Month { get; set; }
     [BindProperty(SupportsGet = true)] public DateOnly? EvaluationDate { get; set; }
 
+    /// <summary>
+    /// When true, stay on the month list instead of redirecting to the canonical period.
+    /// </summary>
+    [BindProperty(SupportsGet = true)]
+    public bool Stay { get; set; }
+
     public IReadOnlyList<PayrollShadowMonthSummary> Months { get; private set; } = [];
+    public PayrollShadowMonthSummary? CanonicalMonth { get; private set; }
     public bool FeatureEnabled { get; private set; }
     public string? Message { get; private set; }
     public string? Error { get; private set; }
@@ -34,6 +42,16 @@ public sealed class IndexModel(
         try
         {
             Months = await payrollShadowService.ListMonthsAsync(cancellationToken);
+            CanonicalMonth = PayrollShadowPeriodSelection.SelectCanonical(Months);
+
+            if (!Stay && CanonicalMonth is not null)
+            {
+                return RedirectToPage("./Month", new
+                {
+                    year = CanonicalMonth.Year,
+                    month = CanonicalMonth.Month,
+                });
+            }
         }
         catch (Exception exception)
         {
@@ -54,6 +72,7 @@ public sealed class IndexModel(
         if (Year is null or < 2000 or > 2100 || Month is null or < 1 or > 12)
         {
             Error = "Ongeldige maand.";
+            Stay = true;
             return await OnGetAsync(cancellationToken);
         }
 
@@ -75,6 +94,7 @@ public sealed class IndexModel(
         {
             logger.LogWarning(exception, "Payroll shadow snapshot creation failed.");
             Error = exception.Message;
+            Stay = true;
             return await OnGetAsync(cancellationToken);
         }
     }
