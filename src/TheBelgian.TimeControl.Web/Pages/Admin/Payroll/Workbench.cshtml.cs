@@ -68,6 +68,7 @@ public sealed class WorkbenchModel(
                 Comment,
                 RequireActor().AuditIdentity,
                 cancellationToken);
+            workbenchService.InvalidateQueueCache(Year, Month);
 
             var nextFilter = new PayrollReviewQueueFilter(
                 PayrollReviewCategory.Project300,

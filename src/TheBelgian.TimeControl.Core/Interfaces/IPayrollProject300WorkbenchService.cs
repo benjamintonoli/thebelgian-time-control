@@ -40,6 +40,11 @@ public interface IPayrollProject300WorkbenchService
         CancellationToken cancellationToken);
 
     PayrollProject300GpsCacheHint GetGpsCacheHint(string resourceId, DateOnly workDate);
+
+    /// <summary>
+    /// Drop short-lived admin-queue cache after decisions/proposals so the left pane stays fresh.
+    /// </summary>
+    void InvalidateQueueCache(int year, int month);
 }
 
 public sealed record PayrollProject300ProposeCorrectionResult(

@@ -23,6 +23,9 @@ internal sealed class PayrollProject300WorkbenchService(
     IPayrollStandbyGpsSource gpsSource,
     PlenionPayrollReader plenionReader,
     PayrollProject300GpsCache gpsCache,
+    PayrollProject300GpsContextCache gpsContextCache,
+    PayrollProject300DaySourceCache daySourceCache,
+    PayrollProject300QueueCache queueCache,
     PayrollProject300HfdCache hfdCache,
     IDbContextFactory<TimeControlDbContext> contextFactory,
     IOptions<PayrollShadowOptions> shadowOptions,
@@ -49,7 +52,7 @@ internal sealed class PayrollProject300WorkbenchService(
     {
         EnsureEnabled();
         var scopedFilter = filter with { Category = PayrollReviewCategory.Project300 };
-        var queue = await reviewQueueService.GetAdminQueueAsync(year, month, scopedFilter, cancellationToken);
+        var queue = await GetAdminQueueCachedAsync(year, month, scopedFilter, cancellationToken);
         var cases = queue.AdminCases;
         var selected = ResolveSelected(cases, selectedAdminCaseKey);
 
@@ -84,20 +87,42 @@ internal sealed class PayrollProject300WorkbenchService(
         CancellationToken cancellationToken = default)
     {
         EnsureEnabled();
-        var queue = await reviewQueueService.GetAdminQueueAsync(
+
+        if (gpsContextCache.TryGet(adminCaseKey, out var cachedContext) && cachedContext is not null)
+        {
+            string? prefetchKey = null;
+            var prefetchStarted = false;
+            if (prefetchNext)
+            {
+                var queue = await GetAdminQueueCachedAsync(
+                    year,
+                    month,
+                    new PayrollReviewQueueFilter(PayrollReviewCategory.Project300, Scope: PayrollReviewQueueScope.All),
+                    cancellationToken);
+                var selectedCached = FindCase(queue.AdminCases, adminCaseKey);
+                if (selectedCached is not null)
+                {
+                    (prefetchKey, prefetchStarted) = TryStartPrefetch(queue.AdminCases, selectedCached);
+                }
+            }
+
+            return new PayrollProject300GpsLoadResult(
+                adminCaseKey,
+                string.Empty,
+                default,
+                cachedContext,
+                CacheHit: true,
+                PowerFleetApiCalls: 0,
+                PrefetchAdminCaseKey: prefetchKey,
+                PrefetchStarted: prefetchStarted);
+        }
+
+        var queueFresh = await GetAdminQueueCachedAsync(
             year,
             month,
             new PayrollReviewQueueFilter(PayrollReviewCategory.Project300, Scope: PayrollReviewQueueScope.All),
             cancellationToken);
-        PayrollAdminCase? selected = null;
-        foreach (var item in queue.AdminCases)
-        {
-            if (string.Equals(item.AdminCaseKey, adminCaseKey, StringComparison.Ordinal))
-            {
-                selected = item;
-                break;
-            }
-        }
+        var selected = FindCase(queueFresh.AdminCases, adminCaseKey);
 
         if (selected is null)
         {
@@ -124,69 +149,18 @@ internal sealed class PayrollProject300WorkbenchService(
             selected.Date,
             cancellationToken);
 
-        var performances = await performanceSource.ReadPerformancesAsync(
-            selected.Date,
-            selected.Date,
-            [selected.ResourceId],
-            cancellationToken);
+        var (performances, _) = await LoadDaySourcesAsync(selected.ResourceId, selected.Date, cancellationToken);
         var gpsContext = PayrollProject300WorkbenchBuilder.BuildDetail(
             selected,
             performances,
             [],
             evidence,
             gpsPending: false).GpsContext;
+        gpsContextCache.Set(selected.AdminCaseKey, gpsContext);
 
-        string? prefetchKey = null;
-        var prefetchStarted = false;
-        if (prefetchNext)
-        {
-            prefetchKey = FindNextUnresolvedKey(queue.AdminCases, selected.AdminCaseKey);
-            if (prefetchKey is not null)
-            {
-                PayrollAdminCase? next = null;
-                foreach (var item in queue.AdminCases)
-                {
-                    if (string.Equals(item.AdminCaseKey, prefetchKey, StringComparison.Ordinal))
-                    {
-                        next = item;
-                        break;
-                    }
-                }
-
-                if (next is not null
-                    && !gpsCache.Has(next.ResourceId, next.Date)
-                    && _prefetchInFlight.TryAdd(Key(next.ResourceId, next.Date), 0))
-                {
-                    prefetchStarted = true;
-                    var prefetchResourceId = next.ResourceId;
-                    var prefetchName = next.DisplayName ?? next.ResourceId;
-                    var prefetchDate = next.Date;
-                    _ = Task.Run(async () =>
-                    {
-                        try
-                        {
-                            await LoadGpsDayAsync(
-                                prefetchResourceId,
-                                prefetchName,
-                                prefetchDate,
-                                CancellationToken.None);
-                        }
-                        catch (Exception exception)
-                        {
-                            logger.LogDebug(
-                                exception,
-                                "GPS prefetch failed for {ResourceId} {Date}",
-                                prefetchResourceId,
-                                prefetchDate);
-                        }
-                        finally
-                        {
-                            _prefetchInFlight.TryRemove(Key(prefetchResourceId, prefetchDate), out _);
-                        }
-                    }, CancellationToken.None);
-                }
-            }
-        }
+        var (prefetchKey2, prefetchStarted2) = prefetchNext
+            ? TryStartPrefetch(queueFresh.AdminCases, selected)
+            : (null, false);
 
         return new PayrollProject300GpsLoadResult(
             selected.AdminCaseKey,
@@ -195,8 +169,8 @@ internal sealed class PayrollProject300WorkbenchService(
             gpsContext,
             cacheHit,
             apiCalls,
-            prefetchKey,
-            prefetchStarted);
+            prefetchKey2,
+            prefetchStarted2);
     }
 
     public PayrollProject300GpsCacheHint GetGpsCacheHint(string resourceId, DateOnly workDate)
@@ -213,6 +187,8 @@ internal sealed class PayrollProject300WorkbenchService(
 
         return PayrollProject300GpsCacheHint.Available;
     }
+
+    public void InvalidateQueueCache(int year, int month) => queueCache.InvalidateMonth(year, month);
 
     public async Task<PayrollProject300ProposeCorrectionResult> ProposeTimeCorrectionAsync(
         int year,
@@ -362,6 +338,7 @@ internal sealed class PayrollProject300WorkbenchService(
         existing.UpdatedAtUtc = now;
 
         await context.SaveChangesAsync(cancellationToken);
+        queueCache.InvalidateMonth(year, month);
         logger.LogInformation(
             "Created Project300 adjust proposal {ActionId} perf={PerformanceId} activity={Activity} (ExecutionEnabled gate applies).",
             existing.ActionId,
@@ -379,16 +356,9 @@ internal sealed class PayrollProject300WorkbenchService(
         PayrollAdminCase adminCase,
         CancellationToken cancellationToken)
     {
-        var resourceIds = new[] { adminCase.ResourceId };
-        var performances = await performanceSource.ReadPerformancesAsync(
+        var (performances, planning) = await LoadDaySourcesAsync(
+            adminCase.ResourceId,
             adminCase.Date,
-            adminCase.Date,
-            resourceIds,
-            cancellationToken);
-        var planning = await planningSource.ReadWorkReservationsAsync(
-            adminCase.Date,
-            adminCase.Date,
-            resourceIds,
             cancellationToken);
 
         var hfdById = await GetHfdDefinitionsAsync(cancellationToken);
@@ -427,6 +397,11 @@ internal sealed class PayrollProject300WorkbenchService(
             gpsPending: !cacheHit,
             activities);
 
+        if (cacheHit && !detail.GpsContext.IsLoading)
+        {
+            gpsContextCache.Set(adminCase.AdminCaseKey, detail.GpsContext);
+        }
+
         var metrics = new PayrollProject300WorkbenchMetrics(
             1,
             1,
@@ -434,6 +409,93 @@ internal sealed class PayrollProject300WorkbenchService(
             GpsDeferred: !cacheHit,
             GpsCacheHit: cacheHit);
         return (detail, metrics);
+    }
+
+    private async Task<(IReadOnlyList<NormalizedPerformanceEntry> Performances, IReadOnlyList<PayrollPlanningReservation> Planning)>
+        LoadDaySourcesAsync(string resourceId, DateOnly date, CancellationToken cancellationToken)
+    {
+        if (daySourceCache.TryGet(resourceId, date, out var cachedPerf, out var cachedPlan))
+        {
+            return (cachedPerf, cachedPlan);
+        }
+
+        var resourceIds = new[] { resourceId };
+        var performances = await performanceSource.ReadPerformancesAsync(
+            date,
+            date,
+            resourceIds,
+            cancellationToken);
+        var planning = await planningSource.ReadWorkReservationsAsync(
+            date,
+            date,
+            resourceIds,
+            cancellationToken);
+        daySourceCache.Set(resourceId, date, performances, planning);
+        return (performances, planning);
+    }
+
+    private async Task<PayrollAdminQueuePage> GetAdminQueueCachedAsync(
+        int year,
+        int month,
+        PayrollReviewQueueFilter filter,
+        CancellationToken cancellationToken)
+    {
+        if (queueCache.TryGet(year, month, filter, out var cached) && cached is not null)
+        {
+            return cached;
+        }
+
+        var page = await reviewQueueService.GetAdminQueueAsync(year, month, filter, cancellationToken);
+        queueCache.Set(year, month, filter, page);
+        return page;
+    }
+
+    private (string? PrefetchKey, bool PrefetchStarted) TryStartPrefetch(
+        IReadOnlyList<PayrollAdminCase> cases,
+        PayrollAdminCase selected)
+    {
+        var prefetchKey = FindNextUnresolvedKey(cases, selected.AdminCaseKey);
+        if (prefetchKey is null)
+        {
+            return (null, false);
+        }
+
+        var next = FindCase(cases, prefetchKey);
+        if (next is null
+            || gpsCache.Has(next.ResourceId, next.Date)
+            || !_prefetchInFlight.TryAdd(Key(next.ResourceId, next.Date), 0))
+        {
+            return (prefetchKey, false);
+        }
+
+        var prefetchResourceId = next.ResourceId;
+        var prefetchName = next.DisplayName ?? next.ResourceId;
+        var prefetchDate = next.Date;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await LoadGpsDayAsync(
+                    prefetchResourceId,
+                    prefetchName,
+                    prefetchDate,
+                    CancellationToken.None);
+            }
+            catch (Exception exception)
+            {
+                logger.LogDebug(
+                    exception,
+                    "GPS prefetch failed for {ResourceId} {Date}",
+                    prefetchResourceId,
+                    prefetchDate);
+            }
+            finally
+            {
+                _prefetchInFlight.TryRemove(Key(prefetchResourceId, prefetchDate), out _);
+            }
+        }, CancellationToken.None);
+
+        return (prefetchKey, true);
     }
 
     private async Task<(StandbyGpsDayEvidence? Evidence, bool CacheHit, int ApiCalls)> LoadGpsDayAsync(
@@ -457,6 +519,19 @@ internal sealed class PayrollProject300WorkbenchService(
             && item.Date == date);
         gpsCache.Set(resourceId, date, evidence);
         return (evidence, false, batch.ApiCallCount);
+    }
+
+    private static PayrollAdminCase? FindCase(IReadOnlyList<PayrollAdminCase> cases, string adminCaseKey)
+    {
+        foreach (var item in cases)
+        {
+            if (string.Equals(item.AdminCaseKey, adminCaseKey, StringComparison.Ordinal))
+            {
+                return item;
+            }
+        }
+
+        return null;
     }
 
     private static string? FindNextUnresolvedKey(IReadOnlyList<PayrollAdminCase> cases, string currentKey)

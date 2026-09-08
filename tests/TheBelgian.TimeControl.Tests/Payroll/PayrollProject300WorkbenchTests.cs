@@ -4,6 +4,7 @@ using TheBelgian.TimeControl.Core.Payroll.Actions;
 using TheBelgian.TimeControl.Core.Payroll.Findings;
 using TheBelgian.TimeControl.Core.Payroll.Models;
 using TheBelgian.TimeControl.Core.Payroll.Review;
+using TheBelgian.TimeControl.Infrastructure.Payroll.Review;
 
 namespace TheBelgian.TimeControl.Tests.Payroll;
 
@@ -400,6 +401,60 @@ public sealed class PayrollProject300WorkbenchTests
             .Select(item => item.Label)
             .ToArray();
         Assert.Equal(["Werk was terecht", "Planning ontbreekt", "Uren zijn fout", "Onzeker"], labels);
+    }
+
+    [Fact]
+    public void DaySourceCache_ReusesResourceIdAndDate()
+    {
+        var cache = new PayrollProject300DaySourceCache();
+        var day = new[] { Performance(101, "08:00", "09:00", 1m) };
+        cache.Set("10", Day, day, []);
+
+        Assert.True(cache.TryGet("10", Day, out var performances, out var planning));
+        Assert.Same(day, performances);
+        Assert.Empty(planning);
+        Assert.False(cache.TryGet("10", Day.AddDays(1), out _, out _));
+    }
+
+    [Fact]
+    public void GpsContextCache_ReusesAdminCaseKey()
+    {
+        var cache = new PayrollProject300GpsContextCache();
+        var context = new PayrollProject300GpsContext(
+            Available: true,
+            Summary: "cached",
+            Events: [],
+            MappingKind: "Plate",
+            ObjectIdCollapsed: "OBJ",
+            TripsCollapsed: []);
+        cache.Set("case-a", context);
+
+        Assert.True(cache.TryGet("case-a", out var hit));
+        Assert.Same(context, hit);
+        Assert.False(cache.TryGet("case-b", out _));
+    }
+
+    [Fact]
+    public void GpsEvidenceCache_ReusesResourceIdAndDate()
+    {
+        var cache = new PayrollProject300GpsCache();
+        var evidence = new StandbyGpsDayEvidence(
+            "10",
+            Day,
+            HasVehicleMapping: true,
+            MappingAmbiguous: false,
+            ObjectId: "OBJ",
+            RegistrationPlate: "1-AAA-111",
+            MappingReason: "Resolved",
+            Trips: [],
+            MappingKind: "Plate");
+        cache.Set("10", Day, evidence);
+
+        Assert.True(cache.TryGet("10", Day, out var hit, out var wasHit));
+        Assert.True(wasHit);
+        Assert.Same(evidence, hit);
+        Assert.True(cache.Has("10", Day));
+        Assert.False(cache.Has("11", Day));
     }
 
     private static PayrollAdminCase AdminCase(long perfId, decimal booked)
