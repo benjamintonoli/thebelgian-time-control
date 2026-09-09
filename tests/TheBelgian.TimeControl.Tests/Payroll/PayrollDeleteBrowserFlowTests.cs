@@ -641,6 +641,15 @@ public sealed class PayrollDeleteBrowserFlowTests
         public Task CancelAsync(Guid actionId, string actor, CancellationToken cancellationToken) =>
             Task.CompletedTask;
 
+        public Task<PayrollActionProposeResult> UpdateCreateProposalAsync(
+            Guid actionId,
+            TimeOnly? start,
+            TimeOnly? endTime,
+            int? mainTaskId,
+            string actor,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new PayrollActionProposeResult(false, "not implemented", actionId, "NotImplemented"));
+
         public Task<PayrollActionProposeResult> ProposeDeleteForPerformanceAsync(
             int year,
             int month,

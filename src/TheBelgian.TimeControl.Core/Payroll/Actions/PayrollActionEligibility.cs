@@ -32,8 +32,23 @@ public static class PayrollActionEligibility
             return PayrollIntervalSemantics.Ambiguous;
         }
 
-        // GPS-derived High proposals use trip min/max (travel/arrival evidence), not proven payable work.
-        // Ayrton 2026-08-31: 08:35–10:06 = Dendermonde→Aalst→Leuven site ARRIVAL, not booked work.
+        // Legacy / explicit GPS travel proposal (Ayrton 08:35–10:06) remains blocked.
+        if (ContainsEvidenceToken(finding.Evidence, "intervalSource=gps"))
+        {
+            return PayrollIntervalSemantics.GpsTravelOnly;
+        }
+
+        if (string.Equals(
+                finding.GpsClassification,
+                nameof(MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps),
+                StringComparison.Ordinal)
+            && (ContainsEvidenceToken(finding.Evidence, "intervalSource=planning")
+                || ContainsEvidenceToken(finding.Evidence, "intervalSource=peer")))
+        {
+            return PayrollIntervalSemantics.PayableWork;
+        }
+
+        // Conservative: High GPS class without a proven planning/peer interval source is travel-only.
         if (string.Equals(
                 finding.GpsClassification,
                 nameof(MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps),
@@ -64,6 +79,80 @@ public static class PayrollActionEligibility
 
         return PayrollIntervalSemantics.Ambiguous;
     }
+
+    public static int? ParseSuggestedHfdTaakId(string? evidence)
+    {
+        if (string.IsNullOrWhiteSpace(evidence))
+        {
+            return null;
+        }
+
+        const string key = "suggestedHfdTaakId=";
+        var idx = evidence.IndexOf(key, StringComparison.Ordinal);
+        if (idx < 0)
+        {
+            return null;
+        }
+
+        var start = idx + key.Length;
+        var end = start;
+        while (end < evidence.Length && char.IsDigit(evidence[end]))
+        {
+            end++;
+        }
+
+        if (end > start
+            && int.TryParse(evidence.AsSpan(start, end - start), NumberStyles.Integer, CultureInfo.InvariantCulture, out var id)
+            && id > 0)
+        {
+            return id;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Peer resource ids from missing-tech evidence <c>peers=[rid#id:..,rid#id:..]</c>.
+    /// Used for targeted rebuild after create (peer + missing technician).
+    /// </summary>
+    public static IReadOnlyList<string> ParsePeerResourceIds(string? evidence)
+    {
+        if (string.IsNullOrWhiteSpace(evidence))
+        {
+            return [];
+        }
+
+        const string key = "peers=[";
+        var idx = evidence.IndexOf(key, StringComparison.Ordinal);
+        if (idx < 0)
+        {
+            return [];
+        }
+
+        var start = idx + key.Length;
+        var end = evidence.IndexOf(']', start);
+        if (end <= start)
+        {
+            return [];
+        }
+
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var token in evidence[start..end].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var hash = token.IndexOf('#');
+            var rid = hash > 0 ? token[..hash] : token;
+            if (!string.IsNullOrWhiteSpace(rid))
+            {
+                ids.Add(rid.Trim());
+            }
+        }
+
+        return ids.Count == 0 ? [] : ids.ToArray();
+    }
+
+    private static bool ContainsEvidenceToken(string? evidence, string token) =>
+        !string.IsNullOrWhiteSpace(evidence)
+        && evidence.Contains(token, StringComparison.Ordinal);
 
     public static PayrollActionEligibilityResult Evaluate(
         PayrollFindingRecord finding,
@@ -239,11 +328,19 @@ public static class PayrollActionEligibility
                 "Create-target is onvolledig (resource/datum/project/VAN/TOT ontbreken).");
         }
 
-        // Never invent or copy peer IDHFDTAAK — only an independently proven MainTaskId unlocks Ready.
-        if (context.ProvenMainTaskId is null or <= 0)
+        // Never invent or copy peer IDHFDTAAK — only planning-proven or admin-supplied MainTaskId unlocks Ready.
+        var provenMainTaskId = context.ProvenMainTaskId
+            ?? ParseSuggestedHfdTaakId(finding.Evidence);
+        if (provenMainTaskId is null or <= 0)
         {
             return Block(actionType, evidence, semantics, PayrollActionBlockReasonCode.MissingMainTaskId,
-                "IDHFDTAAK/taaktype is niet veilig afleidbaar. Peer-IDHFDTAAK wordt niet gekopieerd; create is geblokkeerd.");
+                "ACTIVITY_NOT_PROVEN: IDHFDTAAK/taaktype is niet veilig afleidbaar. Peer-IDHFDTAAK wordt niet gekopieerd; create is geblokkeerd.");
+        }
+
+        if (!PayrollCreateAllowedMainTasks.IsAllowed(provenMainTaskId.Value))
+        {
+            return Block(actionType, evidence, semantics, PayrollActionBlockReasonCode.MissingMainTaskId,
+                PayrollCreateAllowedMainTasks.RejectReason(provenMainTaskId.Value));
         }
 
         var hours = finding.SuggestedPayableHours
@@ -262,7 +359,7 @@ public static class PayrollActionEligibility
             Math.Round(hours, 2, MidpointRounding.AwayFromZero),
             finding.SuggestedProjectId.Trim(),
             string.IsNullOrWhiteSpace(finding.SuggestedBonNr) ? null : finding.SuggestedBonNr.Trim(),
-            context.ProvenMainTaskId.Value,
+            provenMainTaskId.Value,
             semantics);
 
         var revision = ComputeSourceRevision(evidence, proposal, null);

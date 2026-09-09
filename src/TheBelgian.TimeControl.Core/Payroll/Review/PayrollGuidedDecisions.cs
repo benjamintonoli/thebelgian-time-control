@@ -83,8 +83,8 @@ public static class PayrollGuidedDecisions
         ],
         PayrollReviewCategory.MissingPerformance =>
         [
-            Choice(PayrollGuidedDecisionCodes.MissingTechConfirmed, "Ja — prestatie ontbreekt", PayrollFindingStatus.NeedsFollowUp, requiresComment: false),
-            Choice(PayrollGuidedDecisionCodes.MissingTechPlanningWrong, "Nee — planning klopt niet", PayrollFindingStatus.Reviewed, requiresComment: false),
+            Choice(PayrollGuidedDecisionCodes.MissingTechConfirmed, "Prestatie aanmaken", PayrollFindingStatus.NeedsFollowUp, requiresComment: false),
+            Choice(PayrollGuidedDecisionCodes.MissingTechPlanningWrong, "Niet aanmaken", PayrollFindingStatus.Reviewed, requiresComment: false),
             Choice(PayrollGuidedDecisionCodes.MissingTechUncertain, "Onzeker", PayrollFindingStatus.NeedsFollowUp, requiresComment: true),
         ],
         PayrollReviewCategory.Overlap =>

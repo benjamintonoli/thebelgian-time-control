@@ -15,6 +15,25 @@ public sealed class PayrollActionEligibilityTests
     private static readonly DateTimeOffset ProposedEnd = new(2026, 8, 5, 18, 33, 0, TimeSpan.Zero);
 
     [Fact]
+    public void ParsePeerResourceIds_ExtractsDistinctPeers()
+    {
+        var evidence =
+            "class=PlanningPlusPeerPlusGps; peers=[388#271145:08:00-12:00,401#282725:08:05-12:10,388#999:09:00-10:00]; gpsState=Supports";
+        var peers = PayrollActionEligibility.ParsePeerResourceIds(evidence);
+        Assert.Equal(2, peers.Count);
+        Assert.Contains("388", peers);
+        Assert.Contains("401", peers);
+    }
+
+    [Theory]
+    [InlineData(14, true)]
+    [InlineData(23, false)]
+    [InlineData(5, false)]
+    [InlineData(0, false)]
+    public void CreateAllowedMainTasks_RestrictsNonJobIds(int id, bool allowed) =>
+        Assert.Equal(allowed, PayrollCreateAllowedMainTasks.IsAllowed(id));
+
+    [Fact]
     public void Options_Defaults_AreDisabled_AndExecutionRequiresEnabled()
     {
         var options = new PayrollActionsOptions();
@@ -88,7 +107,8 @@ public sealed class PayrollActionEligibilityTests
             hours: 1.51m,
             projectId: "65274",
             bonNr: "26601949",
-            gpsClass: nameof(MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps));
+            gpsClass: nameof(MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps),
+            evidence: "class=PlanningPlusPeerPlusGps; intervalSource=gps; planned=09:00-16:30; peers=[617#282725:10:00-10:40]");
 
         Assert.Equal(PayrollIntervalSemantics.GpsTravelOnly,
             PayrollActionEligibility.ClassifyMissingTechnicianInterval(finding));
@@ -99,6 +119,27 @@ public sealed class PayrollActionEligibilityTests
         Assert.Contains("reis-naar-werf", result.BlockReason!, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Peer-IDHFDTAAK", result.BlockReason!, StringComparison.Ordinal);
         Assert.Null(result.CreateProposal);
+    }
+
+    [Fact]
+    public void Create_HighPlanningInterval_WithSuggestedHfd_ReadyWithoutOverride()
+    {
+        var finding = MissingTechHigh(
+            "100",
+            new DateOnly(2026, 8, 10),
+            new DateTimeOffset(2026, 8, 10, 9, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 8, 10, 12, 0, 0, TimeSpan.Zero),
+            3m,
+            "65274",
+            "BON1",
+            nameof(MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps),
+            evidence: "class=PlanningPlusPeerPlusGps; intervalSource=planning; suggestedHfdTaakId=14; planned=09:00-12:00");
+
+        var result = PayrollActionEligibility.Evaluate(finding, IncludedOpen());
+        Assert.Equal(PayrollProposedActionStatus.ReadyForApproval, result.Status);
+        Assert.NotNull(result.CreateProposal);
+        Assert.Equal(14, result.CreateProposal!.MainTaskId);
+        Assert.Equal(PayrollIntervalSemantics.PayableWork, result.CreateProposal.IntervalSemantics);
     }
 
     [Fact]
@@ -131,23 +172,24 @@ public sealed class PayrollActionEligibilityTests
     [Fact]
     public void Create_HighMissingTask_Blocked()
     {
-        var finding = MissingTechHigh(
-            "100",
-            new DateOnly(2026, 8, 10),
-            new DateTimeOffset(2026, 8, 10, 9, 0, 0, TimeSpan.Zero),
-            new DateTimeOffset(2026, 8, 10, 12, 0, 0, TimeSpan.Zero),
-            3m,
-            "65274",
-            "BON1",
-            nameof(MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps));
+            var finding = MissingTechHigh(
+                "100",
+                new DateOnly(2026, 8, 10),
+                new DateTimeOffset(2026, 8, 10, 9, 0, 0, TimeSpan.Zero),
+                new DateTimeOffset(2026, 8, 10, 12, 0, 0, TimeSpan.Zero),
+                3m,
+                "65274",
+                "BON1",
+                nameof(MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps),
+                evidence: "intervalSource=planning; planned=09:00-12:00");
 
-        var result = PayrollActionEligibility.Evaluate(
-            finding,
-            IncludedOpen() with { IntervalSemanticsOverride = PayrollIntervalSemantics.PayableWork });
+            var result = PayrollActionEligibility.Evaluate(
+                finding,
+                IncludedOpen() with { IntervalSemanticsOverride = PayrollIntervalSemantics.PayableWork });
 
-        Assert.Equal(PayrollProposedActionStatus.Blocked, result.Status);
-        Assert.Equal(PayrollActionBlockReasonCode.MissingMainTaskId, result.BlockReasonCode);
-        Assert.Contains("niet gekopieerd", result.BlockReason!, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(PayrollProposedActionStatus.Blocked, result.Status);
+            Assert.Equal(PayrollActionBlockReasonCode.MissingMainTaskId, result.BlockReasonCode);
+            Assert.Contains("ACTIVITY_NOT_PROVEN", result.BlockReason!, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -543,7 +585,8 @@ public sealed class PayrollActionEligibilityTests
         decimal hours,
         string projectId,
         string bonNr,
-        string gpsClass) =>
+        string gpsClass,
+        string evidence = "evidence") =>
         new()
         {
             FindingKey = $"missing-tech:1:{date:yyyyMMdd}:{resourceId}",
@@ -553,7 +596,7 @@ public sealed class PayrollActionEligibilityTests
             Severity = PayrollFindingSeverity.High,
             Title = "Mogelijk ontbrekende prestatie",
             Description = "desc",
-            Evidence = "evidence",
+            Evidence = evidence,
             SuggestedAction = "act",
             RelatedPerformanceIdsJson = "[14]",
             SuggestedPayableStart = start,

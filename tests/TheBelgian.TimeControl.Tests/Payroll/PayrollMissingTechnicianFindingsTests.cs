@@ -93,9 +93,14 @@ public sealed class PayrollMissingTechnicianFindingsTests
         Assert.Equal(nameof(MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps), finding.GpsClassification);
         Assert.NotNull(finding.SuggestedPayableStart);
         Assert.NotNull(finding.SuggestedPayableEnd);
+        Assert.Equal(At("08:00"), finding.SuggestedPayableStart);
+        Assert.Equal(At("16:00"), finding.SuggestedPayableEnd);
         Assert.True(finding.SuggestedPayableHours > 0m);
         Assert.Equal("P-JOB", finding.SuggestedProjectId);
         Assert.Equal("BON-1", finding.SuggestedBonNr);
+        Assert.Contains("intervalSource=planning", finding.Evidence, StringComparison.Ordinal);
+        Assert.Contains("suggestedHfdTaakId=14", finding.Evidence, StringComparison.Ordinal);
+        Assert.DoesNotContain("intervalSource=gps", finding.Evidence, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -248,7 +253,7 @@ public sealed class PayrollMissingTechnicianFindingsTests
                 TaskTypeName: "Werk",
                 ProjectId: "P-JOB",
                 ProjectNumber: 501,
-                HfdTaakId: null,
+                HfdTaakId: 14,
                 Subject: "Teamjob",
                 Classification: PayrollPlanningClassification.WorkReservation))
             .ToList();

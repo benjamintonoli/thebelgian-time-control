@@ -334,6 +334,15 @@ public sealed class PayrollReviewQueueServiceTests
         public Task CancelAsync(Guid actionId, string actor, CancellationToken cancellationToken) =>
             Task.CompletedTask;
 
+        public Task<PayrollActionProposeResult> UpdateCreateProposalAsync(
+            Guid actionId,
+            TimeOnly? start,
+            TimeOnly? endTime,
+            int? mainTaskId,
+            string actor,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new PayrollActionProposeResult(false, "not implemented", actionId, "NotImplemented"));
+
         public Task<PayrollActionExecutionResult> ExecuteAsync(
             Guid actionId, string comment, string actor, CancellationToken cancellationToken)
         {

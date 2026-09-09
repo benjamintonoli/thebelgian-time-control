@@ -146,6 +146,15 @@ public sealed class PayrollShadowAdminUiGateTests
         public Task CancelAsync(Guid actionId, string actor, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 
+        public Task<PayrollActionProposeResult> UpdateCreateProposalAsync(
+            Guid actionId,
+            TimeOnly? start,
+            TimeOnly? endTime,
+            int? mainTaskId,
+            string actor,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
         public Task<PayrollActionExecutionResult> ExecuteAsync(
             Guid actionId, string comment, string actor, CancellationToken cancellationToken) =>
             throw new NotSupportedException();

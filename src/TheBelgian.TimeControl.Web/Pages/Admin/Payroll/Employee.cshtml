@@ -114,7 +114,8 @@ else
                     @if (finding.FindingType == PayrollFindingType.MissingPlannedTechnicianPerformance)
                     {
                         <p class="mb-1 small">
-                            <strong>GPS:</strong> @PayrollReviewLabels.MissingTechnicianEvidence(finding.GpsClassification)
+                            <strong>ONTBREKENDE PRESTATIE</strong>
+                            · <strong>GPS:</strong> @PayrollReviewLabels.MissingTechnicianEvidence(finding.GpsClassification)
                             · <strong>Evidence strength:</strong> @PayrollReviewLabels.FindingSeverity(finding.Severity)
                         </p>
                     }

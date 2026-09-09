@@ -31,7 +31,8 @@ public sealed class PayrollActionServiceTests
             end: new DateTimeOffset(2026, 8, 31, 10, 6, 0, TimeSpan.Zero),
             hours: 1.51m,
             projectId: "65274",
-            bonNr: "26601949");
+            bonNr: "26601949",
+            evidence: "intervalSource=gps; planned=09:00-16:30; peers=[617#282725:10:00-10:40]");
 
         var actions = await fx.Service.ProposeFromFindingsAsync(2026, 8, "388", "tester", default);
         var action = Assert.Single(actions);
@@ -218,6 +219,7 @@ public sealed class PayrollActionServiceTests
                 7,
                 "reden",
                 "tester",
+                "missing-tech:case",
                 ready.ActionId.ToString("N")),
             default);
         Assert.Equal("already_applied", secondClient.Status);
@@ -768,7 +770,8 @@ public sealed class PayrollActionServiceTests
             DateTimeOffset? end,
             decimal? hours,
             string? projectId,
-            string? bonNr)
+            string? bonNr,
+            string evidence = "evidence")
         {
             await using var context = await Factory.CreateDbContextAsync();
             var monthId = await context.PayrollShadowMonths.Select(item => item.Id).SingleAsync();
@@ -783,7 +786,7 @@ public sealed class PayrollActionServiceTests
                 Status = PayrollFindingStatus.Open,
                 Title = "Mogelijk ontbrekende prestatie",
                 Description = "desc",
-                Evidence = "evidence",
+                Evidence = evidence,
                 SuggestedAction = "act",
                 RelatedPerformanceIdsJson = "[14]",
                 SuggestedPayableStart = start,

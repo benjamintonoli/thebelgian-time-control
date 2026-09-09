@@ -821,6 +821,111 @@ internal sealed class PayrollActionService(
         await context.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<PayrollActionProposeResult> UpdateCreateProposalAsync(
+        Guid actionId,
+        TimeOnly? start,
+        TimeOnly? endTime,
+        int? mainTaskId,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        EnsureActionsEnabled();
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var action = await context.PayrollProposedActionRecords
+            .SingleOrDefaultAsync(item => item.ActionId == actionId, cancellationToken);
+        if (action is null)
+        {
+            return new PayrollActionProposeResult(false, "Payrollactie niet gevonden.", null, "NotFound");
+        }
+
+        if (action.ActionType != PayrollProposedActionType.CreateMissingPerformance)
+        {
+            return new PayrollActionProposeResult(false, "Alleen create-voorstellen zijn bewerkbaar.", action.ActionId, "WrongType");
+        }
+
+        if (action.Status is PayrollProposedActionStatus.Applied
+            or PayrollProposedActionStatus.Executing
+            or PayrollProposedActionStatus.Cancelled)
+        {
+            return new PayrollActionProposeResult(false, "Dit voorstel kan niet meer worden bewerkt.", action.ActionId, "Terminal");
+        }
+
+        var evidence = DeserializeEvidence(action.EvidenceSnapshotJson);
+        var existing = DeserializeCreate(action.ProposalSnapshotJson);
+        if (existing is null)
+        {
+            if (evidence.SuggestedPayableStart is null
+                || evidence.SuggestedPayableEnd is null
+                || string.IsNullOrWhiteSpace(evidence.SuggestedProjectId)
+                || string.IsNullOrWhiteSpace(action.ResourceId))
+            {
+                return new PayrollActionProposeResult(
+                    false,
+                    "Create-target is onvolledig; VAN/TOT/project ontbreken in evidence.",
+                    action.ActionId,
+                    "IncompleteTarget");
+            }
+
+            existing = new PayrollActionCreateProposal(
+                action.ResourceId,
+                DateOnly.FromDateTime(evidence.SuggestedPayableStart.Value.DateTime),
+                evidence.SuggestedPayableStart.Value,
+                evidence.SuggestedPayableEnd.Value,
+                evidence.SuggestedPayableHours
+                    ?? Math.Round(
+                        (decimal)(evidence.SuggestedPayableEnd.Value - evidence.SuggestedPayableStart.Value).TotalHours,
+                        2,
+                        MidpointRounding.AwayFromZero),
+                evidence.SuggestedProjectId.Trim(),
+                string.IsNullOrWhiteSpace(evidence.SuggestedBonNr) ? null : evidence.SuggestedBonNr.Trim(),
+                mainTaskId ?? 0,
+                PayrollIntervalSemantics.PayableWork);
+        }
+
+        var newStart = start is null
+            ? existing.Start
+            : new DateTimeOffset(existing.Date.ToDateTime(start.Value), existing.Start.Offset);
+        var newEnd = endTime is null
+            ? existing.End
+            : new DateTimeOffset(existing.Date.ToDateTime(endTime.Value), existing.End.Offset);
+        if (newEnd <= newStart)
+        {
+            return new PayrollActionProposeResult(false, "TOT moet na VAN liggen.", action.ActionId, "InvalidInterval");
+        }
+
+        var resolvedMainTask = mainTaskId ?? existing.MainTaskId;
+        if (!PayrollCreateAllowedMainTasks.IsAllowed(resolvedMainTask))
+        {
+            return new PayrollActionProposeResult(
+                false,
+                PayrollCreateAllowedMainTasks.RejectReason(resolvedMainTask),
+                action.ActionId,
+                "ACTIVITY_NOT_ALLOWED");
+        }
+
+        var hours = Math.Round((decimal)(newEnd - newStart).TotalHours, 2, MidpointRounding.AwayFromZero);
+        var updated = existing with
+        {
+            Start = newStart,
+            End = newEnd,
+            Hours = hours,
+            MainTaskId = resolvedMainTask,
+        };
+
+        var now = timeProvider.GetUtcNow();
+        action.ProposalSnapshotJson = JsonSerializer.Serialize(updated, JsonOptions);
+        action.SourceRevision = PayrollActionEligibility.ComputeSourceRevision(evidence, updated, null);
+        action.Status = PayrollProposedActionStatus.ReadyForApproval;
+        action.BlockReason = null;
+        action.UpdatedAtUtc = now;
+        action.Comment = string.IsNullOrWhiteSpace(action.Comment)
+            ? $"Admin-edit door {actor}"
+            : action.Comment;
+        await context.SaveChangesAsync(cancellationToken);
+
+        return new PayrollActionProposeResult(true, "Create-voorstel bijgewerkt.", action.ActionId, null);
+    }
+
     private async Task<PayrollActionExecutionResult> ExecuteCreateAsync(
         TimeControlDbContext context,
         PayrollProposedActionRecord action,
@@ -846,10 +951,13 @@ internal sealed class PayrollActionService(
             proposal.MainTaskId,
             action.Comment ?? PayrollActionEligibility.DefaultComment(action.ActionType),
             actor,
-            action.ActionId.ToString("N"));
+            action.FindingKey,
+            action.ActionId.ToString("N"),
+            DryRun: false);
 
         var response = await createClient.CreateAsync(command, cancellationToken);
-        if (string.Equals(response.Status, "contract_unproven", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(response.Status, "contract_unproven", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(response.Status, "create_contract_unproven", StringComparison.OrdinalIgnoreCase))
         {
             return await MarkFailedAsync(context, action, actor,
                 response.Message ?? "PWS create-contract is unproven; niet Applied.",
@@ -857,7 +965,21 @@ internal sealed class PayrollActionService(
                 response.Reference);
         }
 
-        if (!IsSuccessStatus(response.Status) || response.PerformanceId is null)
+        if (string.Equals(response.Status, "already_exists", StringComparison.OrdinalIgnoreCase))
+        {
+            return await MarkFailedAsync(
+                context,
+                action,
+                actor,
+                response.Message ?? "Equivalente prestatie bestaat al (stale); geen TimeControl create-claim.",
+                cancellationToken,
+                response.Reference,
+                response.PerformanceId);
+        }
+
+        if ((!IsSuccessStatus(response.Status)
+                && !string.Equals(response.Status, "already_applied", StringComparison.OrdinalIgnoreCase))
+            || response.PerformanceId is null)
         {
             return await MarkFailedAsync(context, action, actor,
                 response.Message ?? "Create mislukt.",
@@ -1148,7 +1270,7 @@ internal sealed class PayrollActionService(
             month.EvaluationDate,
             actor,
             cancellationToken,
-            limitToResourceIds: string.IsNullOrWhiteSpace(action.ResourceId) ? null : [action.ResourceId]);
+            limitToResourceIds: ResolveRebuildResourceIds(action));
 
         return new PayrollActionExecutionResult(
             action.ActionId,
@@ -1156,6 +1278,33 @@ internal sealed class PayrollActionService(
             message ?? "Actie uitgevoerd.",
             reference,
             performanceId);
+    }
+
+    private static string[]? ResolveRebuildResourceIds(PayrollProposedActionRecord action)
+    {
+        if (string.IsNullOrWhiteSpace(action.ResourceId))
+        {
+            return null;
+        }
+
+        var ids = new HashSet<string>(StringComparer.Ordinal) { action.ResourceId.Trim() };
+        if (action.ActionType == PayrollProposedActionType.CreateMissingPerformance)
+        {
+            try
+            {
+                var evidence = DeserializeEvidence(action.EvidenceSnapshotJson);
+                foreach (var peer in PayrollActionEligibility.ParsePeerResourceIds(evidence.Evidence))
+                {
+                    ids.Add(peer);
+                }
+            }
+            catch
+            {
+                // Keep action resource only when evidence snapshot is unreadable.
+            }
+        }
+
+        return ids.Count == 0 ? null : ids.ToArray();
     }
 
     private async Task<PayrollActionExecutionResult> MarkFailedAsync(
@@ -1402,12 +1551,12 @@ internal sealed class PayrollActionService(
         if (finding.FindingType == PayrollFindingType.MissingPlannedTechnicianPerformance)
         {
             var hasMatch = HasMatchingMissingTechPerformance(finding, performances);
-            // Never copy peer MainTaskId — ProvenMainTaskId stays null unless independently proven later.
+            // Planning-proven HFDTAAK only — never copy peer MainTaskId.
             return new PayrollActionEligibilityContext(
                 included,
                 finalized,
                 hasMatch,
-                ProvenMainTaskId: null,
+                ProvenMainTaskId: PayrollActionEligibility.ParseSuggestedHfdTaakId(finding.Evidence),
                 null,
                 null,
                 null);

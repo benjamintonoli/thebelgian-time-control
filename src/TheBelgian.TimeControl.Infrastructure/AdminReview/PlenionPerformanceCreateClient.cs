@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.Options;
 using TheBelgian.TimeControl.Infrastructure.Configuration;
 
@@ -17,7 +18,9 @@ internal sealed record PlenionPerformanceCreateCommand(
     int MainTaskId,
     string Reason,
     string ReviewedBy,
-    string IdempotencyKey);
+    string ReviewCaseId,
+    string IdempotencyKey,
+    bool DryRun = false);
 
 internal sealed record PlenionPerformanceCreateResponse(
     string Status,
@@ -44,7 +47,6 @@ internal interface IPlenionPerformanceCreateClient
 
 /// <summary>
 /// Posts create requests to PlenionWriteService using the same BaseUrl as correction writes.
-/// When the create contract is not proven server-side, PWS should return status contract_unproven.
 /// </summary>
 internal sealed class HttpPlenionPerformanceCreateClient(
     HttpClient httpClient,
@@ -77,34 +79,109 @@ internal sealed class HttpPlenionPerformanceCreateClient(
         PlenionPerformanceCreateCommand command,
         CancellationToken cancellationToken)
     {
+        if (!long.TryParse(command.ResourceId, out var resourceId) || resourceId <= 0)
+        {
+            return Fail(command, "invalid_resource", "ResourceId moet numeriek en positief zijn.");
+        }
+
+        if (!long.TryParse(command.ProjectId, out var projectId) || projectId <= 0)
+        {
+            return Fail(command, "invalid_project", "ProjectId moet numeriek en positief zijn.");
+        }
+
+        long? bonNr = null;
+        if (!string.IsNullOrWhiteSpace(command.BonNr))
+        {
+            if (!long.TryParse(command.BonNr, out var parsedBon) || parsedBon <= 0)
+            {
+                return Fail(command, "invalid_bon", "BonNr moet numeriek en positief zijn wanneer opgegeven.");
+            }
+
+            bonNr = parsedBon;
+        }
+
+        var payload = new
+        {
+            command.ActionId,
+            command.IdempotencyKey,
+            ResourceId = resourceId,
+            command.Date,
+            command.Start,
+            command.End,
+            ProjectId = projectId,
+            BonNr = bonNr,
+            MainTaskId = (long)command.MainTaskId,
+            command.Reason,
+            command.ReviewedBy,
+            command.ReviewCaseId,
+            DryRun = command.DryRun,
+        };
+
         using var request = new HttpRequestMessage(
             HttpMethod.Post, "api/time-control/performance-creations")
         {
-            Content = JsonContent.Create(command)
+            Content = JsonContent.Create(payload, options: JsonOptions)
         };
         AddApiKey(request);
         using var response = await httpClient.SendAsync(request, cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        var result = JsonSerializer.Deserialize<PlenionPerformanceCreateResponse>(body, JsonOptions);
-        if (result is not null)
+        var wire = JsonSerializer.Deserialize<PwsCreateWireResponse>(body, JsonOptions);
+        if (wire is null)
         {
-            return result;
+            return new PlenionPerformanceCreateResponse(
+                response.StatusCode == HttpStatusCode.Conflict ? "conflict" : "failed",
+                $"PlenionWriteService antwoordde met HTTP {(int)response.StatusCode}.",
+                string.Empty,
+                command.IdempotencyKey,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
         }
 
+        var status = wire.Status ?? "failed";
+        if (string.Equals(status, "create_contract_unproven", StringComparison.OrdinalIgnoreCase))
+        {
+            status = "contract_unproven";
+        }
+
+        var performanceId = wire.Performance?.IdProjPrest;
         return new PlenionPerformanceCreateResponse(
-            response.StatusCode == HttpStatusCode.Conflict ? "conflict" : "failed",
-            $"PlenionWriteService antwoordde met HTTP {(int)response.StatusCode}.",
+            status,
+            wire.Message ?? string.Empty,
+            wire.Reference ?? string.Empty,
+            string.IsNullOrWhiteSpace(wire.IdempotencyKey) ? command.IdempotencyKey : wire.IdempotencyKey,
+            performanceId,
+            wire.Performance?.ResourceId.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? command.ResourceId,
+            wire.Performance?.Date ?? command.Date,
+            wire.Performance?.Van ?? command.Start,
+            wire.Performance?.Tot ?? command.End,
+            wire.Performance?.IdProj.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? command.ProjectId,
+            wire.Performance?.BonNr?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? command.BonNr,
+            wire.Performance is null ? command.MainTaskId : (int)wire.Performance.IdHfdTaak);
+    }
+
+    private static PlenionPerformanceCreateResponse Fail(
+        PlenionPerformanceCreateCommand command,
+        string status,
+        string message) =>
+        new(
+            status,
+            message,
             string.Empty,
             command.IdempotencyKey,
             null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null);
-    }
+            command.ResourceId,
+            command.Date,
+            command.Start,
+            command.End,
+            command.ProjectId,
+            command.BonNr,
+            command.MainTaskId);
 
     private void AddApiKey(HttpRequestMessage request)
     {
@@ -112,6 +189,31 @@ internal sealed class HttpPlenionPerformanceCreateClient(
         {
             request.Headers.TryAddWithoutValidation(_options.ApiKeyHeaderName, _options.ApiKey);
         }
+    }
+
+    private sealed class PwsCreateWireResponse
+    {
+        public string? Status { get; set; }
+        public string? Message { get; set; }
+        public string? Reference { get; set; }
+        public string? IdempotencyKey { get; set; }
+        public string? ActionId { get; set; }
+        public bool Created { get; set; }
+        public bool AlreadyApplied { get; set; }
+        public bool DryRun { get; set; }
+        public PwsCreatedPerformance? Performance { get; set; }
+    }
+
+    private sealed class PwsCreatedPerformance
+    {
+        public long? IdProjPrest { get; set; }
+        public long ResourceId { get; set; }
+        public DateOnly Date { get; set; }
+        public TimeSpan Van { get; set; }
+        public TimeSpan Tot { get; set; }
+        public long IdProj { get; set; }
+        public long? BonNr { get; set; }
+        public long IdHfdTaak { get; set; }
     }
 }
 

@@ -5,6 +5,12 @@
     ViewData["Title"] = "Payrollvoorstel controleren";
     var view = Model.View;
     var isDelete = view?.ActionType == PayrollProposedActionType.DeleteExistingPerformance;
+    var isCreate = view?.ActionType == PayrollProposedActionType.CreateMissingPerformance;
+    var canEditCreate = isCreate
+        && view is not null
+        && view.Status is not PayrollProposedActionStatus.Applied
+            and not PayrollProposedActionStatus.Executing
+            and not PayrollProposedActionStatus.Cancelled;
 }
 
 @if (!string.IsNullOrWhiteSpace(Model.Error))
@@ -36,6 +42,14 @@ else
             Geen cascade. Geen automatische uitvoering — expliciete goedkeuring is verplicht.
         </div>
     }
+    else if (isCreate)
+    {
+        <h1 class="h4 mb-3">Prestatie aanmaken in Plenion</h1>
+        <div class="alert alert-warning">
+            <strong>Er wordt een nieuwe urenprestatie in Plenion aangemaakt.</strong>
+            Geen automatische uitvoering — expliciete goedkeuring is verplicht.
+        </div>
+    }
     else
     {
         <h1 class="h4 mb-3">Voorstel controleren</h1>
@@ -61,7 +75,7 @@ else
     <div class="row g-3 mb-4">
         <div class="col-md-6">
             <section class="border rounded p-3 h-100">
-                <h2 class="h6">@(isDelete ? "Huidige prestatie" : "Huidig / bron")</h2>
+                <h2 class="h6">@(isCreate ? "Bewijs" : isDelete ? "Huidige prestatie" : "Huidig / bron")</h2>
                 @if (view.DeleteProposal is not null)
                 {
                     <p class="mb-1"><strong>@(view.DisplayName ?? view.ResourceId)</strong></p>
@@ -85,6 +99,13 @@ else
                     }
                     <p class="mb-0 small text-muted">PerformanceId @view.DeleteProposal.PerformanceId@(view.DeleteProposal.ExpectedMainTaskExternalId is long taskId ? $" · IDHFDTAAK {taskId}" : "")</p>
                 }
+                else if (isCreate)
+                {
+                    <p class="mb-1"><strong>ONTBREKENDE PRESTATIE</strong></p>
+                    <p class="mb-1 small">@PayrollReviewLabels.MissingTechnicianEvidence(view.Evidence.GpsClassification)</p>
+                    <p class="mb-1 small">@view.Evidence.Description</p>
+                    <p class="mb-0 small text-muted">Geen bestaande PROJ_Prest voor deze medewerker op dit interval.</p>
+                }
                 else
                 {
                     <p class="mb-1"><strong>@view.Evidence.Title</strong></p>
@@ -96,10 +117,6 @@ else
                             Einde: @view.AdjustProposal.CurrentEnd.ToString("HH:mm") ·
                             Prestatie #@view.AdjustProposal.PerformanceId
                         </p>
-                    }
-                    else
-                    {
-                        <p class="mb-0 small text-muted">Geen bestaande prestatie (create).</p>
                     }
                 }
             </section>
@@ -125,14 +142,13 @@ else
                 {
                     <p class="mb-1"><strong>Nieuwe prestatie aanmaken</strong></p>
                     <ul class="small mb-0">
-                        <li>Medewerker: @view.CreateProposal.ResourceId</li>
+                        <li>Medewerker: @(view.DisplayName ?? view.CreateProposal.ResourceId)</li>
                         <li>Datum: @PayrollDisplayFormatting.DateWithWeekday(view.CreateProposal.Date)</li>
-                        <li>Dossier/project: @view.CreateProposal.ProjectId</li>
-                        <li>Bon: @(view.CreateProposal.BonNr ?? "—")</li>
-                        <li>Start: @view.CreateProposal.Start.ToString("HH:mm")</li>
-                        <li>Einde: @view.CreateProposal.End.ToString("HH:mm")</li>
-                        <li>Uren: @view.CreateProposal.Hours.ToString("0.##")</li>
-                        <li>Taak/type: @view.CreateProposal.MainTaskId</li>
+                        <li>Project: @view.CreateProposal.ProjectId</li>
+                        <li>BON: @(view.CreateProposal.BonNr ?? "—")</li>
+                        <li>VAN–TOT: @view.CreateProposal.Start.ToString("HH:mm")–@view.CreateProposal.End.ToString("HH:mm")</li>
+                        <li>Duur: @view.CreateProposal.Hours.ToString("0.##") u</li>
+                        <li>Activiteit (IDHFDTAAK): @view.CreateProposal.MainTaskId</li>
                     </ul>
                 }
                 else if (view.AdjustProposal is not null)
@@ -151,6 +167,36 @@ else
             </section>
         </div>
     </div>
+
+    @if (canEditCreate)
+    {
+        <form method="post"
+              asp-page="/Admin/Payroll/ActionConfirm"
+              asp-page-handler="UpdateCreate"
+              asp-route-ActionId="@Model.ActionId"
+              class="border rounded p-3 mb-4"
+              style="max-width: 40rem;">
+            <input type="hidden" asp-for="ActionId" />
+            <h2 class="h6">Voorstel bijwerken</h2>
+            <p class="small text-muted">Corrigeer VAN/TOT of kies een toegelaten activiteit vóór definitieve goedkeuring.</p>
+            <div class="row g-2 mb-2">
+                <div class="col-4">
+                    <label class="form-label" asp-for="EditStart">VAN</label>
+                    <input class="form-control" type="time" asp-for="EditStart" />
+                </div>
+                <div class="col-4">
+                    <label class="form-label" asp-for="EditEnd">TOT</label>
+                    <input class="form-control" type="time" asp-for="EditEnd" />
+                </div>
+                <div class="col-4">
+                    <label class="form-label" asp-for="EditMainTaskId">IDHFDTAAK</label>
+                    <input class="form-control" type="number" min="1" asp-for="EditMainTaskId" />
+                </div>
+            </div>
+            <p class="small text-muted mb-2">Niet toegelaten: 5, 10, 18, 23 (reis/wacht/niet-job). PWS controleert of de taak bestaat.</p>
+            <button type="submit" class="btn btn-sm btn-outline-primary">Voorstel opslaan</button>
+        </form>
+    }
 
     <form method="post"
           asp-page="/Admin/Payroll/ActionConfirm"
@@ -172,6 +218,17 @@ else
                         disabled="@(!view.CanExecute)"
                         data-confirm="Prestatie definitief verwijderen uit Plenion. Doorgaan?">
                     Definitief verwijderen
+                </button>
+            }
+            else if (isCreate)
+            {
+                <button type="submit"
+                        asp-page-handler="Execute"
+                        asp-route-ActionId="@Model.ActionId"
+                        class="btn btn-primary"
+                        disabled="@(!view.CanExecute)"
+                        data-confirm="Er wordt een nieuwe urenprestatie in Plenion aangemaakt. Doorgaan?">
+                    Definitief aanmaken
                 </button>
             }
             else

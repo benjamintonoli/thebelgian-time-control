@@ -39,6 +39,18 @@ public interface IPayrollActionService
         CancellationToken cancellationToken);
 
     /// <summary>
+    /// Updates VAN/TOT and/or MainTaskId on a create proposal before approval.
+    /// Restricted activity list applies; PWS remains authoritative at execute.
+    /// </summary>
+    Task<PayrollActionProposeResult> UpdateCreateProposalAsync(
+        Guid actionId,
+        TimeOnly? start,
+        TimeOnly? endTime,
+        int? mainTaskId,
+        string actor,
+        CancellationToken cancellationToken);
+
+    /// <summary>
     /// Proposes a human-approved delete for any finding/workbench source that has a concrete performance id.
     /// Propose works when PayrollActions:Enabled; execute is gated by DeletePerformanceEnabled.
     /// </summary>

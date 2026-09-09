@@ -114,6 +114,11 @@ public static class MissingTechnicianControl
         DateTimeOffset? suggestedStart = null;
         DateTimeOffset? suggestedEnd = null;
         decimal? suggestedHours = null;
+        string intervalSource = "none";
+        int? suggestedHfdTaakId = group.Reservations
+            .Where(item => string.Equals(item.ResourceId, missingResourceId, StringComparison.Ordinal))
+            .Select(item => item.HfdTaakId)
+            .FirstOrDefault(id => id is > 0);
         string? suggestedBon = peers
             .Select(item => item.BonNr)
             .FirstOrDefault(item => !string.IsNullOrWhiteSpace(item));
@@ -134,7 +139,7 @@ public static class MissingTechnicianControl
         {
             evidenceClass = MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps;
             severity = PayrollFindingSeverity.High;
-            (suggestedStart, suggestedEnd, suggestedHours) = ProposeInterval(group, peers, gps, preferGps: true);
+            (suggestedStart, suggestedEnd, suggestedHours, intervalSource) = ProposeInterval(group, peers, gps, preferGps: false);
         }
         else if (gpsState == GpsSupportState.NoData)
         {
@@ -157,6 +162,8 @@ public static class MissingTechnicianControl
             suggestedHours = null;
             suggestedProject = null;
             suggestedBon = null;
+            suggestedHfdTaakId = null;
+            intervalSource = "none";
         }
 
         var peer = peers[0];
@@ -164,7 +171,16 @@ public static class MissingTechnicianControl
         var description =
             $"Planning {planned} (kalender {group.IdCalendar}); collega {peer.ResourceId} heeft prestatie "
             + $"{FormatPerfInterval(peer)}; geen matching jobprestatie voor resource {missingResourceId}.";
-        var evidence = BuildEvidence(group, missingResourceId, peers, conflicting, gps, gpsState, evidenceClass);
+        var evidence = BuildEvidence(
+            group,
+            missingResourceId,
+            peers,
+            conflicting,
+            gps,
+            gpsState,
+            evidenceClass,
+            intervalSource,
+            suggestedHfdTaakId);
         var action = evidenceClass switch
         {
             MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps =>
@@ -202,41 +218,31 @@ public static class MissingTechnicianControl
             GpsClassification: evidenceClass.ToString());
     }
 
-    private static (DateTimeOffset? Start, DateTimeOffset? End, decimal? Hours) ProposeInterval(
+    private static (DateTimeOffset? Start, DateTimeOffset? End, decimal? Hours, string IntervalSource) ProposeInterval(
         PlannedWorkGroup group,
         List<NormalizedPerformanceEntry> peers,
         StandbyGpsDayEvidence? gps,
         bool preferGps)
     {
-        if (preferGps && gps is not null)
-        {
-            var movement = SelectWindowTrips(group, gps);
-            if (movement.Count > 0)
-            {
-                var start = movement.Min(item => item.Start);
-                var end = movement.Max(item => item.End);
-                if (end > start)
-                {
-                    return (start, end, RoundHours((decimal)(end - start).TotalHours));
-                }
-            }
-        }
+        // GPS trip min/max is travel/arrival evidence, never a payable work interval (Ayrton 08:35–10:06).
+        _ = preferGps;
+        _ = gps;
 
         if (group.TimeFrom is not null && group.TimeTo is not null && group.TimeTo > group.TimeFrom)
         {
             var offset = TimeSpan.Zero;
             var start = new DateTimeOffset(group.Date.ToDateTime(group.TimeFrom.Value), offset);
             var end = new DateTimeOffset(group.Date.ToDateTime(group.TimeTo.Value), offset);
-            return (start, end, RoundHours((decimal)(end - start).TotalHours));
+            return (start, end, RoundHours((decimal)(end - start).TotalHours), "planning");
         }
 
         var peer = peers.FirstOrDefault(item => item.Start is not null && item.End is not null && item.End > item.Start);
         if (peer?.Start is not null && peer.End is not null)
         {
-            return (peer.Start, peer.End, RoundHours((decimal)(peer.End.Value - peer.Start.Value).TotalHours));
+            return (peer.Start, peer.End, RoundHours((decimal)(peer.End.Value - peer.Start.Value).TotalHours), "peer");
         }
 
-        return (null, null, null);
+        return (null, null, null, "none");
     }
 
     private static NormalizedPerformanceEntry? FindMatchingJobPerformance(
@@ -412,13 +418,22 @@ public static class MissingTechnicianControl
         NormalizedPerformanceEntry? conflicting,
         StandbyGpsDayEvidence? gps,
         GpsSupportState gpsState,
-        MissingTechnicianEvidenceClass evidenceClass)
+        MissingTechnicianEvidenceClass evidenceClass,
+        string intervalSource,
+        int? suggestedHfdTaakId)
     {
         var sb = new StringBuilder();
         sb.Append(CultureInfo.InvariantCulture,
             $"class={evidenceClass}; idKalender={group.IdCalendar}; project={group.ProjectId ?? "—"}; ");
         sb.Append(CultureInfo.InvariantCulture,
             $"planned={FormatPlannedInterval(group)}; missing={missingResourceId}; ");
+        sb.Append(CultureInfo.InvariantCulture,
+            $"intervalSource={intervalSource}; ");
+        if (suggestedHfdTaakId is > 0)
+        {
+            sb.Append(CultureInfo.InvariantCulture, $"suggestedHfdTaakId={suggestedHfdTaakId.Value}; ");
+        }
+
         sb.Append(CultureInfo.InvariantCulture,
             $"peers=[{string.Join(',', peers.Select(p => $"{p.ResourceId}#{p.SourceEntryId}:{FormatPerfInterval(p)}"))}]; ");
         if (conflicting is not null)

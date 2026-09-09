@@ -27,6 +27,15 @@ public sealed class ActionConfirmModel(
     [BindProperty]
     public string Comment { get; set; } = string.Empty;
 
+    [BindProperty]
+    public TimeOnly? EditStart { get; set; }
+
+    [BindProperty]
+    public TimeOnly? EditEnd { get; set; }
+
+    [BindProperty]
+    public int? EditMainTaskId { get; set; }
+
     public PayrollActionConfirmationView? View { get; private set; }
     public string? Message { get; private set; }
     public string? Error { get; private set; }
@@ -54,7 +63,60 @@ public sealed class ActionConfirmModel(
             Comment = View.DefaultComment;
         }
 
+        if (View.CreateProposal is not null)
+        {
+            EditStart ??= TimeOnly.FromTimeSpan(View.CreateProposal.Start.TimeOfDay);
+            EditEnd ??= TimeOnly.FromTimeSpan(View.CreateProposal.End.TimeOfDay);
+            EditMainTaskId ??= View.CreateProposal.MainTaskId;
+        }
+        else if (View.Evidence.SuggestedPayableStart is not null && View.Evidence.SuggestedPayableEnd is not null)
+        {
+            EditStart ??= TimeOnly.FromTimeSpan(View.Evidence.SuggestedPayableStart.Value.TimeOfDay);
+            EditEnd ??= TimeOnly.FromTimeSpan(View.Evidence.SuggestedPayableEnd.Value.TimeOfDay);
+            EditMainTaskId ??= PayrollActionEligibility.ParseSuggestedHfdTaakId(View.Evidence.Evidence);
+        }
+
         return Page();
+    }
+
+    public async Task<IActionResult> OnPostUpdateCreateAsync(CancellationToken cancellationToken)
+    {
+        if (!EnsureUiEnabled())
+        {
+            return NotFound();
+        }
+
+        if (ActionId == Guid.Empty)
+        {
+            return NotFound();
+        }
+
+        try
+        {
+            var actor = RequireActor();
+            var result = await payrollActionService.UpdateCreateProposalAsync(
+                ActionId,
+                EditStart,
+                EditEnd,
+                EditMainTaskId,
+                actor.AuditIdentity,
+                cancellationToken);
+            if (!result.Ok)
+            {
+                Error = result.Message;
+            }
+            else
+            {
+                Message = result.Message;
+            }
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Create proposal update failed for {ActionId}.", ActionId);
+            Error = "Voorstel bijwerken mislukt.";
+        }
+
+        return await OnGetAsync(cancellationToken);
     }
 
     public async Task<IActionResult> OnPostExecuteAsync(CancellationToken cancellationToken)
@@ -286,6 +348,12 @@ public sealed class ActionConfirmModel(
             return $"Prestatie {delete.CurrentStart:HH:mm}–{delete.CurrentEnd:HH:mm} is verwijderd uit Plenion.";
         }
 
+        var create = confirmation?.CreateProposal;
+        if (create is not null)
+        {
+            return $"Prestatie {create.Start:HH:mm}–{create.End:HH:mm} is aangemaakt in Plenion.";
+        }
+
         return "Actie uitgevoerd.";
     }
 
@@ -306,14 +374,33 @@ public sealed class ActionConfirmModel(
             return "Deze prestatie heeft gekoppelde gegevens en kan niet automatisch worden verwijderd.";
         }
 
+        if (detail.Contains("CreatePerformanceEnabled", StringComparison.OrdinalIgnoreCase)
+            || detail.Contains("create staat uit", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Aanmaken is momenteel uitgeschakeld.";
+        }
+
         if (detail.Contains("uitgeschakeld", StringComparison.OrdinalIgnoreCase)
             || detail.Contains("DeletePerformanceEnabled", StringComparison.OrdinalIgnoreCase)
             || detail.Contains("ExecutionEnabled", StringComparison.OrdinalIgnoreCase))
         {
-            return "Verwijderen is momenteel uitgeschakeld.";
+            return "Uitvoering is momenteel uitgeschakeld.";
         }
 
-        return "De prestatie kon niet worden verwijderd. Er is niets gewijzigd.";
+        if (detail.Contains("already_exists", StringComparison.OrdinalIgnoreCase)
+            || detail.Contains("equivalente", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Er bestaat al een equivalente prestatie. Er is niets nieuws aangemaakt.";
+        }
+
+        if (result.ActionId != Guid.Empty && detail.Contains("create", StringComparison.OrdinalIgnoreCase))
+        {
+            return detail;
+        }
+
+        return string.IsNullOrWhiteSpace(detail)
+            ? "De actie kon niet worden uitgevoerd. Er is niets gewijzigd."
+            : detail;
     }
 
     private static string MapException(Exception exception)
@@ -324,11 +411,16 @@ public sealed class ActionConfirmModel(
             return "Reden is verplicht.";
         }
 
+        if (message.Contains("CreatePerformanceEnabled", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Aanmaken is momenteel uitgeschakeld.";
+        }
+
         if (message.Contains("uitgeschakeld", StringComparison.OrdinalIgnoreCase)
             || message.Contains("ExecutionEnabled", StringComparison.OrdinalIgnoreCase)
             || message.Contains("DeletePerformanceEnabled", StringComparison.OrdinalIgnoreCase))
         {
-            return "Verwijderen is momenteel uitgeschakeld.";
+            return "Uitvoering is momenteel uitgeschakeld.";
         }
 
         if (message.Contains("niet gevonden", StringComparison.OrdinalIgnoreCase))
@@ -336,6 +428,6 @@ public sealed class ActionConfirmModel(
             return "Actie niet gevonden. Open de bevestiging opnieuw via de workbench.";
         }
 
-        return "De prestatie kon niet worden verwijderd. Er is niets gewijzigd.";
+        return "De actie kon niet worden uitgevoerd. Er is niets gewijzigd.";
     }
 }
