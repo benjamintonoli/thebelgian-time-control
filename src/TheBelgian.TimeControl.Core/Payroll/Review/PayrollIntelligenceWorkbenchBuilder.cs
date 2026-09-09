@@ -123,6 +123,20 @@ public static partial class PayrollIntelligenceWorkbenchBuilder
             || conflictClass == MissingTechnicianConflictClass.PlannedJobSupportedExistingBookingWrong;
         var conflictToken = ParseToken(finding.Evidence, "conflict");
         var plannedSite = ParseToken(finding.Evidence, "plannedSite");
+        var workContinuity = ParseToken(finding.Evidence, "workContinuity");
+        var continuityNl = ParseToken(finding.Evidence, "continuityNl");
+        var excursion = ParseToken(finding.Evidence, "excursion");
+        var excursionInterval = ParseToken(finding.Evidence, "excursionInterval");
+        var excursionAway = ParseToken(finding.Evidence, "excursionAway");
+        var operationalSite = ParseToken(finding.Evidence, "operationalSite");
+        var allocationReview = string.Equals(ParseToken(finding.Evidence, "allocationReview"), "true", StringComparison.OrdinalIgnoreCase);
+        var pauseNote = ParseToken(finding.Evidence, "pauseNote");
+        string? excursionSummary = null;
+        if (!string.IsNullOrWhiteSpace(excursion) && !string.Equals(excursion, "none", StringComparison.OrdinalIgnoreCase))
+        {
+            excursionSummary = $"{excursionInterval ?? "—"} · {excursion}"
+                + (string.IsNullOrWhiteSpace(excursionAway) || excursionAway == "—" ? "" : $" · {excursionAway}");
+        }
 
         return new PayrollIntelligenceCaseDetail(
             adminCase,
@@ -166,7 +180,14 @@ public static partial class PayrollIntelligenceWorkbenchBuilder
                 isWrongDossier,
                 isWrongDossier
                     ? "1) DeleteExistingPerformance op huidige boeking  2) CreatePerformance op geplande job/BON met GPS-interval"
-                    : null),
+                    : null,
+                workContinuity,
+                continuityNl,
+                excursion,
+                excursionSummary,
+                operationalSite,
+                allocationReview,
+                pauseNote),
             BuildGpsContext(gps, gpsPending));
     }
 

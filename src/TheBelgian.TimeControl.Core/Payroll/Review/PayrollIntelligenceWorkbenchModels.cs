@@ -86,7 +86,14 @@ public sealed record PayrollMissingWorkbenchDetail(
     string? PlannedSiteLabel = null,
     string? ExistingBookingSummary = null,
     bool IsWrongDossier = false,
-    string? ReplacementPlanNl = null);
+    string? ReplacementPlanNl = null,
+    string? WorkContinuity = null,
+    string? WorkContinuityNl = null,
+    string? ExcursionClass = null,
+    string? ExcursionSummary = null,
+    string? OperationalSite = null,
+    bool AllocationReview = false,
+    string? PauseNoteNl = null);
 
 public sealed record PayrollIntelligenceGpsContext(
     bool Available,

@@ -238,6 +238,29 @@ public static class MissingTechnicianControl
             siteMatch,
             hasCompleteSite);
 
+        var continuity = MissingTechnicianWorkdayContinuity.Assess(
+            site.Arrival,
+            site.Departure,
+            gps,
+            peerGps,
+            plannedLocation,
+            peer,
+            dayRows,
+            group);
+
+        // Operational site (peer GPS / same-postcode cluster) may strengthen a weak postcode site match.
+        if (siteMatch is MissingTechnicianSiteMatch.NeitherMatch or MissingTechnicianSiteMatch.LocationUnknown
+            && continuity.OperationalSite is MissingTechnicianOperationalSiteRelation.SameOperationalSiteProven
+                or MissingTechnicianOperationalSiteRelation.SameOperationalSiteLikely
+            && hasCompleteSite)
+        {
+            siteMatch = MissingTechnicianSiteMatch.PlannedJobSiteMatch;
+            conflictClass = MissingTechnicianSiteConflictAnalyzer.ClassifyConflict(
+                materialConflict,
+                siteMatch,
+                hasCompleteSite);
+        }
+
         MissingTechnicianEvidenceClass evidenceClass;
         PayrollFindingSeverity severity;
         PayrollFindingType findingType = PayrollFindingType.MissingPlannedTechnicianPerformance;
@@ -284,14 +307,25 @@ public static class MissingTechnicianControl
         }
         else if (travelMode == MissingTechnicianTravelMode.SeparateVehicleProven
                  && hasCompleteSite
-                 && siteMatch == MissingTechnicianSiteMatch.PlannedJobSiteMatch)
+                 && siteMatch == MissingTechnicianSiteMatch.PlannedJobSiteMatch
+                 && MissingTechnicianWorkdayContinuity.AllowsContinuousProposal(continuity.Continuity))
         {
+            // Payable continuity may remain continuous across HQ/meal excursions — do not geofence-split.
             evidenceClass = MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps;
             severity = PayrollFindingSeverity.High;
             suggestedStart = site.Arrival;
             suggestedEnd = site.Departure;
             suggestedHours = RoundHours((decimal)(site.Departure!.Value - site.Arrival!.Value).TotalHours);
             intervalSource = "gpsSite";
+        }
+        else if (travelMode == MissingTechnicianTravelMode.SeparateVehicleProven
+                 && hasCompleteSite
+                 && siteMatch == MissingTechnicianSiteMatch.PlannedJobSiteMatch
+                 && continuity.Continuity == MissingTechnicianWorkContinuity.SplitRequired)
+        {
+            evidenceClass = MissingTechnicianEvidenceClass.Ambiguous;
+            severity = PayrollFindingSeverity.Review;
+            intervalSource = "none";
         }
         else if (travelMode == MissingTechnicianTravelMode.SeparateVehicleProven
                  && hasCompleteSite
@@ -384,13 +418,16 @@ public static class MissingTechnicianControl
             plannedLocation,
             existingLocation,
             proposed.Start,
-            proposed.End);
+            proposed.End,
+            continuity);
         var action = findingType == PayrollFindingType.WrongProjectBooking
             ? "Mogelijk verkeerde project/bon geboekt. Vervangplan: verwijderen + correcte prestatie aanmaken (menselijke goedkeuring)."
             : evidenceClass switch
             {
                 MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps when intervalSource == "gpsSite" =>
-                    "Voorstel volgt eigen GPS werfaanwezigheid (menselijke goedkeuring vereist).",
+                    continuity.AllocationReview
+                        ? "Voorstel volgt GPS werkaanwezigheid (continu). Projectallocatie van tijdelijke verplaatsing nakijken; uren niet inkorten."
+                        : "Voorstel volgt eigen GPS werkaanwezigheid (menselijke goedkeuring vereist). Tijdelijke GPS-verplaatsing splitst werktijd niet automatisch.",
                 MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps when intervalSource == "peerSharedTravel" =>
                     "Waarschijnlijk samen gereden. Voorstel volgt de geregistreerde werkuren van de collega.",
                 MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps =>
@@ -399,6 +436,8 @@ public static class MissingTechnicianControl
                     MissingTechnicianSiteConflictAnalyzer.FormatConflictNl(conflictClass),
                 MissingTechnicianEvidenceClass.ContradictedByGps =>
                     "Geen voorstel: GPS lijkt elders actief.",
+                _ when continuity.Continuity == MissingTechnicianWorkContinuity.SplitRequired =>
+                    "GPS-onderbreking lijkt een andere job/niet-werkperiode; split of review vereist.",
                 _ => "Controleer planning vs prestaties; GPS/shared vehicle kan ontbrekende track verklaren.",
             };
 
@@ -723,7 +762,8 @@ public static class MissingTechnicianControl
         JobLocationEvidence? plannedLocation,
         JobLocationEvidence? existingLocation,
         DateTimeOffset? proposedStart,
-        DateTimeOffset? proposedEnd)
+        DateTimeOffset? proposedEnd,
+        MissingTechnicianContinuityAssessment? continuity = null)
     {
         var sb = new StringBuilder();
         sb.Append(CultureInfo.InvariantCulture,
@@ -769,6 +809,35 @@ public static class MissingTechnicianControl
             {
                 sb.Append(CultureInfo.InvariantCulture, $"{site.Note}; ");
             }
+        }
+
+        if (continuity is not null)
+        {
+            sb.Append(CultureInfo.InvariantCulture,
+                $"workContinuity={MissingTechnicianWorkdayContinuity.FormatContinuity(continuity.Continuity)}; ");
+            sb.Append(CultureInfo.InvariantCulture,
+                $"operationalSite={MissingTechnicianWorkdayContinuity.FormatOperationalSite(continuity.OperationalSite)}; ");
+            sb.Append(CultureInfo.InvariantCulture,
+                $"allocationReview={(continuity.AllocationReview ? "true" : "false")}; ");
+            if (continuity.Excursions.Count > 0)
+            {
+                var primary = continuity.Excursions[0];
+                sb.Append(CultureInfo.InvariantCulture,
+                    $"excursion={MissingTechnicianWorkdayContinuity.FormatExcursionClass(primary.Classification)}; ");
+                sb.Append(CultureInfo.InvariantCulture,
+                    $"excursionInterval={primary.DepartSite:HH:mm}-{primary.ReturnSite:HH:mm}; ");
+                sb.Append(CultureInfo.InvariantCulture,
+                    $"excursionAway={primary.AwayAddress ?? "—"}; ");
+                sb.Append(CultureInfo.InvariantCulture,
+                    $"excursionCount={continuity.Excursions.Count}; ");
+            }
+            else
+            {
+                sb.Append("excursion=none; ");
+            }
+
+            sb.Append(CultureInfo.InvariantCulture, $"continuityNl={continuity.ContinuityNl}; ");
+            sb.Append(CultureInfo.InvariantCulture, $"pauseNote={continuity.PauseNoteNl}; ");
         }
 
         sb.Append(CultureInfo.InvariantCulture,

@@ -249,8 +249,20 @@ public static class MissingTechnicianSiteConflictAnalyzer
             return null;
         }
 
-        var digits = new string(value.Where(char.IsDigit).ToArray());
-        return digits.Length >= 4 ? digits[..4] : null;
+        // Prefer a standalone Belgian postcode token (avoid swallowing house numbers: "Ingberthoeveweg 21, 2630").
+        var match = System.Text.RegularExpressions.Regex.Match(value, @"\b([1-9]\d{3})\b");
+        if (match.Success)
+        {
+            return match.Groups[1].Value;
+        }
+
+        var trimmed = value.Trim();
+        if (trimmed.Length == 4 && trimmed.All(char.IsDigit) && trimmed[0] != '0')
+        {
+            return trimmed;
+        }
+
+        return null;
     }
 
     public static string? ExtractLocalityOrPostcode(string? addressOrLabel)

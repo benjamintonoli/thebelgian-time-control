@@ -119,10 +119,8 @@ else
             <div id="gps-site-summary">
                 @if (missing.GpsSiteStart is not null)
                 {
-                    <div>Aankomst werf: @FmtTime(missing.GpsSiteStart)</div>
-                    <div>
-                        Vertrek werf:
-                        @(missing.GpsSiteEnd is null ? "onbekend" : FmtTime(missing.GpsSiteEnd))
+                    <div><strong>WERF</strong> — aankomst @FmtTime(missing.GpsSiteStart)
+                        @if (missing.GpsSiteEnd is not null) { <span>· vertrek @FmtTime(missing.GpsSiteEnd)</span> }
                     </div>
                     @if (!string.IsNullOrWhiteSpace(missing.GpsSiteNote))
                     {
@@ -134,6 +132,37 @@ else
                     <span class="text-muted">Nog geen GPS-werfvenster.</span>
                 }
             </div>
+            @if (!string.IsNullOrWhiteSpace(missing.ExcursionSummary) && !string.Equals(missing.ExcursionClass, "none", StringComparison.OrdinalIgnoreCase))
+            {
+                <div class="mt-3">
+                    <div class="text-uppercase small text-muted fw-semibold mb-1">Tijdelijke verplaatsing</div>
+                    <div>@missing.ExcursionSummary</div>
+                    <div class="small text-muted mt-1">Classificatie: @(missing.ExcursionClass ?? "—")</div>
+                </div>
+            }
+            @if (!string.IsNullOrWhiteSpace(missing.WorkContinuityNl) || !string.IsNullOrWhiteSpace(missing.WorkContinuity))
+            {
+                <div class="mt-3">
+                    <div class="text-uppercase small text-muted fw-semibold mb-1">Werkcontinuïteit</div>
+                    <div class="fw-semibold">@(missing.WorkContinuity ?? "—")</div>
+                    @if (!string.IsNullOrWhiteSpace(missing.WorkContinuityNl))
+                    {
+                        <div class="mt-1">@missing.WorkContinuityNl</div>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(missing.OperationalSite))
+                    {
+                        <div class="small text-muted mt-1">Operationele site: @missing.OperationalSite</div>
+                    }
+                    <div class="small mt-1">
+                        Projectallocatie:
+                        @(missing.AllocationReview ? "NA TE KIJKEN (uren niet inkorten)" : "OK / niet van toepassing")
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(missing.PauseNoteNl))
+                    {
+                        <div class="small text-muted mt-1">@missing.PauseNoteNl</div>
+                    }
+                </div>
+            }
         </section>
 
         <section class="mb-3 border rounded p-3">
