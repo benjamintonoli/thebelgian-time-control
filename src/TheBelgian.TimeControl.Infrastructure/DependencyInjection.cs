@@ -303,6 +303,7 @@ public static class DependencyInjection
         services.AddScoped<IPayrollShadowService, PayrollShadowService>();
         services.AddScoped<IPayrollActionService, PayrollActionService>();
         services.AddScoped<IPayrollReviewQueueService, PayrollReviewQueueService>();
+        services.AddScoped<IPayrollControlCenterService, PayrollControlCenterService>();
         services.AddSingleton<PayrollProject300GpsCache>();
         services.AddSingleton<PayrollProject300GpsContextCache>();
         services.AddSingleton<PayrollProject300DaySourceCache>();

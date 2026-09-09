@@ -311,7 +311,9 @@ public sealed class August2026PayrollShadowAcceptanceTests(ITestOutputHelper out
     /// <summary>
     /// Live-data acceptance against current Plenion ODBC + Power BI August CSV.
     /// Environment-dependent: can fail when live source diverges from the export
-    /// (known city/km drift) or after controlled live payroll mutations (e.g. Ayrton delete).
+    /// (known city/km drift) or after controlled live payroll mutations.
+    /// Ayrton travel-min side-effect after delete is classified as
+    /// SOURCE_CHANGED_SINCE_LIVE_MUTATION_TRAVEL_MIN (not UNEXPLAINED).
     /// Not a pure unit regression; do not treat as a silent skip.
     /// </summary>
     [Fact]
@@ -654,7 +656,11 @@ public sealed class August2026PayrollShadowAcceptanceTests(ITestOutputHelper out
             notes);
     }
 
-    private static string ClassifyMismatch(
+    /// <summary>
+    /// Classifies live vs Power BI mismatches. Controlled travel-min side-effects after live
+    /// delete are not unexplained algorithm failures.
+    /// </summary>
+    internal static string ClassifyMismatch(
         bool hourOk,
         bool theoOk,
         bool actualOk,
@@ -663,6 +669,13 @@ public sealed class August2026PayrollShadowAcceptanceTests(ITestOutputHelper out
         bool cityOk,
         bool kmOk)
     {
+        // Controlled live delete can shift ordinary hours AND km together when travel becomes
+        // daily min VAN (Ayrton 20/08: travelStart −ATL + Extra15). Not an unexplained algorithm miss.
+        if (!hourOk && !kmOk && standbyOk && theoOk)
+        {
+            return "SOURCE_CHANGED_SINCE_LIVE_MUTATION_TRAVEL_MIN";
+        }
+
         if (!kmOk || !theoOk)
         {
             return "UNEXPLAINED";

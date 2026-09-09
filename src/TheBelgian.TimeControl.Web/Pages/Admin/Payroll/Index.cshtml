@@ -31,7 +31,8 @@
             · @PayrollReviewLabels.MonthStatus(canonical.Status)
         </div>
         <div class="d-flex flex-wrap gap-2">
-            <a class="btn btn-sm btn-primary" asp-page="./Month" asp-route-year="@canonical.Year" asp-route-month="@canonical.Month">Medewerkers</a>
+            <a class="btn btn-sm btn-primary" asp-page="./Control" asp-route-year="@canonical.Year" asp-route-month="@canonical.Month">Control Center</a>
+            <a class="btn btn-sm btn-outline-primary" asp-page="./Month" asp-route-year="@canonical.Year" asp-route-month="@canonical.Month">Medewerkers</a>
             <a class="btn btn-sm btn-outline-primary" asp-page="./Queue" asp-route-year="@canonical.Year" asp-route-month="@canonical.Month">Queue / review</a>
             <a class="btn btn-sm btn-outline-primary" asp-page="./Workbench" asp-route-year="@canonical.Year" asp-route-month="@canonical.Month">Project 300 workbench</a>
             <a class="btn btn-sm btn-outline-primary" asp-page="./Project200Workbench" asp-route-year="@canonical.Year" asp-route-month="@canonical.Month">Project 200 workbench</a>
@@ -98,6 +99,8 @@
                     <td>@item.NeedsDecision</td>
                     <td>@item.PendingReview / @item.NeedsFollowUp / @item.Accepted</td>
                     <td class="text-nowrap">
+                        <a class="small" asp-page="./Control" asp-route-year="@item.Year" asp-route-month="@item.Month">Control</a>
+                        ·
                         <a class="small" asp-page="./Queue" asp-route-year="@item.Year" asp-route-month="@item.Month">Queue</a>
                         ·
                         <a class="small" asp-page="./Workbench" asp-route-year="@item.Year" asp-route-month="@item.Month">300</a>

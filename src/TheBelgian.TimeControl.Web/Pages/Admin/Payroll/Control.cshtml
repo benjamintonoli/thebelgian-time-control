@@ -1,0 +1,333 @@
+@page "/Admin/Payroll/{year:int}/{month:int}/Control"
+@model TheBelgian.TimeControl.Web.Pages.Admin.Payroll.ControlModel
+@using System.Globalization
+@using TheBelgian.TimeControl.Core.Payroll.Actions
+@using TheBelgian.TimeControl.Core.Payroll.Findings
+@using TheBelgian.TimeControl.Core.Payroll.Models
+@using TheBelgian.TimeControl.Core.Payroll.Review
+@{
+    ViewData["Title"] = $"Payroll Control {Model.Month:00}/{Model.Year}";
+    var nl = CultureInfo.GetCultureInfo("nl-BE");
+    var center = Model.Center;
+    string MonthTitle(int year, int month) =>
+        CultureInfo.GetCultureInfo("nl-BE").DateTimeFormat.GetMonthName(month).ToUpperInvariant() + " " + year;
+    string Fmt(decimal? value, string suffix = "") =>
+        value is null ? "—" : value.Value.ToString("0.##", nl) + suffix;
+    string FmtMoney(decimal? value) =>
+        value is null ? "—" : "€ " + value.Value.ToString("0.00", nl);
+    string CardHref(PayrollControlCard card) =>
+        card.Category is PayrollReviewCategory.Project300
+            or PayrollReviewCategory.Project200
+            or PayrollReviewCategory.Project100
+            or PayrollReviewCategory.Standby
+            ? Url.Page(card.NavigationPage, new { year = Model.Year, month = Model.Month })!
+            : Url.Page("./Queue", new { year = Model.Year, month = Model.Month, Category = card.Category })!;
+    string PriorityHref(PayrollControlPriorityItem item) =>
+        item.Category is PayrollReviewCategory.Project300
+            or PayrollReviewCategory.Project200
+            or PayrollReviewCategory.Project100
+            or PayrollReviewCategory.Standby
+            ? Url.Page(item.NavigationPage, new { year = Model.Year, month = Model.Month, Focus = item.FocusKey, Scope = PayrollReviewQueueScope.Open })!
+            : Url.Page("./Queue", new { year = Model.Year, month = Model.Month, Category = item.Category, Focus = item.FocusKey })!;
+}
+
+<div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
+    <div>
+        <div class="text-uppercase small text-muted fw-semibold">Payroll Control Center</div>
+        <h1 class="h3 mb-1">PAYROLL CONTROL — @MonthTitle(Model.Year, Model.Month)</h1>
+        @if (center is not null)
+        {
+            <p class="text-muted mb-0">
+                Status: <strong>@PayrollReviewLabels.MonthStatus(center.Status)</strong>
+                @if (center.IsReadOnly)
+                {
+                    <span class="badge text-bg-secondary ms-1">Alleen-lezen</span>
+                }
+            </p>
+        }
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+        <a class="btn btn-sm btn-outline-secondary" asp-page="./Month" asp-route-year="@Model.Year" asp-route-month="@Model.Month">Medewerkers</a>
+        <a class="btn btn-sm btn-outline-secondary" asp-page="./Queue" asp-route-year="@Model.Year" asp-route-month="@Model.Month">Queue</a>
+        <a class="btn btn-sm btn-outline-secondary" asp-page="./Index" asp-route-Stay="true">← Overzicht</a>
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(Model.Error))
+{
+    <div class="alert alert-danger">@Model.Error</div>
+}
+
+@if (center is null)
+{
+    <div class="alert alert-warning">Shadow-maand niet gevonden.</div>
+}
+else
+{
+    var s = center.Summary;
+    <section class="card mb-3">
+        <div class="card-body">
+            <div class="row g-2">
+                <div class="col-6 col-md-3 col-lg"><div class="border rounded p-2 h-100"><div class="small text-muted">Included</div><div class="fs-4 fw-semibold">@s.IncludedEmployees</div></div></div>
+                <div class="col-6 col-md-3 col-lg"><div class="border rounded p-2 h-100"><div class="small text-muted">Klaar</div><div class="fs-4 fw-semibold text-success">@s.ReadyEmployees</div></div></div>
+                <div class="col-6 col-md-3 col-lg"><div class="border rounded p-2 h-100"><div class="small text-muted">Aandacht</div><div class="fs-4 fw-semibold text-warning">@s.AttentionEmployees</div></div></div>
+                <div class="col-6 col-md-3 col-lg"><div class="border rounded p-2 h-100"><div class="small text-muted">Open cases</div><div class="fs-4 fw-semibold">@s.OpenAdminCases</div></div></div>
+                <div class="col-6 col-md-3 col-lg"><div class="border rounded p-2 h-100"><div class="small text-muted">Opvolging</div><div class="fs-4 fw-semibold text-warning">@s.FollowUpAdminCases</div></div></div>
+                <div class="col-6 col-md-3 col-lg"><div class="border rounded p-2 h-100"><div class="small text-muted">Pending actions</div><div class="fs-4 fw-semibold">@s.PendingActions</div></div></div>
+                <div class="col-6 col-md-3 col-lg"><div class="border rounded p-2 h-100"><div class="small text-muted">Applied actions</div><div class="fs-4 fw-semibold">@s.AppliedActions</div></div></div>
+                <div class="col-6 col-md-3 col-lg"><div class="border rounded p-2 h-100"><div class="small text-muted">Finalisatie blockers</div><div class="fs-4 fw-semibold @(s.FinalizationBlockerCount == 0 ? "text-success" : "text-danger")">@s.FinalizationBlockerCount</div></div></div>
+            </div>
+            <p class="small text-muted mb-0 mt-3">@center.Diagnostics.ReconciliationNote</p>
+        </div>
+    </section>
+
+    <section class="mb-3">
+        <div class="d-flex flex-wrap gap-2 mb-2">
+            @foreach (var m in center.AvailableMonths.Take(12))
+            {
+                var active = m.Year == Model.Year && m.Month == Model.Month;
+                <a class="btn btn-sm @(active ? "btn-dark" : "btn-outline-secondary")"
+                   asp-page="./Control" asp-route-year="@m.Year" asp-route-month="@m.Month">
+                    @m.Month.ToString("00")/@m.Year · @PayrollReviewLabels.MonthStatus(m.Status)
+                </a>
+            }
+        </div>
+    </section>
+
+    <section class="mb-4">
+        <h2 class="h5 mb-2">Controles</h2>
+        <div class="row g-2">
+            @foreach (var card in center.ControlCards)
+            {
+                <div class="col-md-6 col-xl-4">
+                    <a class="text-decoration-none" href="@CardHref(card)">
+                        <div class="card h-100 border @(card.Open + card.FollowUp > 0 ? "border-warning" : "")">
+                            <div class="card-body">
+                                <div class="fw-semibold mb-1">@card.Title</div>
+                                <div class="small">
+                                    Open <strong>@card.Open</strong>
+                                    · Opvolging <strong>@card.FollowUp</strong>
+                                    · Afgehandeld <strong>@card.Completed</strong>
+                                </div>
+                                @if (card.Total > 0)
+                                {
+                                    <div class="progress mt-2" style="height:0.4rem;">
+                                        <div class="progress-bar bg-success" style="width:@((card.Completed * 100) / Math.Max(1, card.Total))%"></div>
+                                    </div>
+                                    <div class="small text-muted mt-1">@card.Completed / @card.Total</div>
+                                }
+                            </div>
+                        </div>
+                    </a>
+                </div>
+            }
+        </div>
+        <p class="small text-muted mt-2 mb-0">Voortgang: @s.ProgressCompleted / @s.ProgressTotal cases (@s.ProgressPercent%)</p>
+    </section>
+
+    <div class="row g-3 mb-4">
+        <div class="col-lg-5">
+            <section class="card h-100">
+                <div class="card-body">
+                    <h2 class="h5">Finalisatie</h2>
+                    <div class="mb-2">
+                        Klaar voor finalisatie:
+                        <strong class="@(center.Finalization.CanFinalize ? "text-success" : "text-danger")">
+                            @(center.Finalization.CanFinalize ? "YES" : "NO")
+                        </strong>
+                    </div>
+                    @if (center.IsReadOnly)
+                    {
+                        <div class="alert alert-secondary small mb-2">
+                            Finalized @(center.FinalizedAtUtc?.ToLocalTime().ToString("dd/MM/yyyy HH:mm") ?? "—")
+                            door @(center.FinalizedBy ?? "—"). Snapshot is bevroren.
+                        </div>
+                    }
+                    else if (!center.Finalization.CanFinalize)
+                    {
+                        <ul class="small mb-3">
+                            @foreach (var blocker in center.Finalization.Blockers)
+                            {
+                                <li>@blocker.FriendlyMessage</li>
+                            }
+                        </ul>
+                        <a class="btn btn-sm btn-outline-primary" asp-page="./Queue" asp-route-year="@Model.Year" asp-route-month="@Model.Month">Naar opvolging</a>
+                    }
+                    else
+                    {
+                        <a class="btn btn-primary" asp-page="./Finalize" asp-route-year="@Model.Year" asp-route-month="@Model.Month">Maand finaliseren</a>
+                    }
+                    <div class="small text-muted mt-3">
+                        Employee Pending (@center.Finalization.PendingIncluded) is informatief en geen blocker.
+                    </div>
+                </div>
+            </section>
+        </div>
+        <div class="col-lg-7">
+            <section class="card h-100">
+                <div class="card-body">
+                    <h2 class="h5">Payroll impact</h2>
+                    <div class="text-uppercase small text-muted fw-semibold mb-1">@center.Impact.CurrentCalculatedLabel</div>
+                    <div class="row g-2 small mb-3">
+                        <div class="col-6 col-md-4">Overuren 150: <strong>@Fmt(center.Impact.CurrentOvertime150Units)</strong></div>
+                        <div class="col-6 col-md-4">Wachtdienst: <strong>@Fmt(center.Impact.CurrentStandbyHours, " u")</strong></div>
+                        <div class="col-6 col-md-4">Stad: <strong>@FmtMoney(center.Impact.CurrentCityAllowanceAmount)</strong></div>
+                        <div class="col-6 col-md-4">KM: <strong>@FmtMoney(center.Impact.CurrentKmAmount)</strong></div>
+                        <div class="col-6 col-md-4">Open cases: <strong>@Fmt(center.Impact.OpenBookedHours, " u")</strong></div>
+                    </div>
+                    <div class="text-uppercase small text-muted fw-semibold mb-1">@center.Impact.PotentialIfAppliedLabel</div>
+                    <div class="row g-2 small">
+                        <div class="col-6">Pending delete: <strong>@Fmt(center.Impact.PendingDeleteHours, " u")</strong></div>
+                        <div class="col-6">Pending adjust (voorsteluren): <strong>@Fmt(center.Impact.PendingAdjustHours, " u")</strong></div>
+                        <div class="col-12">Missing tech (sterk bewijs, create OFF): <strong>@Fmt(center.Impact.PotentialMissingTechHours, " u")</strong></div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <section class="card mb-4">
+        <div class="card-body">
+            <h2 class="h5">Acties</h2>
+            <div class="row g-2 small mb-3">
+                <div class="col-6 col-md">ReadyForApproval: <strong>@center.Actions.ReadyForApproval</strong></div>
+                <div class="col-6 col-md">Executing: <strong>@center.Actions.Executing</strong></div>
+                <div class="col-6 col-md">Applied: <strong>@center.Actions.Applied</strong></div>
+                <div class="col-6 col-md text-danger">Failed: <strong>@center.Actions.Failed</strong></div>
+                <div class="col-6 col-md text-warning">Stale: <strong>@center.Actions.Stale</strong></div>
+                <div class="col-6 col-md">Blocked: <strong>@center.Actions.Blocked</strong></div>
+            </div>
+            @if (center.Actions.CreateRequiredButGated > 0)
+            {
+                <div class="alert alert-warning small">
+                    @center.Actions.CreateRequiredButGated ontbrekende-prestatie case(s):
+                    <strong>Nieuwe prestatie vereist — aanmaken momenteel niet actief</strong>
+                    (CreatePerformanceEnabled=false).
+                </div>
+            }
+            @if (center.Actions.HighlightRows.Count > 0 && !center.IsReadOnly)
+            {
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead><tr><th>Resource</th><th>Type</th><th>Status</th><th></th></tr></thead>
+                        <tbody>
+                        @foreach (var row in center.Actions.HighlightRows)
+                        {
+                            <tr>
+                                <td>@row.ResourceId</td>
+                                <td>@row.ActionType</td>
+                                <td>@row.Status</td>
+                                <td>
+                                    @if (row.Status is PayrollProposedActionStatus.ReadyForApproval
+                                        or PayrollProposedActionStatus.Failed
+                                        or PayrollProposedActionStatus.Stale
+                                        or PayrollProposedActionStatus.Blocked)
+                                    {
+                                        <a class="small" asp-page="./ActionConfirm" asp-route-ActionId="@row.ActionId">Open</a>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </section>
+
+    <section class="card mb-4">
+        <div class="card-body">
+            <h2 class="h5">Volgende te beoordelen</h2>
+            @if (center.PriorityQueue.Count == 0)
+            {
+                <p class="text-muted mb-0">Geen openstaande admin cases.</p>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead>
+                        <tr>
+                            <th>Medewerker</th>
+                            <th>Datum</th>
+                            <th>Controle</th>
+                            <th>Issue</th>
+                            <th>Impact</th>
+                            <th>Status</th>
+                            <th></th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        @foreach (var item in center.PriorityQueue)
+                        {
+                            <tr>
+                                <td>@(item.DisplayName ?? item.ResourceId)</td>
+                                <td>@PayrollDisplayFormatting.DateWithWeekdayShort(item.Date)</td>
+                                <td>@PayrollReviewCategories.DisplayName(item.Category)</td>
+                                <td class="small">
+                                    @item.IssueSummary
+                                    @if (item.CreateRequiredButGated)
+                                    {
+                                        <div class="text-warning">Nieuwe prestatie vereist — aanmaken momenteel niet actief</div>
+                                    }
+                                </td>
+                                <td>@(item.ImpactSummary ?? "—")</td>
+                                <td>@PayrollGuidedDecisions.AdminStatusLabel(item.Status)</td>
+                                <td>
+                                    @if (!center.IsReadOnly)
+                                    {
+                                        <a class="btn btn-sm btn-outline-primary" href="@PriorityHref(item)">Beoordelen</a>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </section>
+
+    <section class="card mb-4">
+        <div class="card-body table-responsive">
+            <h2 class="h5">Medewerkers</h2>
+            <table class="table table-sm align-middle mb-0">
+                <thead>
+                <tr>
+                    <th>Medewerker</th>
+                    <th>Actual</th>
+                    <th>Norm</th>
+                    <th>Diff</th>
+                    <th>OT 150</th>
+                    <th>Standby</th>
+                    <th>KM</th>
+                    <th>Stad</th>
+                    <th>Open</th>
+                    <th>Opvolging</th>
+                    <th>Pending acties</th>
+                    <th>Ready</th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var emp in center.Employees)
+                {
+                    <tr class="@(!emp.IsReady ? "table-warning" : null)">
+                        <td>@emp.DisplayName</td>
+                        <td>@Fmt(emp.ActualHours)</td>
+                        <td>@Fmt(emp.TheoreticalHours)</td>
+                        <td>@Fmt(emp.DifferenceHours)</td>
+                        <td>@Fmt(emp.Overtime150Units)</td>
+                        <td>@Fmt(emp.StandbyHours)</td>
+                        <td>@FmtMoney(emp.KmAmount)</td>
+                        <td>@FmtMoney(emp.CityAllowanceAmount)</td>
+                        <td>@emp.OpenCases</td>
+                        <td>@emp.FollowUpCases</td>
+                        <td>@emp.PendingActions</td>
+                        <td>@(emp.IsReady ? "YES" : "NO")</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    </section>
+}

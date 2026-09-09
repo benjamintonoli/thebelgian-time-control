@@ -8,6 +8,8 @@ namespace TheBelgian.TimeControl.Tests.Payroll;
 /// removing an earliest ordinary row can make a later travel (HfdTaak=5) row become
 /// daily min VAN, applying travel-begin (-ATL) and Extra15 (+0.25).
 /// Net side-effect beyond deleted ATL: -0.0833 h when travel ATL=0.3333.
+/// LiveDataAcceptance must classify this as SOURCE_CHANGED_SINCE_LIVE_MUTATION_TRAVEL_MIN,
+/// not UNEXPLAINED.
 /// </summary>
 public sealed class LegacyTravelMinSideEffectTests
 {
