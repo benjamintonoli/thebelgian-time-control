@@ -15,7 +15,9 @@ public static class PayrollGuidedDecisionCodes
     public const string P200Uncertain = "P200_UNCERTAIN";
 
     public const string P100Valid = "P100_VALID";
-    public const string P100DurationWrong = "P100_DURATION_WRONG";
+    public const string P100HoursWrong = "P100_HOURS_WRONG";
+    public const string P100PlanningMissing = "P100_PLANNING_MISSING";
+    public const string P100DurationWrong = "P100_DURATION_WRONG"; // legacy alias kept for older decisions
     public const string P100NotTraining = "P100_NOT_TRAINING";
     public const string P100Uncertain = "P100_UNCERTAIN";
 
@@ -70,9 +72,9 @@ public static class PayrollGuidedDecisions
         ],
         PayrollReviewCategory.Project100 =>
         [
-            Choice(PayrollGuidedDecisionCodes.P100Valid, "Correct", PayrollFindingStatus.Reviewed, requiresComment: false),
-            Choice(PayrollGuidedDecisionCodes.P100DurationWrong, "Duur fout", PayrollFindingStatus.NeedsFollowUp, requiresComment: true),
-            Choice(PayrollGuidedDecisionCodes.P100NotTraining, "Geen opleiding/toolbox", PayrollFindingStatus.NeedsFollowUp, requiresComment: true),
+            Choice(PayrollGuidedDecisionCodes.P100Valid, "Boeking is correct", PayrollFindingStatus.Reviewed, requiresComment: false),
+            Choice(PayrollGuidedDecisionCodes.P100HoursWrong, "Uren zijn fout", PayrollFindingStatus.NeedsFollowUp, requiresComment: false),
+            Choice(PayrollGuidedDecisionCodes.P100PlanningMissing, "Planning ontbreekt", PayrollFindingStatus.NeedsFollowUp, requiresComment: false),
             Choice(PayrollGuidedDecisionCodes.P100Uncertain, "Onzeker", PayrollFindingStatus.NeedsFollowUp, requiresComment: true),
         ],
         PayrollReviewCategory.Standby =>

@@ -15,6 +15,7 @@ public sealed class ActionConfirmModel(
     IPayrollActionService payrollActionService,
     IPayrollProject300WorkbenchService project300WorkbenchService,
     IPayrollProject200WorkbenchService project200WorkbenchService,
+    IPayrollProject100WorkbenchService project100WorkbenchService,
     IPayrollStandbyWorkbenchService standbyWorkbenchService,
     ICurrentUserContext currentUser,
     IOptions<PayrollShadowOptions> payrollOptions,
@@ -170,6 +171,25 @@ public sealed class ActionConfirmModel(
                     });
                 }
 
+                var isProject100 = IsProject100Action(confirmation);
+                if (isProject100)
+                {
+                    project100WorkbenchService.InvalidateQueueCache(
+                        confirmation?.Year ?? 0,
+                        confirmation?.Month ?? 0);
+                    var nextP100Focus = await ResolveNextProject100FocusAsync(
+                        confirmation?.Year,
+                        confirmation?.Month,
+                        cancellationToken);
+                    return RedirectToPage("./Project100Workbench", new
+                    {
+                        year = confirmation?.Year,
+                        month = confirmation?.Month,
+                        Scope = PayrollReviewQueueScope.Open,
+                        Focus = nextP100Focus,
+                    });
+                }
+
                 var isProject200 = IsProject200Action(confirmation);
                 if (isProject200)
                 {
@@ -248,9 +268,11 @@ public sealed class ActionConfirmModel(
             {
                 var workbenchPage = IsStandbyAction(confirmation)
                     ? "./StandbyWorkbench"
-                    : IsProject200Action(confirmation)
-                        ? "./Project200Workbench"
-                        : "./Workbench";
+                    : IsProject100Action(confirmation)
+                        ? "./Project100Workbench"
+                        : IsProject200Action(confirmation)
+                            ? "./Project200Workbench"
+                            : "./Workbench";
                 return RedirectToPage(workbenchPage, new
                 {
                     year = confirmation.Year,
@@ -330,6 +352,36 @@ public sealed class ActionConfirmModel(
         }
     }
 
+    private async Task<string?> ResolveNextProject100FocusAsync(
+        int? year,
+        int? month,
+        CancellationToken cancellationToken)
+    {
+        if (year is null or <= 0 || month is null or <= 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            var shell = await project100WorkbenchService.GetShellAsync(
+                year.Value,
+                month.Value,
+                new PayrollReviewQueueFilter(
+                    PayrollReviewCategory.Project100,
+                    Scope: PayrollReviewQueueScope.Open),
+                selectedAdminCaseKey: null,
+                cancellationToken);
+            return shell.SelectedKey
+                ?? (shell.Cases.Count > 0 ? shell.Cases[0].AdminCaseKey : null);
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Could not resolve next Project100 focus after action {ActionId}.", ActionId);
+            return null;
+        }
+    }
+
     private async Task<string?> ResolveNextStandbyFocusAsync(
         int? year,
         int? month,
@@ -380,6 +432,30 @@ public sealed class ActionConfirmModel(
             or PayrollFindingType.StandbyPossibleWrongDossier
             or PayrollFindingType.StandbyAmbiguousEvidence
             or PayrollFindingType.StandbyNoGpsData;
+    }
+
+    private static bool IsProject100Action(PayrollActionConfirmationView? confirmation)
+    {
+        if (confirmation is null)
+        {
+            return false;
+        }
+
+        var findingKey = confirmation.Evidence.FindingKey ?? string.Empty;
+        if (findingKey.StartsWith("p100-", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (confirmation.Evidence.FindingType is PayrollFindingType.Project100TrainingHours
+            or PayrollFindingType.Project100TrainingInOvertime
+            or PayrollFindingType.Project100ExceedsPlannedDuration)
+        {
+            return true;
+        }
+
+        var projectLabel = confirmation.DeleteProposal?.ProjectLabel;
+        return string.Equals(projectLabel, "100", StringComparison.Ordinal);
     }
 
     private static bool IsProject200Action(PayrollActionConfirmationView? confirmation)

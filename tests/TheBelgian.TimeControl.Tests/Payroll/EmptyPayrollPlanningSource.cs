@@ -11,4 +11,11 @@ internal sealed class EmptyPayrollPlanningSource : IPayrollPlanningSource
         IReadOnlyCollection<string> resourceIds,
         CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<PayrollPlanningReservation>>([]);
+
+    public Task<IReadOnlyList<PayrollPlanningReservation>> ReadSharedAttendeeReservationsAsync(
+        DateOnly fromDate,
+        DateOnly throughDate,
+        IReadOnlyCollection<string> resourceIds,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<PayrollPlanningReservation>>([]);
 }

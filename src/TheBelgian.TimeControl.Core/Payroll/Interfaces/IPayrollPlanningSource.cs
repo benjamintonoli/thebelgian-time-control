@@ -9,4 +9,14 @@ public interface IPayrollPlanningSource
         DateOnly throughDate,
         IReadOnlyCollection<string> resourceIds,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Same as <see cref="ReadWorkReservationsAsync"/> but emits all attendees on calendars
+    /// that include any of the filter resources (peer discovery for shared training sessions).
+    /// </summary>
+    Task<IReadOnlyList<PayrollPlanningReservation>> ReadSharedAttendeeReservationsAsync(
+        DateOnly fromDate,
+        DateOnly throughDate,
+        IReadOnlyCollection<string> resourceIds,
+        CancellationToken cancellationToken = default);
 }

@@ -318,7 +318,15 @@ public static class DependencyInjection
         services.AddSingleton<PayrollProject200BonMemoCache>();
         services.AddSingleton<PayrollProject200MonthContextCache>();
         services.AddSingleton<PayrollProject200HfdCache>();
-        services.AddScoped<IPayrollProject200WorkbenchService, PayrollProject200WorkbenchService>();
+                services.AddScoped<IPayrollProject200WorkbenchService, PayrollProject200WorkbenchService>();
+        services.AddSingleton<PayrollProject100GpsCache>();
+        services.AddSingleton<PayrollProject100GpsContextCache>();
+        services.AddSingleton<PayrollProject100DaySourceCache>();
+        services.AddSingleton<PayrollProject100QueueCache>();
+        services.AddSingleton<PayrollProject100BonMemoCache>();
+        services.AddSingleton<PayrollProject100MonthContextCache>();
+        services.AddSingleton<PayrollProject100HfdCache>();
+        services.AddScoped<IPayrollProject100WorkbenchService, PayrollProject100WorkbenchService>();
         services.AddSingleton<PayrollStandbyGpsDayCache>();
         services.AddSingleton<PayrollStandbyGpsContextCache>();
         services.AddSingleton<PayrollStandbyDaySourceCache>();

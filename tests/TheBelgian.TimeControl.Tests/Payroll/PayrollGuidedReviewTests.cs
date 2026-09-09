@@ -100,7 +100,9 @@ public sealed class PayrollGuidedReviewTests
     public void Project200_AndToolbox_ChoicesExist()
     {
         Assert.Contains(PayrollGuidedDecisions.ChoicesFor(PayrollReviewCategory.Project200), item => item.DecisionCode == PayrollGuidedDecisionCodes.P200Valid);
-        Assert.Contains(PayrollGuidedDecisions.ChoicesFor(PayrollReviewCategory.Project100), item => item.DecisionCode == PayrollGuidedDecisionCodes.P100DurationWrong);
+        Assert.Contains(PayrollGuidedDecisions.ChoicesFor(PayrollReviewCategory.Project100), item => item.DecisionCode == PayrollGuidedDecisionCodes.P100HoursWrong);
+        Assert.Contains(PayrollGuidedDecisions.ChoicesFor(PayrollReviewCategory.Project100), item => item.DecisionCode == PayrollGuidedDecisionCodes.P100Valid);
+        Assert.Contains(PayrollGuidedDecisions.ChoicesFor(PayrollReviewCategory.Project100), item => item.DecisionCode == PayrollGuidedDecisionCodes.P100PlanningMissing);
     }
 
     [Fact]

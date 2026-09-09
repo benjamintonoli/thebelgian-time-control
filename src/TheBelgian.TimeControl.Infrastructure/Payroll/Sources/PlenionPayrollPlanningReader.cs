@@ -44,6 +44,41 @@ public sealed class PlenionPayrollPlanningReader(
             return [];
         }
 
+        return await ReadReservationsCoreAsync(fromDate, throughDate, filter, includeSharedAttendees: false, cancellationToken);
+    }
+
+    public Task<IReadOnlyList<PayrollPlanningReservation>> ReadSharedAttendeeReservationsAsync(
+        DateOnly fromDate,
+        DateOnly throughDate,
+        IReadOnlyCollection<string> resourceIds,
+        CancellationToken cancellationToken = default)
+    {
+        OfflineOnlyGuard.EnsureLiveAccessAllowed("PlenionODBC");
+        if (string.IsNullOrWhiteSpace(_connectionString))
+        {
+            throw new InvalidOperationException("PlenionOdbc connection string ontbreekt.");
+        }
+
+        LastQueryCount = 0;
+        var filter = resourceIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id.Trim())
+            .ToHashSet(StringComparer.Ordinal);
+        if (filter.Count == 0)
+        {
+            return Task.FromResult<IReadOnlyList<PayrollPlanningReservation>>([]);
+        }
+
+        return ReadReservationsCoreAsync(fromDate, throughDate, filter, includeSharedAttendees: true, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<PayrollPlanningReservation>> ReadReservationsCoreAsync(
+        DateOnly fromDate,
+        DateOnly throughDate,
+        HashSet<string> filter,
+        bool includeSharedAttendees,
+        CancellationToken cancellationToken)
+    {
         await using var connection = new OdbcConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
@@ -97,14 +132,24 @@ public sealed class PlenionPayrollPlanningReader(
                 : Convert.ToInt32(reader["IDHFDTAAK"], CultureInfo.InvariantCulture);
             var classification = PayrollPlanningClassifier.Classify(calendarRow.TaskTypeId);
             typeNames.TryGetValue(calendarRow.TaskTypeId, out var typeName);
-
-            foreach (var resourceId in LegacyCalendarSynthesis.ExpandResources(calendarRow))
+            var attendees = LegacyCalendarSynthesis.ExpandResources(calendarRow);
+            if (attendees.Count == 0)
             {
-                if (!filter.Contains(resourceId))
-                {
-                    continue;
-                }
+                continue;
+            }
 
+            var touchesFilter = attendees.Any(filter.Contains);
+            if (!touchesFilter)
+            {
+                continue;
+            }
+
+            var emitResources = includeSharedAttendees
+                ? attendees
+                : attendees.Where(filter.Contains).ToArray();
+
+            foreach (var resourceId in emitResources)
+            {
                 foreach (var date in ExpandDates(calendarRow, fromDate, throughDate))
                 {
                     results.Add(new PayrollPlanningReservation(
@@ -125,11 +170,12 @@ public sealed class PlenionPayrollPlanningReader(
         }
 
         logger.LogInformation(
-            "Plenion planning source: {Count} reservation rows for findings ({From}..{Through}), queries={Queries}.",
+            "Plenion planning source: {Count} reservation rows for findings ({From}..{Through}), queries={Queries}, sharedAttendees={Shared}.",
             results.Count,
             fromDate,
             throughDate,
-            LastQueryCount);
+            LastQueryCount,
+            includeSharedAttendees);
 
         return results;
     }
