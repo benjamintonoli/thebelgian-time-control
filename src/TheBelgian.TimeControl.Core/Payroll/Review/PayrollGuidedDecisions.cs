@@ -19,9 +19,11 @@ public static class PayrollGuidedDecisionCodes
     public const string P100NotTraining = "P100_NOT_TRAINING";
     public const string P100Uncertain = "P100_UNCERTAIN";
 
+    public const string StandbyBookingCorrect = "STANDBY_BOOKING_CORRECT";
     public const string StandbyPhysicalOnly = "STANDBY_PHYSICAL_ONLY";
     public const string StandbyPhoneThenPhysical = "STANDBY_PHONE_THEN_PHYSICAL";
     public const string StandbyPhoneOnly = "STANDBY_PHONE_ONLY";
+    public const string StandbyHoursWrong = "STANDBY_HOURS_WRONG";
     public const string StandbyWrongDossier = "STANDBY_WRONG_DOSSIER";
     public const string StandbyUncertain = "STANDBY_UNCERTAIN";
 
@@ -75,10 +77,12 @@ public static class PayrollGuidedDecisions
         ],
         PayrollReviewCategory.Standby =>
         [
-            Choice(PayrollGuidedDecisionCodes.StandbyPhysicalOnly, "Enkel fysieke interventie", PayrollFindingStatus.Reviewed, requiresComment: false),
-            Choice(PayrollGuidedDecisionCodes.StandbyPhoneThenPhysical, "Telefoon + fysieke interventie", PayrollFindingStatus.NeedsFollowUp, requiresComment: false),
-            Choice(PayrollGuidedDecisionCodes.StandbyPhoneOnly, "Enkel telefonisch", PayrollFindingStatus.NeedsFollowUp, requiresComment: true),
-            Choice(PayrollGuidedDecisionCodes.StandbyWrongDossier, "Verkeerd dossier", PayrollFindingStatus.NeedsFollowUp, requiresComment: true),
+            Choice(PayrollGuidedDecisionCodes.StandbyBookingCorrect, "Boeking is correct", PayrollFindingStatus.Reviewed, requiresComment: false),
+            Choice(PayrollGuidedDecisionCodes.StandbyPhoneOnly, "Telefoon enkel", PayrollFindingStatus.NeedsFollowUp, requiresComment: false),
+            Choice(PayrollGuidedDecisionCodes.StandbyPhysicalOnly, "Fysieke interventie", PayrollFindingStatus.NeedsFollowUp, requiresComment: false),
+            Choice(PayrollGuidedDecisionCodes.StandbyPhoneThenPhysical, "Telefoon + interventie", PayrollFindingStatus.NeedsFollowUp, requiresComment: false),
+            Choice(PayrollGuidedDecisionCodes.StandbyHoursWrong, "Uren zijn fout", PayrollFindingStatus.NeedsFollowUp, requiresComment: false),
+            Choice(PayrollGuidedDecisionCodes.StandbyWrongDossier, "Dossier nakijken", PayrollFindingStatus.NeedsFollowUp, requiresComment: true),
             Choice(PayrollGuidedDecisionCodes.StandbyUncertain, "Onzeker", PayrollFindingStatus.NeedsFollowUp, requiresComment: true),
         ],
         PayrollReviewCategory.MissingPerformance =>

@@ -15,6 +15,7 @@ public sealed class ActionConfirmModel(
     IPayrollActionService payrollActionService,
     IPayrollProject300WorkbenchService project300WorkbenchService,
     IPayrollProject200WorkbenchService project200WorkbenchService,
+    IPayrollStandbyWorkbenchService standbyWorkbenchService,
     ICurrentUserContext currentUser,
     IOptions<PayrollShadowOptions> payrollOptions,
     IOptions<PayrollActionsOptions> actionsOptions,
@@ -151,6 +152,24 @@ public sealed class ActionConfirmModel(
             {
                 var confirmation = await payrollActionService.PrepareConfirmationAsync(ActionId, cancellationToken);
                 TempData["FlashSuccess"] = BuildSuccessMessage(confirmation);
+                if (IsStandbyAction(confirmation))
+                {
+                    standbyWorkbenchService.InvalidateQueueCache(
+                        confirmation?.Year ?? 0,
+                        confirmation?.Month ?? 0);
+                    var nextStandbyFocus = await ResolveNextStandbyFocusAsync(
+                        confirmation?.Year,
+                        confirmation?.Month,
+                        cancellationToken);
+                    return RedirectToPage("./StandbyWorkbench", new
+                    {
+                        year = confirmation?.Year,
+                        month = confirmation?.Month,
+                        Scope = PayrollReviewQueueScope.Open,
+                        Focus = nextStandbyFocus,
+                    });
+                }
+
                 var isProject200 = IsProject200Action(confirmation);
                 if (isProject200)
                 {
@@ -227,9 +246,11 @@ public sealed class ActionConfirmModel(
             await payrollActionService.CancelAsync(ActionId, RequireActor().AuditIdentity, cancellationToken);
             if (confirmation is not null)
             {
-                var workbenchPage = IsProject200Action(confirmation)
-                    ? "./Project200Workbench"
-                    : "./Workbench";
+                var workbenchPage = IsStandbyAction(confirmation)
+                    ? "./StandbyWorkbench"
+                    : IsProject200Action(confirmation)
+                        ? "./Project200Workbench"
+                        : "./Workbench";
                 return RedirectToPage(workbenchPage, new
                 {
                     year = confirmation.Year,
@@ -309,6 +330,58 @@ public sealed class ActionConfirmModel(
         }
     }
 
+    private async Task<string?> ResolveNextStandbyFocusAsync(
+        int? year,
+        int? month,
+        CancellationToken cancellationToken)
+    {
+        if (year is null or <= 0 || month is null or <= 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            var shell = await standbyWorkbenchService.GetShellAsync(
+                year.Value,
+                month.Value,
+                new PayrollReviewQueueFilter(
+                    PayrollReviewCategory.Standby,
+                    Scope: PayrollReviewQueueScope.Open),
+                selectedAdminCaseKey: null,
+                cancellationToken);
+            return shell.SelectedKey
+                ?? (shell.Cases.Count > 0 ? shell.Cases[0].AdminCaseKey : null);
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Could not resolve next Standby focus after action {ActionId}.", ActionId);
+            return null;
+        }
+    }
+
+    private static bool IsStandbyAction(PayrollActionConfirmationView? confirmation)
+    {
+        if (confirmation is null)
+        {
+            return false;
+        }
+
+        var findingKey = confirmation.Evidence.FindingKey ?? string.Empty;
+        if (findingKey.StartsWith("standby-", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return confirmation.Evidence.FindingType is PayrollFindingType.StandbyStartMismatch
+            or PayrollFindingType.StandbyEndMismatch
+            or PayrollFindingType.StandbyDurationMismatch
+            or PayrollFindingType.StandbyPhoneExceeds15Min
+            or PayrollFindingType.StandbyPossibleWrongDossier
+            or PayrollFindingType.StandbyAmbiguousEvidence
+            or PayrollFindingType.StandbyNoGpsData;
+    }
+
     private static bool IsProject200Action(PayrollActionConfirmationView? confirmation)
     {
         if (confirmation is null)
@@ -352,6 +425,12 @@ public sealed class ActionConfirmModel(
         if (create is not null)
         {
             return $"Prestatie {create.Start:HH:mm}–{create.End:HH:mm} is aangemaakt in Plenion.";
+        }
+
+        var adjust = confirmation?.AdjustProposal;
+        if (adjust is not null)
+        {
+            return $"Prestatie #{adjust.PerformanceId} aangepast naar {adjust.ProposedStart:HH:mm}–{adjust.ProposedEnd:HH:mm}.";
         }
 
         return "Actie uitgevoerd.";

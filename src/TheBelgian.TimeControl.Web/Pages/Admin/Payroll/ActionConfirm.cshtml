@@ -6,6 +6,7 @@
     var view = Model.View;
     var isDelete = view?.ActionType == PayrollProposedActionType.DeleteExistingPerformance;
     var isCreate = view?.ActionType == PayrollProposedActionType.CreateMissingPerformance;
+    var isAdjust = view?.ActionType == PayrollProposedActionType.AdjustExistingPerformanceTime;
     var canEditCreate = isCreate
         && view is not null
         && view.Status is not PayrollProposedActionStatus.Applied
@@ -47,6 +48,14 @@ else
         <h1 class="h4 mb-3">Prestatie aanmaken in Plenion</h1>
         <div class="alert alert-warning">
             <strong>Er wordt een nieuwe urenprestatie in Plenion aangemaakt.</strong>
+            Geen automatische uitvoering — expliciete goedkeuring is verplicht.
+        </div>
+    }
+    else if (isAdjust)
+    {
+        <h1 class="h4 mb-3">Prestatie aanpassen in Plenion</h1>
+        <div class="alert alert-warning">
+            <strong>De VAN/TOT van een bestaande urenprestatie wordt in Plenion aangepast.</strong>
             Geen automatische uitvoering — expliciete goedkeuring is verplicht.
         </div>
     }
@@ -153,12 +162,18 @@ else
                 }
                 else if (view.AdjustProposal is not null)
                 {
+                    var currentMinutes = (view.AdjustProposal.CurrentEnd - view.AdjustProposal.CurrentStart).TotalMinutes;
+                    var proposedMinutes = (view.AdjustProposal.ProposedEnd - view.AdjustProposal.ProposedStart).TotalMinutes;
+                    var deltaMinutes = proposedMinutes - currentMinutes;
                     <p class="mb-1"><strong>Tijdscorrectie bestaande prestatie</strong></p>
-                    <p class="mb-1 small">Datum: @PayrollDisplayFormatting.DateWithWeekday(view.AdjustProposal.CurrentStart)</p>
-                    <p class="mb-0 small">
-                        Start: @view.AdjustProposal.CurrentStart.ToString("HH:mm") → @view.AdjustProposal.ProposedStart.ToString("HH:mm")<br />
-                        Einde: @view.AdjustProposal.CurrentEnd.ToString("HH:mm") → @view.AdjustProposal.ProposedEnd.ToString("HH:mm")
-                    </p>
+                    <ul class="small mb-0">
+                        <li>Datum: @PayrollDisplayFormatting.DateWithWeekday(view.AdjustProposal.CurrentStart)</li>
+                        <li>Prestatie #@view.AdjustProposal.PerformanceId</li>
+                        <li>Activiteit: @(view.AdjustProposal.ExpectedActivityType ?? "—")@(view.AdjustProposal.ExpectedMainTaskExternalId is long hfd ? $" · IDHFDTAAK {hfd}" : "")</li>
+                        <li>Huidige uren: @view.AdjustProposal.CurrentStart.ToString("HH:mm")–@view.AdjustProposal.CurrentEnd.ToString("HH:mm")</li>
+                        <li>Nieuwe uren: @view.AdjustProposal.ProposedStart.ToString("HH:mm")–@view.AdjustProposal.ProposedEnd.ToString("HH:mm")</li>
+                        <li>Verschil: @(deltaMinutes >= 0 ? "+" : "")@deltaMinutes.ToString("0") min</li>
+                    </ul>
                 }
                 else
                 {
@@ -229,6 +244,17 @@ else
                         disabled="@(!view.CanExecute)"
                         data-confirm="Er wordt een nieuwe urenprestatie in Plenion aangemaakt. Doorgaan?">
                     Definitief aanmaken
+                </button>
+            }
+            else if (isAdjust)
+            {
+                <button type="submit"
+                        asp-page-handler="Execute"
+                        asp-route-ActionId="@Model.ActionId"
+                        class="btn btn-primary"
+                        disabled="@(!view.CanExecute)"
+                        data-confirm="De VAN/TOT van deze prestatie wordt in Plenion aangepast. Doorgaan?">
+                    Definitief aanpassen
                 </button>
             }
             else

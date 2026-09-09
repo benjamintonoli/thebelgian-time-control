@@ -288,6 +288,7 @@ public sealed class PayrollDeleteBrowserFlowTests
             actions,
             workbench ?? new FakeWorkbench(),
             project200 ?? new FakeWorkbench200(),
+            new FakeWorkbenchStandby(),
             new FakeUser(),
             Options.Create(new PayrollShadowOptions { Enabled = true, AdminUiEnabled = true }),
             Options.Create(new PayrollActionsOptions
@@ -581,6 +582,50 @@ public sealed class PayrollDeleteBrowserFlowTests
             PayrollProject200GpsCacheHint.Unknown;
 
         public void InvalidateQueueCache(int year, int month) => InvalidateCalled = true;
+    }
+
+    private sealed class FakeWorkbenchStandby : IPayrollStandbyWorkbenchService
+    {
+        public Task<PayrollStandbyWorkbenchPage> GetWorkbenchAsync(
+            int year, int month, PayrollReviewQueueFilter filter, string? selectedAdminCaseKey, CancellationToken cancellationToken) =>
+            GetShellAsync(year, month, filter, selectedAdminCaseKey, cancellationToken);
+
+        public Task<PayrollStandbyWorkbenchPage> GetShellAsync(
+            int year, int month, PayrollReviewQueueFilter filter, string? selectedAdminCaseKey, CancellationToken cancellationToken)
+        {
+            var emptyCategories = new Dictionary<PayrollReviewCategory, int>();
+            return Task.FromResult(new PayrollStandbyWorkbenchPage(
+                year,
+                month,
+                new PayrollAdminQueueSummary(0, 0, 0, 0, 0, 0, 0, emptyCategories, emptyCategories, emptyCategories, emptyCategories, emptyCategories),
+                [],
+                null,
+                null,
+                new PayrollStandbyWorkbenchMetrics(0, 0, 0, GpsDeferred: true)));
+        }
+
+        public Task<PayrollStandbyWorkbenchPage> GetCoreDetailAsync(
+            int year, int month, PayrollReviewQueueFilter filter, string? selectedAdminCaseKey, CancellationToken cancellationToken) =>
+            GetShellAsync(year, month, filter, selectedAdminCaseKey, cancellationToken);
+
+        public Task<PayrollStandbyGpsLoadResult> GetGpsContextAsync(
+            int year, int month, string adminCaseKey, bool prefetchNext = true, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<PayrollStandbyProposeCorrectionResult> ProposeTimeCorrectionAsync(
+            int year, int month, string adminCaseKey, long performanceId, TimeOnly newStart, TimeOnly newEnd, string reason, string actor, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<PayrollStandbyProposeCorrectionResult> ProposeDeletePerformanceAsync(
+            int year, int month, string adminCaseKey, long performanceId, string reason, string actor, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public PayrollStandbyGpsCacheHint GetGpsCacheHint(string resourceId, DateOnly workDate) =>
+            PayrollStandbyGpsCacheHint.Unknown;
+
+        public void InvalidateQueueCache(int year, int month)
+        {
+        }
     }
 
     private sealed class FakeUser : ICurrentUserContext

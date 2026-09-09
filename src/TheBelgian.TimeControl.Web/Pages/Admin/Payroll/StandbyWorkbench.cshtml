@@ -1,13 +1,13 @@
-@page "/Admin/Payroll/{year:int}/{month:int}/Workbench/Project200"
-@model TheBelgian.TimeControl.Web.Pages.Admin.Payroll.Project200WorkbenchModel
+@page "/Admin/Payroll/{year:int}/{month:int}/Workbench/Standby"
+@model TheBelgian.TimeControl.Web.Pages.Admin.Payroll.StandbyWorkbenchModel
 @using System.Globalization
 @using TheBelgian.TimeControl.Core.Payroll.Findings
 @using TheBelgian.TimeControl.Core.Payroll.Review
 @{
-    ViewData["Title"] = $"300 workbench {Model.Month:00}/{Model.Year}";
+    ViewData["Title"] = $"Wachtdienst workbench {Model.Month:00}/{Model.Year}";
     var wb = Model.Workbench;
     string ScopeHref(PayrollReviewQueueScope scope) =>
-        Url.Page("./Workbench", new
+        Url.Page("./StandbyWorkbench", new
         {
             year = Model.Year,
             month = Model.Month,
@@ -21,17 +21,17 @@
 
 <div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
     <div>
-        <div class="text-uppercase small text-muted fw-semibold">Payroll · Project 200</div>
+        <div class="text-uppercase small text-muted fw-semibold">Payroll · Wachtdienst</div>
         <h1 class="h3 mb-1">Review workbench @Model.Month.ToString("00")/@Model.Year</h1>
-        <p class="text-muted mb-0">Queue links · context rechts · GPS async. GPS valideert 300 nooit automatisch.</p>
+        <p class="text-muted mb-0">Queue links · context rechts · GPS async. GPS is context voor wachtdienst; menselijke goedkeuring blijft verplicht.</p>
     </div>
     <div class="d-flex flex-wrap gap-2">
-        <a class="btn btn-sm btn-dark" asp-page="./Workbench" asp-route-year="@Model.Year" asp-route-month="@Model.Month">Werkblad</a>
+        <a class="btn btn-sm btn-dark" asp-page="./StandbyWorkbench" asp-route-year="@Model.Year" asp-route-month="@Model.Month">Wachtdienst</a>
         <a class="btn btn-sm btn-outline-secondary"
            asp-page="./Queue"
            asp-route-year="@Model.Year"
            asp-route-month="@Model.Month"
-           asp-route-Category="Project200"
+           asp-route-Category="Standby"
            asp-route-ListMode="true">Lijst</a>
         <a class="btn btn-sm btn-outline-secondary" asp-page="./Queue" asp-route-year="@Model.Year" asp-route-month="@Model.Month">← Categorieën</a>
     </div>
@@ -48,8 +48,8 @@ else
 {
     <div class="d-flex flex-wrap gap-2 mb-2 small">
         <span>Cases <strong>@wb.Cases.Count</strong></span>
-        <span class="text-muted">· Open @wb.AdminSummary.UnresolvedAdminByCategory.GetValueOrDefault(PayrollReviewCategory.Project200)</span>
-        <span class="text-muted">· Opvolging @wb.AdminSummary.FollowUpAdminByCategory.GetValueOrDefault(PayrollReviewCategory.Project200)</span>
+        <span class="text-muted">· Open @wb.AdminSummary.UnresolvedAdminByCategory.GetValueOrDefault(PayrollReviewCategory.Standby)</span>
+        <span class="text-muted">· Opvolging @wb.AdminSummary.FollowUpAdminByCategory.GetValueOrDefault(PayrollReviewCategory.Standby)</span>
     </div>
 
     <div class="btn-group btn-group-sm mb-3" role="group">
@@ -81,11 +81,11 @@ else
 
     <form id="wb-af" class="d-none">@Html.AntiForgeryToken()</form>
 
-    <div class="timecontrol-cockpit payroll-p200-workbench">
-        <aside class="review-queue review-queue-sticky" aria-label="Project 200 queue">
-            <div class="queue-title"><strong>300 queue</strong><span>@wb.Cases.Count</span></div>
+    <div class="timecontrol-cockpit payroll-standby-workbench">
+        <aside class="review-queue review-queue-sticky" aria-label="Wachtdienst queue">
+            <div class="queue-title"><strong>Wachtdienst queue</strong><span>@wb.Cases.Count</span></div>
             <div class="queue-report-form">
-                <div class="queue-items" id="p200-queue-items">
+                <div class="queue-items" id="standby-queue-items">
                     @foreach (var item in wb.Cases)
                     {
                         var active = string.Equals(wb.SelectedKey, item.AdminCaseKey, StringComparison.Ordinal) ? "active" : null;
@@ -113,9 +113,9 @@ else
                                         var hint = Model.GpsHints.GetValueOrDefault(item.AdminCaseKey);
                                         var hintText = hint switch
                                         {
-                                            PayrollProject200GpsCacheHint.Available => "GPS✓",
-                                            PayrollProject200GpsCacheHint.Unavailable => "GPS–",
-                                            PayrollProject200GpsCacheHint.Cached => "GPS✓",
+                                            PayrollStandbyGpsCacheHint.Available => "GPS✓",
+                                            PayrollStandbyGpsCacheHint.Unavailable => "GPS–",
+                                            PayrollStandbyGpsCacheHint.Cached => "GPS✓",
                                             _ => "",
                                         };
                                     }
@@ -136,8 +136,8 @@ else
             </div>
         </aside>
 
-        <main class="case-detail position-relative" id="p200-case-detail">
-            <div class="empty-detail p-4" id="p200-detail-placeholder">
+        <main class="case-detail position-relative" id="standby-case-detail">
+            <div class="empty-detail p-4" id="standby-detail-placeholder">
                 <h2 class="h5">Context laden…</h2>
                 <p class="text-muted mb-0">Maandcontext en geselecteerde case worden geladen.</p>
             </div>
@@ -147,8 +147,8 @@ else
 
 @section Scripts {
 <style>
-.payroll-p200-workbench { min-height: 720px; }
-.payroll-p200-workbench .review-queue { width: auto; }
+.payroll-standby-workbench { min-height: 720px; }
+.payroll-standby-workbench .review-queue { width: auto; }
 .p200-sticky-decisions {
   position: sticky;
   bottom: 0;
@@ -195,19 +195,19 @@ else
   color: #fff;
 }
 @@media (min-width: 992px) {
-  .payroll-p200-workbench { grid-template-columns: minmax(260px, 32%) minmax(0, 68%); }
+  .payroll-standby-workbench { grid-template-columns: minmax(260px, 32%) minmax(0, 68%); }
 }
 </style>
 <script>
 (function () {
   const token = document.querySelector('#wb-af input[name="__RequestVerificationToken"]')?.value;
-  const decideUrl = '@Url.Page("./Workbench", new { year = Model.Year, month = Model.Month, handler = "Decide" })';
-  const corrUrl = '@Url.Page("./Workbench", new { year = Model.Year, month = Model.Month, handler = "ProposeCorrection" })';
-  const deleteUrl = '@Url.Page("./Workbench", new { year = Model.Year, month = Model.Month, handler = "ProposeDelete" })';
+  const decideUrl = '@Url.Page("./StandbyWorkbench", new { year = Model.Year, month = Model.Month, handler = "Decide" })';
+  const corrUrl = '@Url.Page("./StandbyWorkbench", new { year = Model.Year, month = Model.Month, handler = "ProposeCorrection" })';
+  const deleteUrl = '@Url.Page("./StandbyWorkbench", new { year = Model.Year, month = Model.Month, handler = "ProposeDelete" })';
   const confirmBase = '@Url.Page("./ActionConfirm")';
-  const detailUrl = '@Url.Page("./Workbench", new { year = Model.Year, month = Model.Month, handler = "Detail", Scope = Model.Scope, Search = Model.Search, Sort = Model.Sort })';
-  const gpsBase = '@Url.Page("./Workbench", new { year = Model.Year, month = Model.Month, handler = "Gps" })';
-  const detailHost = document.getElementById('p200-case-detail');
+  const detailUrl = '@Url.Page("./StandbyWorkbench", new { year = Model.Year, month = Model.Month, handler = "Detail", Scope = Model.Scope, Search = Model.Search, Sort = Model.Sort })';
+  const gpsBase = '@Url.Page("./StandbyWorkbench", new { year = Model.Year, month = Model.Month, handler = "Gps" })';
+  const detailHost = document.getElementById('standby-case-detail');
   let currentKey = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(initialFocus));
   let loadSeq = 0;
 
@@ -245,7 +245,7 @@ else
         const requiresComment = btn.dataset.requiresComment === 'true';
         let comment = document.getElementById('wb-comment')?.value?.trim() || '';
         // Uren zijn fout: open inline actiekeuze — no native browser prompt.
-        if (decisionCode === '@PayrollGuidedDecisionCodes.P200HoursReview') {
+        if (decisionCode === '@PayrollGuidedDecisionCodes.StandbyHoursWrong') {
           document.getElementById('correction-panel')?.classList.remove('d-none');
           document.getElementById('adjust-panel')?.classList.add('d-none');
           document.getElementById('delete-panel')?.classList.add('d-none');
@@ -425,3 +425,4 @@ else
 })();
 </script>
 }
+

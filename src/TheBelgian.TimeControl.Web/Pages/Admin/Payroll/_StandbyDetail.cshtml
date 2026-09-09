@@ -1,4 +1,4 @@
-@model TheBelgian.TimeControl.Web.Pages.Admin.Payroll.Project200WorkbenchModel
+@model TheBelgian.TimeControl.Web.Pages.Admin.Payroll.StandbyWorkbenchModel
 @using System.Globalization
 @using TheBelgian.TimeControl.Core.Payroll.Review
 @{
@@ -27,7 +27,7 @@
 }
 else
 {
-    <div class="p200-detail-body" data-admin-case-key="@selected.AdminCaseKey" data-has-supported="@(detail.HasSupportedTimeCorrection ? "true" : "false")">
+    <div class="standby-detail-body" data-admin-case-key="@selected.AdminCaseKey" data-has-supported="@(detail.HasSupportedTimeCorrection ? "true" : "false")">
         <div class="d-flex justify-content-between flex-wrap gap-2 mb-3">
             <div>
                 <h2 class="h4 mb-1">@(selected.DisplayName ?? selected.ResourceId)</h2>
@@ -37,7 +37,7 @@ else
         </div>
 
         <section class="mb-4">
-            <div class="display-6 fs-3 fw-semibold mb-1">PROJECT 200</div>
+            <div class="display-6 fs-3 fw-semibold mb-1">WACHTDIENSTBOEKING</div>
             @{
                 var cmp = detail.PlanningComparison;
             }
@@ -66,7 +66,7 @@ else
             @if (detail.BookedRows.Count == 1)
             {
                 var row = detail.BookedRows[0];
-                @if (PayrollProject200WorkbenchBuilder.IsMeaningfulBonNr(row.BonNr))
+                @if (PayrollStandbyWorkbenchBuilder.IsMeaningfulBonNr(row.BonNr))
                 {
                     <div class="small text-muted mt-1">BON @row.BonNr</div>
                 }
@@ -112,7 +112,7 @@ else
             }
             @if (tech is null || !tech.HasAnyTechnicianText)
             {
-                <div class="text-muted">@PayrollProject200CaseDetail.NoTechnicianRemarkMessage</div>
+                <div class="text-muted">@PayrollStandbyCaseDetail.NoTechnicianRemarkMessage</div>
             }
             else
             {
@@ -171,18 +171,18 @@ else
                 {
                     <div class="text-uppercase small text-muted fw-semibold mb-1">Voor</div>
                     ViewData["ListId"] = "p200-before";
-                    <partial name="_Project200Timeline" model="focused.Before" />
+                    <partial name="_StandbyTimeline" model="focused.Before" />
                 }
 
                 <div class="text-uppercase small text-muted fw-semibold mb-1 mt-3">300</div>
                 ViewData["ListId"] = "p200-booking";
-                <partial name="_Project200Timeline" model="focused.Booking" />
+                <partial name="_StandbyTimeline" model="focused.Booking" />
 
                 if (focused.After.Count > 0)
                 {
                     <div class="text-uppercase small text-muted fw-semibold mb-1 mt-3">Daarna</div>
                     ViewData["ListId"] = "p200-after";
-                    <partial name="_Project200Timeline" model="focused.After" />
+                    <partial name="_StandbyTimeline" model="focused.After" />
                 }
             }
 
@@ -194,12 +194,12 @@ else
                         @{
                             ViewData["ListId"] = "p200-full-day";
                         }
-                        <partial name="_Project200Timeline" model="focused.FullDay" />
+                        <partial name="_StandbyTimeline" model="focused.FullDay" />
                     </div>
                 </details>
             }
 
-            <p class="small text-muted mt-2 mb-0">@PayrollProject200CaseDetail.GpsNeverValidatesNote</p>
+            <p class="small text-muted mt-2 mb-0">@PayrollStandbyCaseDetail.GpsNeverValidatesNote</p>
         </section>
 
         <section class="mb-3 d-none" id="correction-panel">
@@ -213,7 +213,7 @@ else
 
             <div class="d-none" id="adjust-panel">
                 <div class="text-uppercase small text-muted fw-semibold mb-2">Tijd aanpassen</div>
-                @foreach (var target in detail.CorrectionTargets.Where(item => item.CorrectionCapability == PayrollProject200CorrectionCapability.SupportedVanTot))
+                @foreach (var target in detail.CorrectionTargets.Where(item => item.CorrectionCapability == PayrollStandbyCorrectionCapability.SupportedVanTot))
                 {
                     var suggestStart = target.SuggestedAdjustStart?.ToString("HH:mm") ?? FmtTime(target.CurrentStart);
                     var suggestEnd = target.SuggestedAdjustEnd?.ToString("HH:mm") ?? FmtTime(target.CurrentEnd);
@@ -238,15 +238,15 @@ else
                         </div>
                     </div>
                 }
-                @if (!detail.CorrectionTargets.Any(item => item.CorrectionCapability == PayrollProject200CorrectionCapability.SupportedVanTot))
+                @if (!detail.CorrectionTargets.Any(item => item.CorrectionCapability == PayrollStandbyCorrectionCapability.SupportedVanTot))
                 {
-                    <div class="alert alert-secondary small mb-0">@PayrollProject200WorkbenchBuilder.UnsupportedActivityMessage</div>
+                    <div class="alert alert-secondary small mb-0">@PayrollStandbyWorkbenchBuilder.UnsupportedActivityMessage</div>
                 }
             </div>
 
             @{
                 var deleteTargets = detail.CorrectionTargets
-                    .Where(item => item.CorrectionCapability == PayrollProject200CorrectionCapability.SupportedDelete)
+                    .Where(item => item.CorrectionCapability == PayrollStandbyCorrectionCapability.SupportedDelete)
                     .ToList();
                 var multiDelete = deleteTargets.Count > 1;
             }
@@ -267,7 +267,7 @@ else
                     var delRemark = detail.TechnicianContext?.PerformanceRemarks.FirstOrDefault(item => item.PerformanceId == target.PerformanceId);
                     <div class="border rounded border-danger-subtle p-2 mb-2 delete-target" data-performance-id="@target.PerformanceId">
                         <div class="small fw-semibold">@FmtTime(target.CurrentStart)–@FmtTime(target.CurrentEnd) · @FmtHours(target.AtlHours)</div>
-                        <div class="small text-muted">BON @(booked?.BonNr ?? "—") · @(booked?.ProjectDisplayLabel ?? "Project 200") · #@target.PerformanceId</div>
+                        <div class="small text-muted">BON @(booked?.BonNr ?? "—") · @(booked?.ProjectDisplayLabel ?? "Wachtdienst") · #@target.PerformanceId</div>
                         @if (!string.IsNullOrWhiteSpace(delRemark?.PrestOmschr) || !string.IsNullOrWhiteSpace(booked?.Description))
                         {
                             <div class="small">Technieker: @(delRemark?.PrestOmschr ?? booked?.Description)</div>

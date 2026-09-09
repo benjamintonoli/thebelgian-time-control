@@ -176,17 +176,21 @@ else
 
             <div class="d-none" id="adjust-panel">
                 <div class="text-uppercase small text-muted fw-semibold mb-2">Tijd aanpassen</div>
-                <p class="small">Admin-ingegeven VAN/TOT → voorstel. Uitvoering blijft apart bevestigd.</p>
                 @foreach (var target in detail.CorrectionTargets.Where(item => item.CorrectionCapability == PayrollProject300CorrectionCapability.SupportedVanTot))
                 {
+                    var booked = detail.BookedRows.FirstOrDefault(item => item.PerformanceId == target.PerformanceId);
                     <div class="border rounded p-2 mb-2 correction-target" data-performance-id="@target.PerformanceId">
-                        <div class="small">@FmtTime(target.CurrentStart)–@FmtTime(target.CurrentEnd) · @FmtHours(target.AtlHours)</div>
-                        <div class="small text-muted mb-2">@target.CapabilityMessage</div>
+                        <div class="text-uppercase small text-muted fw-semibold mb-1">Huidige prestatie</div>
+                        <div class="small fw-semibold">@(selected.DisplayName ?? selected.ResourceId)</div>
+                        <div class="small mb-1">@PayrollDisplayFormatting.DateWithWeekday(selected.Date)</div>
+                        <div class="small mb-1">@FmtTime(target.CurrentStart)–@FmtTime(target.CurrentEnd) · @FmtHours(target.AtlHours)</div>
+                        <div class="small text-muted mb-2">Project 300 · BON @(booked?.BonNr ?? "—") · #@target.PerformanceId</div>
+                        <div class="text-uppercase small text-muted fw-semibold mb-1">Nieuwe uren</div>
                         <div class="row g-2 align-items-end">
-                            <div class="col-auto"><label class="form-label small mb-0">Start</label><input class="form-control form-control-sm corr-start" type="time" value="@FmtTime(target.CurrentStart)" /></div>
-                            <div class="col-auto"><label class="form-label small mb-0">Einde</label><input class="form-control form-control-sm corr-end" type="time" value="@FmtTime(target.CurrentEnd)" /></div>
+                            <div class="col-auto"><label class="form-label small mb-0">Van</label><input class="form-control form-control-sm corr-start" type="time" value="@FmtTime(target.CurrentStart)" /></div>
+                            <div class="col-auto"><label class="form-label small mb-0">Tot</label><input class="form-control form-control-sm corr-end" type="time" value="@FmtTime(target.CurrentEnd)" /></div>
                             <div class="col-md-4"><label class="form-label small mb-0">Reden</label><input class="form-control form-control-sm corr-reason" placeholder="Verplicht" /></div>
-                            <div class="col-auto"><button type="button" class="btn btn-sm btn-warning wb-propose-corr">Voorstel controleren</button></div>
+                            <div class="col-auto"><button type="button" class="btn btn-sm btn-warning wb-propose-corr">Aanpassing controleren</button></div>
                         </div>
                     </div>
                 }

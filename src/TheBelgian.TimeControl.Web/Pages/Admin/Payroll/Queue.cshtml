@@ -122,6 +122,13 @@ else
                                    asp-route-year="@Model.Year"
                                    asp-route-month="@Model.Month">Werkblad</a>
                             }
+                            else if (cat == PayrollReviewCategory.Standby && open + follow > 0)
+                            {
+                                <a class="btn btn-sm btn-primary"
+                                   asp-page="./StandbyWorkbench"
+                                   asp-route-year="@Model.Year"
+                                   asp-route-month="@Model.Month">Werkblad</a>
+                            }
                             else if (open + follow > 0)
                             {
                                 <a class="btn btn-sm btn-primary" href="@GuidedHref(cat)">Start controle</a>
