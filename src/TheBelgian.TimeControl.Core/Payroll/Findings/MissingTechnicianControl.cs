@@ -369,7 +369,8 @@ public static class MissingTechnicianControl
             group,
             missingResourceId,
             peers,
-            materialConflict ?? planningWindowConflict,
+            materialConflict,
+            planningWindowConflict,
             gps,
             peerGps,
             gpsState,
@@ -403,9 +404,6 @@ public static class MissingTechnicianControl
 
         var related = peers.Select(item => item.SourceEntryId)
             .Concat(materialConflict is null ? [] : new[] { materialConflict.SourceEntryId })
-            .Concat(planningWindowConflict is null || materialConflict?.SourceEntryId == planningWindowConflict.SourceEntryId
-                ? []
-                : new[] { planningWindowConflict.SourceEntryId })
             .Distinct()
             .OrderBy(id => id)
             .ToArray();
@@ -710,7 +708,8 @@ public static class MissingTechnicianControl
         PlannedWorkGroup group,
         string missingResourceId,
         List<NormalizedPerformanceEntry> peers,
-        NormalizedPerformanceEntry? conflicting,
+        NormalizedPerformanceEntry? materialConflict,
+        NormalizedPerformanceEntry? planningWindowConflict,
         StandbyGpsDayEvidence? gps,
         StandbyGpsDayEvidence? peerGps,
         GpsSupportState gpsState,
@@ -774,10 +773,15 @@ public static class MissingTechnicianControl
 
         sb.Append(CultureInfo.InvariantCulture,
             $"peers=[{string.Join(',', peers.Select(p => $"{p.ResourceId}#{p.SourceEntryId}:{FormatPerfInterval(p)}"))}]; ");
-        if (conflicting is not null)
+        if (materialConflict is not null)
         {
             sb.Append(CultureInfo.InvariantCulture,
-                $"conflict=#{conflicting.SourceEntryId}:{FormatPerfInterval(conflicting)} proj={conflicting.ProjectId ?? "—"}; ");
+                $"conflict=#{materialConflict.SourceEntryId}:{FormatPerfInterval(materialConflict)} proj={materialConflict.ProjectId ?? "—"}; ");
+        }
+        else if (planningWindowConflict is not null)
+        {
+            sb.Append(CultureInfo.InvariantCulture,
+                $"planningWindowConflict=#{planningWindowConflict.SourceEntryId}:{FormatPerfInterval(planningWindowConflict)} proj={planningWindowConflict.ProjectId ?? "—"} (nonMaterialVsProposed); ");
         }
 
         if (gps is null)

@@ -158,6 +158,9 @@ public sealed class MissingTechnicianSiteConflictV2Tests
         Assert.Equal(PayrollFindingSeverity.High, finding.Severity);
         Assert.DoesNotContain("conflictClass=TimeConflictOnly", finding.Evidence, StringComparison.Ordinal);
         Assert.Contains("conflictClass=None", finding.Evidence, StringComparison.Ordinal);
+        Assert.Contains("planningWindowConflict=#281602:", finding.Evidence, StringComparison.Ordinal);
+        Assert.Contains("nonMaterialVsProposed", finding.Evidence, StringComparison.Ordinal);
+        Assert.DoesNotContain("conflict=#281602:", finding.Evidence, StringComparison.Ordinal);
     }
 
     [Fact]
