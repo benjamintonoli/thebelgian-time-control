@@ -24,7 +24,7 @@ public static class PayrollFindingsEngine
         IReadOnlySet<string>? includedResourceIds = null)
     {
         var special = SpecialProjectTimeControl.Evaluate(performances, planning, legacyDifferenceByResource);
-        var overlaps = OverlapControl.Evaluate(performances);
+        var overlaps = OverlapControl.Evaluate(performances, standbyGps);
         var standby = StandbyControl.Evaluate(performances, planning, standbyGps ?? []);
         var included = includedResourceIds
             ?? performances.Select(item => item.ResourceId)

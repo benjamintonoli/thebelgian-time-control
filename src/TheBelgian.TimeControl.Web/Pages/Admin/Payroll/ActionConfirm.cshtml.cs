@@ -17,6 +17,7 @@ public sealed class ActionConfirmModel(
     IPayrollProject200WorkbenchService project200WorkbenchService,
     IPayrollProject100WorkbenchService project100WorkbenchService,
     IPayrollStandbyWorkbenchService standbyWorkbenchService,
+    IPayrollIntelligenceWorkbenchService intelligenceWorkbenchService,
     ICurrentUserContext currentUser,
     IOptions<PayrollShadowOptions> payrollOptions,
     IOptions<PayrollActionsOptions> actionsOptions,
@@ -171,6 +172,44 @@ public sealed class ActionConfirmModel(
                     });
                 }
 
+                if (IsOverlapAction(confirmation))
+                {
+                    intelligenceWorkbenchService.InvalidateQueueCache(
+                        confirmation?.Year ?? 0,
+                        confirmation?.Month ?? 0);
+                    var nextOverlapFocus = await ResolveNextIntelligenceFocusAsync(
+                        confirmation?.Year,
+                        confirmation?.Month,
+                        PayrollReviewCategory.Overlap,
+                        cancellationToken);
+                    return RedirectToPage("./OverlapWorkbench", new
+                    {
+                        year = confirmation?.Year,
+                        month = confirmation?.Month,
+                        Scope = PayrollReviewQueueScope.Open,
+                        Focus = nextOverlapFocus,
+                    });
+                }
+
+                if (IsMissingTechnicianAction(confirmation))
+                {
+                    intelligenceWorkbenchService.InvalidateQueueCache(
+                        confirmation?.Year ?? 0,
+                        confirmation?.Month ?? 0);
+                    var nextMissingFocus = await ResolveNextIntelligenceFocusAsync(
+                        confirmation?.Year,
+                        confirmation?.Month,
+                        PayrollReviewCategory.MissingPerformance,
+                        cancellationToken);
+                    return RedirectToPage("./MissingTechnicianWorkbench", new
+                    {
+                        year = confirmation?.Year,
+                        month = confirmation?.Month,
+                        Scope = PayrollReviewQueueScope.Open,
+                        Focus = nextMissingFocus,
+                    });
+                }
+
                 var isProject100 = IsProject100Action(confirmation);
                 if (isProject100)
                 {
@@ -268,11 +307,15 @@ public sealed class ActionConfirmModel(
             {
                 var workbenchPage = IsStandbyAction(confirmation)
                     ? "./StandbyWorkbench"
-                    : IsProject100Action(confirmation)
-                        ? "./Project100Workbench"
-                        : IsProject200Action(confirmation)
-                            ? "./Project200Workbench"
-                            : "./Workbench";
+                    : IsOverlapAction(confirmation)
+                        ? "./OverlapWorkbench"
+                        : IsMissingTechnicianAction(confirmation)
+                            ? "./MissingTechnicianWorkbench"
+                            : IsProject100Action(confirmation)
+                                ? "./Project100Workbench"
+                                : IsProject200Action(confirmation)
+                                    ? "./Project200Workbench"
+                                    : "./Workbench";
                 return RedirectToPage(workbenchPage, new
                 {
                     year = confirmation.Year,
@@ -432,6 +475,93 @@ public sealed class ActionConfirmModel(
             or PayrollFindingType.StandbyPossibleWrongDossier
             or PayrollFindingType.StandbyAmbiguousEvidence
             or PayrollFindingType.StandbyNoGpsData;
+    }
+
+    private static bool IsOverlapAction(PayrollActionConfirmationView? confirmation)
+    {
+        if (confirmation is null)
+        {
+            return false;
+        }
+
+        if (HasKeyPrefix(confirmation, "overlap-") || HasKeyPrefix(confirmation, "overlap:"))
+        {
+            return true;
+        }
+
+        if (confirmation.Evidence.FindingType is PayrollFindingType.OverlappingPerformances)
+        {
+            return true;
+        }
+
+        return string.Equals(confirmation.DeleteProposal?.ProjectLabel, "overlap", StringComparison.Ordinal);
+    }
+
+    private static bool IsMissingTechnicianAction(PayrollActionConfirmationView? confirmation)
+    {
+        if (confirmation is null)
+        {
+            return false;
+        }
+
+        if (HasKeyPrefix(confirmation, "missing-") || HasKeyPrefix(confirmation, "missing-tech:"))
+        {
+            return true;
+        }
+
+        return confirmation.Evidence.FindingType is PayrollFindingType.MissingPlannedTechnicianPerformance
+            || confirmation.ActionType == PayrollProposedActionType.CreateMissingPerformance;
+    }
+
+    private static bool HasKeyPrefix(PayrollActionConfirmationView confirmation, string prefix)
+    {
+        var findingKey = confirmation.Evidence.FindingKey ?? string.Empty;
+        if (findingKey.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (confirmation.Evidence.SourceFindingKeys is { Count: > 0 } keys
+            && keys.Any(key => key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private async Task<string?> ResolveNextIntelligenceFocusAsync(
+        int? year,
+        int? month,
+        PayrollReviewCategory category,
+        CancellationToken cancellationToken)
+    {
+        if (year is null or <= 0 || month is null or < 1 or > 12)
+        {
+            return null;
+        }
+
+        try
+        {
+            var shell = await intelligenceWorkbenchService.GetShellAsync(
+                year.Value,
+                month.Value,
+                category,
+                new PayrollReviewQueueFilter(category, Scope: PayrollReviewQueueScope.Open),
+                selectedAdminCaseKey: null,
+                cancellationToken);
+            return shell.SelectedKey
+                ?? (shell.Cases.Count > 0 ? shell.Cases[0].AdminCaseKey : null);
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(
+                exception,
+                "Could not resolve next {Category} focus after action {ActionId}.",
+                category,
+                ActionId);
+            return null;
+        }
     }
 
     private static bool IsProject100Action(PayrollActionConfirmationView? confirmation)

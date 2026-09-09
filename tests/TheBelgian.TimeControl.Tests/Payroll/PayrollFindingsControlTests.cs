@@ -198,7 +198,7 @@ public sealed class PayrollFindingsControlTests
 
         var finding = Assert.Single(OverlapControl.Evaluate([left, right]));
         Assert.Equal(PayrollFindingType.OverlappingPerformances, finding.FindingType);
-        Assert.Equal(PayrollFindingSeverity.High, finding.Severity);
+        Assert.Equal(PayrollFindingSeverity.Review, finding.Severity);
         Assert.Equal(0.75m, finding.OverlapHours);
     }
 

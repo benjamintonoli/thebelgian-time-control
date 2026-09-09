@@ -146,7 +146,8 @@ public sealed class PayrollControlCenterTests
         Assert.Equal("./Project200Workbench", PayrollControlCenterBuilder.NavigationPageFor(PayrollReviewCategory.Project200));
         Assert.Equal("./Project100Workbench", PayrollControlCenterBuilder.NavigationPageFor(PayrollReviewCategory.Project100));
         Assert.Equal("./StandbyWorkbench", PayrollControlCenterBuilder.NavigationPageFor(PayrollReviewCategory.Standby));
-        Assert.Equal("./Queue", PayrollControlCenterBuilder.NavigationPageFor(PayrollReviewCategory.MissingPerformance));
+        Assert.Equal("./MissingTechnicianWorkbench", PayrollControlCenterBuilder.NavigationPageFor(PayrollReviewCategory.MissingPerformance));
+        Assert.Equal("./OverlapWorkbench", PayrollControlCenterBuilder.NavigationPageFor(PayrollReviewCategory.Overlap));
     }
 
     [Fact]

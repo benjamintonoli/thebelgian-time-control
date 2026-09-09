@@ -116,7 +116,7 @@ public static class PayrollControlCenterBuilder
             ProgressTotal: progressTotal,
             ProgressPercent: progressPercent);
 
-        var cards = BuildCards(adminSummary);
+        var cards = BuildCards(adminSummary, adminCases);
         var createGated = CountCreateRequiredButGated(adminCases, createPerformanceEnabled);
         var actionOverview = BuildActionOverview(actions, createGated);
         var impact = BuildImpact(finalization, adminSummary, actions, adminCases, createPerformanceEnabled);
@@ -159,6 +159,8 @@ public static class PayrollControlCenterBuilder
         PayrollReviewCategory.Project200 => "./Project200Workbench",
         PayrollReviewCategory.Project100 => "./Project100Workbench",
         PayrollReviewCategory.Standby => "./StandbyWorkbench",
+        PayrollReviewCategory.Overlap => "./OverlapWorkbench",
+        PayrollReviewCategory.MissingPerformance => "./MissingTechnicianWorkbench",
         _ => "./Queue",
     };
 
@@ -192,6 +194,18 @@ public static class PayrollControlCenterBuilder
             score += 1_500;
         }
 
+        if (adminCase.Category == PayrollReviewCategory.Overlap
+            && adminCase.Severity == PayrollFindingSeverity.High)
+        {
+            score += 1_800; // exact duplicates / GPS-supported corrections
+        }
+
+        if (adminCase.Category == PayrollReviewCategory.MissingPerformance
+            && adminCase.Severity == PayrollFindingSeverity.High)
+        {
+            score += 1_400;
+        }
+
         if (hasPendingDestructiveAction)
         {
             score += 1_200;
@@ -203,7 +217,9 @@ public static class PayrollControlCenterBuilder
         return score;
     }
 
-    private static List<PayrollControlCard> BuildCards(PayrollAdminQueueSummary summary)
+    private static List<PayrollControlCard> BuildCards(
+        PayrollAdminQueueSummary summary,
+        IReadOnlyList<PayrollAdminCase> adminCases)
     {
         var cards = new List<PayrollControlCard>(ControlOrder.Length);
         foreach (var category in ControlOrder)
@@ -212,6 +228,7 @@ public static class PayrollControlCenterBuilder
             var follow = summary.FollowUpAdminByCategory.GetValueOrDefault(category);
             var completed = summary.CompletedAdminByCategory.GetValueOrDefault(category);
             var total = open + follow + completed;
+            var (extraLabel, extraCount) = ExtraStatusFor(category, adminCases);
             cards.Add(new PayrollControlCard(
                 category,
                 CardTitle(category),
@@ -221,11 +238,41 @@ public static class PayrollControlCenterBuilder
                 completed,
                 total,
                 completed,
-                ExtraStatusLabel: null,
-                ExtraStatusCount: 0));
+                ExtraStatusLabel: extraLabel,
+                ExtraStatusCount: extraCount));
         }
 
         return cards;
+    }
+
+    private static (string? Label, int Count) ExtraStatusFor(
+        PayrollReviewCategory category,
+        IReadOnlyList<PayrollAdminCase> adminCases)
+    {
+        var openOrFollow = adminCases
+            .Where(item => item.Category == category
+                && item.WorkflowStatus is PayrollFindingStatus.Open or PayrollFindingStatus.NeedsFollowUp)
+            .ToList();
+        if (openOrFollow.Count == 0)
+        {
+            return (null, 0);
+        }
+
+        if (category == PayrollReviewCategory.Overlap)
+        {
+            var high = openOrFollow.Count(item => item.Severity == PayrollFindingSeverity.High);
+            var review = openOrFollow.Count(item => item.Severity != PayrollFindingSeverity.High);
+            return ($"High {high} / Review {review}", high);
+        }
+
+        if (category == PayrollReviewCategory.MissingPerformance)
+        {
+            var high = openOrFollow.Count(item => item.Severity == PayrollFindingSeverity.High);
+            var review = openOrFollow.Count(item => item.Severity == PayrollFindingSeverity.Review);
+            return ($"High {high} / Review {review}", high);
+        }
+
+        return (null, 0);
     }
 
     private static PayrollControlPriorityItem[] BuildPriorityQueue(
@@ -392,12 +439,12 @@ public static class PayrollControlCenterBuilder
 
     private static int CategoryWeight(PayrollReviewCategory category) => category switch
     {
+        PayrollReviewCategory.Overlap => 200,
+        PayrollReviewCategory.MissingPerformance => 160,
+        PayrollReviewCategory.Standby => 100,
         PayrollReviewCategory.Project300 => 90,
-        PayrollReviewCategory.MissingPerformance => 80,
-        PayrollReviewCategory.Standby => 70,
-        PayrollReviewCategory.Project200 => 60,
-        PayrollReviewCategory.Project100 => 50,
-        PayrollReviewCategory.Overlap => 40,
+        PayrollReviewCategory.Project200 => 70,
+        PayrollReviewCategory.Project100 => 60,
         _ => 10,
     };
 
@@ -417,7 +464,7 @@ public static class PayrollControlCenterBuilder
         PayrollReviewCategory.Project100 => "OPLEIDING / PROJECT 100",
         PayrollReviewCategory.Standby => "WACHTDIENST",
         PayrollReviewCategory.MissingPerformance => "ONTBREKENDE PRESTATIES",
-        PayrollReviewCategory.Overlap => "OVERLAPPEN",
+        PayrollReviewCategory.Overlap => "DUBBELE UREN",
         _ => "OTHER",
     };
 

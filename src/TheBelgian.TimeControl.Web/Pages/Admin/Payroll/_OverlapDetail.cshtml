@@ -1,0 +1,193 @@
+@model TheBelgian.TimeControl.Web.Pages.Admin.Payroll.OverlapWorkbenchModel
+@using System.Globalization
+@using TheBelgian.TimeControl.Core.Payroll.Findings
+@using TheBelgian.TimeControl.Core.Payroll.Review
+@{
+    var nl = CultureInfo.GetCultureInfo("nl-BE");
+    var wb = Model.Workbench;
+    var selected = wb?.Detail?.AdminCase;
+    var detail = wb?.Detail;
+    var overlap = detail?.Overlap;
+    string FmtTime(DateTimeOffset? value) => value?.ToString("HH:mm") ?? "—";
+    string FmtHours(decimal hours) => hours.ToString("0.##", nl) + " u";
+}
+
+@if (detail is null || selected is null || overlap is null)
+{
+    <div class="empty-detail p-4">
+        <h2 class="h5">Geen overlap-detail</h2>
+        <p class="text-muted mb-0">Selecteer een case in de queue.</p>
+    </div>
+}
+else
+{
+    <div class="overlap-detail-body" data-admin-case-key="@selected.AdminCaseKey">
+        <div class="d-flex justify-content-between flex-wrap gap-2 mb-3">
+            <div>
+                <h2 class="h4 mb-1">@(selected.DisplayName ?? selected.ResourceId)</h2>
+                <div class="text-muted">@PayrollDisplayFormatting.DateWithWeekday(selected.Date)</div>
+            </div>
+            <span class="badge text-bg-light text-dark border">@PayrollGuidedDecisions.AdminStatusLabel(selected.WorkflowStatus)</span>
+        </div>
+
+        <section class="mb-3">
+            <div class="text-uppercase small text-muted fw-semibold mb-1">Overlap</div>
+            <div class="fs-5 fw-semibold">
+                @FmtTime(overlap.OverlapStart)–@FmtTime(overlap.OverlapEnd)
+                · @FmtHours(overlap.OverlapHours)
+                · @PayrollReviewLabels.OverlapKind(overlap.Kind)
+            </div>
+            <p class="mb-1 mt-2" id="overlap-advice">@overlap.AdviceNl</p>
+            <div class="small text-muted">Confidence: @overlap.Confidence</div>
+            @if (!string.IsNullOrWhiteSpace(overlap.ImpactAdjustSummary))
+            {
+                <div class="small mt-1"><strong>Impact adjust:</strong> @overlap.ImpactAdjustSummary</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(overlap.ImpactDeleteSummary))
+            {
+                <div class="small"><strong>Impact delete:</strong> @overlap.ImpactDeleteSummary</div>
+            }
+        </section>
+
+        <section class="mb-4 intel-side-grid">
+            <div class="border rounded p-3">
+                <div class="text-uppercase small text-muted fw-semibold mb-1">Prestatie A · #@overlap.A.PerformanceId</div>
+                <div class="fs-5">@FmtTime(overlap.A.Start)–@FmtTime(overlap.A.End) · @FmtHours(overlap.A.AtlHours)</div>
+                <div class="small text-muted mt-1">
+                    @(overlap.A.ProjectId ?? "—")
+                    @if (!string.IsNullOrWhiteSpace(overlap.A.BonNr)) { <span>· BON @overlap.A.BonNr</span> }
+                    @if (!string.IsNullOrWhiteSpace(overlap.A.ActivityType)) { <span>· @overlap.A.ActivityType</span> }
+                </div>
+                @if (!string.IsNullOrWhiteSpace(overlap.A.Description))
+                {
+                    <div class="mt-2">@overlap.A.Description</div>
+                }
+                @if (!string.IsNullOrWhiteSpace(overlap.A.Memo))
+                {
+                    <div class="small text-muted mt-1">@overlap.A.Memo</div>
+                }
+                <div class="small mt-2 @(overlap.A.AdjustSupported || overlap.A.DeleteSupported ? "text-success" : "text-muted")">@overlap.A.CapabilityMessage</div>
+            </div>
+            <div class="border rounded p-3">
+                <div class="text-uppercase small text-muted fw-semibold mb-1">Prestatie B · #@overlap.B.PerformanceId</div>
+                <div class="fs-5">@FmtTime(overlap.B.Start)–@FmtTime(overlap.B.End) · @FmtHours(overlap.B.AtlHours)</div>
+                <div class="small text-muted mt-1">
+                    @(overlap.B.ProjectId ?? "—")
+                    @if (!string.IsNullOrWhiteSpace(overlap.B.BonNr)) { <span>· BON @overlap.B.BonNr</span> }
+                    @if (!string.IsNullOrWhiteSpace(overlap.B.ActivityType)) { <span>· @overlap.B.ActivityType</span> }
+                </div>
+                @if (!string.IsNullOrWhiteSpace(overlap.B.Description))
+                {
+                    <div class="mt-2">@overlap.B.Description</div>
+                }
+                @if (!string.IsNullOrWhiteSpace(overlap.B.Memo))
+                {
+                    <div class="small text-muted mt-1">@overlap.B.Memo</div>
+                }
+                <div class="small mt-2 @(overlap.B.AdjustSupported || overlap.B.DeleteSupported ? "text-success" : "text-muted")">@overlap.B.CapabilityMessage</div>
+            </div>
+        </section>
+
+        <section class="mb-4">
+            @if (detail.GpsContext.IsLoading)
+            {
+                <div class="small text-muted mb-2" id="gps-inline-status">GPS-context laden…</div>
+            }
+            else
+            {
+                <div class="small text-muted mb-2" id="gps-inline-status">@detail.GpsContext.Summary</div>
+            }
+            <div id="gps-panel"
+                 data-admin-case-key="@selected.AdminCaseKey"
+                 data-loading="@(detail.GpsContext.IsLoading ? "true" : "false")">
+                <ul class="list-unstyled small mb-0" id="gps-events">
+                    @foreach (var ev in detail.GpsContext.Events)
+                    {
+                        <li>
+                            <strong>@ev.At.ToString("HH:mm")@(ev.End is null ? "" : "–" + ev.End.Value.ToString("HH:mm"))</strong>
+                            @ev.Label
+                            @if (!string.IsNullOrWhiteSpace(ev.Detail)) { <span class="text-muted">· @ev.Detail</span> }
+                        </li>
+                    }
+                </ul>
+            </div>
+        </section>
+
+        @{
+            var target = overlap.TargetPerformanceId == overlap.A.PerformanceId
+                ? overlap.A
+                : overlap.TargetPerformanceId == overlap.B.PerformanceId
+                    ? overlap.B
+                    : null;
+            var suggestStart = overlap.ProposedStart?.ToString("HH:mm") ?? FmtTime(target?.Start);
+            var suggestEnd = overlap.ProposedEnd?.ToString("HH:mm") ?? FmtTime(target?.End);
+        }
+
+        <section class="mb-3 d-none" id="adjust-panel">
+            <div class="text-uppercase small text-muted fw-semibold mb-2">Tijd aanpassen</div>
+            @if (target is { AdjustSupported: true })
+            {
+                <div class="border rounded p-2 correction-target"
+                     data-performance-id="@target.PerformanceId"
+                     data-suggest-start="@suggestStart"
+                     data-suggest-end="@suggestEnd">
+                    <div class="small mb-2">Doel #@target.PerformanceId · huidig @FmtTime(target.Start)–@FmtTime(target.End)</div>
+                    @if (overlap.ProposedStart is not null && overlap.ProposedEnd is not null)
+                    {
+                        <div class="mb-2">
+                            <button type="button" class="btn btn-sm btn-outline-secondary wb-use-suggest">Gebruik voorstel (@suggestStart–@suggestEnd)</button>
+                        </div>
+                    }
+                    <div class="row g-2 align-items-end">
+                        <div class="col-auto"><label class="form-label small mb-0">Van</label><input class="form-control form-control-sm corr-start" type="time" value="@suggestStart" /></div>
+                        <div class="col-auto"><label class="form-label small mb-0">Tot</label><input class="form-control form-control-sm corr-end" type="time" value="@suggestEnd" /></div>
+                        <div class="col-md-4"><label class="form-label small mb-0">Reden</label><input class="form-control form-control-sm corr-reason" placeholder="Verplicht" /></div>
+                        <div class="col-auto"><button type="button" class="btn btn-sm btn-warning wb-propose-corr">Aanpassing controleren</button></div>
+                    </div>
+                    <div class="alert alert-danger small d-none mt-2 mb-0" id="wb-corr-error"></div>
+                </div>
+            }
+            else
+            {
+                <div class="alert alert-secondary small mb-0">@(overlap.AdjustBlockReason ?? "Geen aanpasbare doelprestatie.")</div>
+            }
+        </section>
+
+        <section class="mb-3 d-none" id="delete-panel">
+            <div class="text-uppercase small text-muted fw-semibold mb-2">Prestatie verwijderen</div>
+            @if (target is { DeleteSupported: true })
+            {
+                <div class="border rounded p-2 delete-target" data-performance-id="@target.PerformanceId">
+                    <div class="small mb-2">Doel #@target.PerformanceId · @FmtTime(target.Start)–@FmtTime(target.End) · @FmtHours(target.AtlHours)</div>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-6"><label class="form-label small mb-0">Reden</label><input class="form-control form-control-sm delete-reason" placeholder="Optioneel" /></div>
+                        <div class="col-auto"><button type="button" class="btn btn-sm btn-danger wb-propose-delete">Verwijdering controleren</button></div>
+                    </div>
+                    <div class="alert alert-danger small d-none mt-2 mb-0" id="wb-delete-error"></div>
+                </div>
+            }
+            else
+            {
+                <div class="alert alert-secondary small mb-0">@(overlap.DeleteBlockReason ?? "Geen verwijderbare doelprestatie.")</div>
+            }
+        </section>
+
+        <section class="border-top pt-3 sticky-bottom bg-white p200-sticky-decisions" id="wb-decisions" data-admin-case-key="@selected.AdminCaseKey">
+            <div class="text-uppercase small text-muted fw-semibold mb-2">Beslissing</div>
+            <div class="d-flex flex-wrap gap-2 mb-2">
+                @foreach (var choice in selected.Choices.Where(c =>
+                    c.DecisionCode is not (PayrollGuidedDecisionCodes.OverlapAWrong or PayrollGuidedDecisionCodes.OverlapBWrong)))
+                {
+                    <button type="button"
+                            class="btn btn-sm btn-outline-dark wb-decide"
+                            data-decision="@choice.DecisionCode"
+                            data-label="@choice.Label"
+                            data-requires-comment="@(choice.RequiresComment ? "true" : "false")">@choice.Label</button>
+                }
+            </div>
+            <label class="form-label small mb-1" for="wb-comment">Toelichting</label>
+            <textarea id="wb-comment" class="form-control form-control-sm mb-2" rows="2" placeholder="Optioneel / verplicht bij sommige keuzes">@selected.ReviewComment</textarea>
+            <div class="alert alert-danger small d-none mb-0" id="wb-decide-error"></div>
+        </section>
+    </div>
+}

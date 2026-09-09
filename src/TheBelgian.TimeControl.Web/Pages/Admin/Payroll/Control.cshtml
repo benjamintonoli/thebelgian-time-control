@@ -20,6 +20,8 @@
             or PayrollReviewCategory.Project200
             or PayrollReviewCategory.Project100
             or PayrollReviewCategory.Standby
+            or PayrollReviewCategory.Overlap
+            or PayrollReviewCategory.MissingPerformance
             ? Url.Page(card.NavigationPage, new { year = Model.Year, month = Model.Month })!
             : Url.Page("./Queue", new { year = Model.Year, month = Model.Month, Category = card.Category })!;
     string PriorityHref(PayrollControlPriorityItem item) =>
@@ -27,6 +29,8 @@
             or PayrollReviewCategory.Project200
             or PayrollReviewCategory.Project100
             or PayrollReviewCategory.Standby
+            or PayrollReviewCategory.Overlap
+            or PayrollReviewCategory.MissingPerformance
             ? Url.Page(item.NavigationPage, new { year = Model.Year, month = Model.Month, Focus = item.FocusKey, Scope = PayrollReviewQueueScope.Open })!
             : Url.Page("./Queue", new { year = Model.Year, month = Model.Month, Category = item.Category, Focus = item.FocusKey })!;
 }
@@ -109,6 +113,16 @@ else
                                     · Opvolging <strong>@card.FollowUp</strong>
                                     · Afgehandeld <strong>@card.Completed</strong>
                                 </div>
+                                @if (!string.IsNullOrWhiteSpace(card.ExtraStatusLabel))
+                                {
+                                    <div class="small text-muted mt-1">
+                                        @card.ExtraStatusLabel
+                                        @if (card.ExtraStatusCount > 0)
+                                        {
+                                            <span>· @card.ExtraStatusCount</span>
+                                        }
+                                    </div>
+                                }
                                 @if (card.Total > 0)
                                 {
                                     <div class="progress mt-2" style="height:0.4rem;">

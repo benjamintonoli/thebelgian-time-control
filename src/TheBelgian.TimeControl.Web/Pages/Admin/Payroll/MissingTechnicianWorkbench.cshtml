@@ -1,0 +1,311 @@
+@page "/Admin/Payroll/{year:int}/{month:int}/Workbench/MissingTechnician"
+@model TheBelgian.TimeControl.Web.Pages.Admin.Payroll.MissingTechnicianWorkbenchModel
+@using TheBelgian.TimeControl.Core.Payroll.Findings
+@using TheBelgian.TimeControl.Core.Payroll.Review
+@{
+    ViewData["Title"] = $"Missing technician {Model.Month:00}/{Model.Year}";
+    var wb = Model.Workbench;
+    string ScopeHref(PayrollReviewQueueScope scope) =>
+        Url.Page("./MissingTechnicianWorkbench", new
+        {
+            year = Model.Year,
+            month = Model.Month,
+            Scope = scope,
+            Search = Model.Search,
+            Sort = Model.Sort,
+            Focus = Model.Focus,
+        })!;
+    var initialFocus = wb?.SelectedKey ?? Model.Focus;
+}
+
+<div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
+    <div>
+        <div class="text-uppercase small text-muted fw-semibold">Payroll · Ontbrekende prestaties</div>
+        <h1 class="h3 mb-1">Missing technician @Model.Month.ToString("00")/@Model.Year</h1>
+        <p class="text-muted mb-0">Queue links · collega/GPS rechts · create via ActionConfirm. Geen automatische Plenion-writes.</p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+        <a class="btn btn-sm btn-outline-secondary" asp-page="./Control" asp-route-year="@Model.Year" asp-route-month="@Model.Month">Control</a>
+        <a class="btn btn-sm btn-outline-secondary" asp-page="./Queue" asp-route-year="@Model.Year" asp-route-month="@Model.Month" asp-route-Category="MissingPerformance">← Queue</a>
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(Model.Message)) { <div class="alert alert-success">@Model.Message</div> }
+@if (!string.IsNullOrWhiteSpace(Model.Error)) { <div class="alert alert-danger">@Model.Error</div> }
+
+@if (wb is null)
+{
+    <div class="alert alert-warning">Shadow-maand niet gevonden.</div>
+}
+else
+{
+    <div class="d-flex flex-wrap gap-2 mb-2 small">
+        <span>Cases <strong>@wb.Cases.Count</strong></span>
+        <span class="text-muted">· Open @wb.AdminSummary.UnresolvedAdminByCategory.GetValueOrDefault(PayrollReviewCategory.MissingPerformance)</span>
+    </div>
+
+    <div class="btn-group btn-group-sm mb-3" role="group">
+        <a class="btn @(Model.Scope == PayrollReviewQueueScope.Open ? "btn-dark" : "btn-outline-secondary")" href="@ScopeHref(PayrollReviewQueueScope.Open)">Te beoordelen</a>
+        <a class="btn @(Model.Scope == PayrollReviewQueueScope.Closed ? "btn-dark" : "btn-outline-secondary")" href="@ScopeHref(PayrollReviewQueueScope.Closed)">Afgehandeld</a>
+        <a class="btn @(Model.Scope == PayrollReviewQueueScope.All ? "btn-dark" : "btn-outline-secondary")" href="@ScopeHref(PayrollReviewQueueScope.All)">Alles</a>
+    </div>
+
+    <form method="get" class="cockpit-filters mb-3">
+        <input type="hidden" name="year" value="@Model.Year" />
+        <input type="hidden" name="month" value="@Model.Month" />
+        <input type="hidden" asp-for="Scope" />
+        <div>
+            <label asp-for="Search">Zoeken</label>
+            <input class="form-control form-control-sm" asp-for="Search" placeholder="Medewerker / BON / datum" />
+        </div>
+        <div>
+            <label asp-for="Sort">Sortering</label>
+            <select class="form-select form-select-sm" asp-for="Sort">
+                <option value="default">Ernst / datum</option>
+                <option value="datum">Datum</option>
+                <option value="medewerker">Medewerker A-Z</option>
+                <option value="status">Status</option>
+            </select>
+        </div>
+        <button class="btn btn-sm btn-dark align-self-end" type="submit">Toepassen</button>
+    </form>
+
+    <form id="wb-af" class="d-none">@Html.AntiForgeryToken()</form>
+
+    <div class="timecontrol-cockpit payroll-intel-workbench">
+        <aside class="review-queue review-queue-sticky" aria-label="Missing queue">
+            <div class="queue-title"><strong>Missing queue</strong><span>@wb.Cases.Count</span></div>
+            <div class="queue-report-form">
+                <div class="queue-items" id="intel-queue-items">
+                    @foreach (var item in wb.Cases)
+                    {
+                        var active = string.Equals(wb.SelectedKey, item.AdminCaseKey, StringComparison.Ordinal) ? "active" : null;
+                        <article class="queue-case @active" data-admin-case-key="@item.AdminCaseKey">
+                            <a class="queue-case-link wb-select-case" href="#" data-admin-case-key="@item.AdminCaseKey" aria-current="@(active is null ? null : "true")">
+                                <div class="queue-case-top">
+                                    <strong>@(item.DisplayName ?? item.ResourceId)</strong>
+                                    <span>@PayrollDisplayFormatting.DateWithWeekdayShort(item.Date)</span>
+                                </div>
+                                <div class="queue-facts">
+                                    <span>@(item.FriendlyState ?? item.IssueSummary ?? "—")</span>
+                                </div>
+                                <div class="queue-case-bottom">
+                                    @{
+                                        var openish = PayrollReviewCategories.IsUnresolved(item.WorkflowStatus);
+                                        var hint = Model.GpsHints.GetValueOrDefault(item.AdminCaseKey);
+                                        var hintText = hint switch
+                                        {
+                                            PayrollIntelligenceGpsCacheHint.Available => "GPS✓",
+                                            PayrollIntelligenceGpsCacheHint.Unavailable => "GPS–",
+                                            _ => "",
+                                        };
+                                    }
+                                    <span class="queue-status-dot @(openish ? "text-warning" : "text-success")">●</span>
+                                    @if (!string.IsNullOrEmpty(hintText))
+                                    {
+                                        <span class="queue-gps-hint text-muted">@hintText</span>
+                                    }
+                                </div>
+                            </a>
+                        </article>
+                    }
+                    @if (wb.Cases.Count == 0)
+                    {
+                        <div class="p-3 small text-muted">Geen cases voor deze filters.</div>
+                    }
+                </div>
+            </div>
+        </aside>
+
+        <main class="case-detail position-relative" id="intel-case-detail">
+            <div class="empty-detail p-4">
+                <h2 class="h5">Context laden…</h2>
+                <p class="text-muted mb-0">Selecteer een case of wacht op detail.</p>
+            </div>
+        </main>
+    </div>
+}
+
+@section Scripts {
+<style>
+.payroll-intel-workbench { min-height: 680px; }
+.payroll-intel-workbench .review-queue { width: auto; }
+@@media (min-width: 992px) {
+  .payroll-intel-workbench { grid-template-columns: minmax(240px, 30%) minmax(0, 70%); }
+}
+</style>
+<script>
+(function () {
+  const token = document.querySelector('#wb-af input[name="__RequestVerificationToken"]')?.value;
+  const decideUrl = '@Url.Page("./MissingTechnicianWorkbench", new { year = Model.Year, month = Model.Month, handler = "Decide" })';
+  const createUrl = '@Url.Page("./MissingTechnicianWorkbench", new { year = Model.Year, month = Model.Month, handler = "ProposeCreate" })';
+  const confirmBase = '@Url.Page("./ActionConfirm")';
+  const detailUrl = '@Url.Page("./MissingTechnicianWorkbench", new { year = Model.Year, month = Model.Month, handler = "Detail", Scope = Model.Scope, Search = Model.Search, Sort = Model.Sort })';
+  const gpsBase = '@Url.Page("./MissingTechnicianWorkbench", new { year = Model.Year, month = Model.Month, handler = "Gps" })';
+  const detailHost = document.getElementById('intel-case-detail');
+  let currentKey = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(initialFocus));
+  let loadSeq = 0;
+
+  async function loadDetail(key) {
+    if (!detailHost || !key) return;
+    const seq = ++loadSeq;
+    currentKey = key;
+    document.querySelectorAll('.queue-case').forEach(el => {
+      el.classList.toggle('active', el.dataset.adminCaseKey === key);
+    });
+    detailHost.innerHTML = '<div class="empty-detail p-4"><h2 class="h5">Context laden…</h2></div>';
+    const url = detailUrl + (detailUrl.includes('?') ? '&' : '?') + 'adminCaseKey=' + encodeURIComponent(key);
+    const response = await fetch(url, { headers: { 'Accept': 'text/html' } });
+    if (!response.ok) {
+      detailHost.innerHTML = '<div class="alert alert-danger m-3">Detail laden mislukt.</div>';
+      return;
+    }
+    const html = await response.text();
+    if (seq !== loadSeq) return;
+    detailHost.innerHTML = html;
+    wireDetail();
+    const urlObj = new URL(window.location.href);
+    urlObj.searchParams.set('Focus', key);
+    history.replaceState(null, '', urlObj.pathname + urlObj.search);
+  }
+
+  function wireDetail() {
+    document.getElementById('wb-use-peer')?.addEventListener('click', () => {
+      const start = document.getElementById('create-panel')?.dataset.peerStart;
+      const end = document.getElementById('create-panel')?.dataset.peerEnd;
+      if (start) document.querySelector('.create-start').value = start;
+      if (end) document.querySelector('.create-end').value = end;
+      document.getElementById('create-panel')?.classList.remove('d-none');
+    });
+    document.getElementById('wb-use-gps')?.addEventListener('click', () => {
+      const start = document.getElementById('create-panel')?.dataset.gpsStart;
+      const end = document.getElementById('create-panel')?.dataset.gpsEnd;
+      if (start) document.querySelector('.create-start').value = start;
+      if (end) document.querySelector('.create-end').value = end;
+      document.getElementById('create-panel')?.classList.remove('d-none');
+    });
+
+    document.querySelectorAll('.wb-decide').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const wrap = document.getElementById('wb-decisions');
+        const err = document.getElementById('wb-decide-error');
+        err?.classList.add('d-none');
+        const adminCaseKey = wrap?.dataset.adminCaseKey;
+        const decisionCode = btn.dataset.decision;
+        const requiresComment = btn.dataset.requiresComment === 'true';
+        let comment = document.getElementById('wb-comment')?.value?.trim() || '';
+
+        if (decisionCode === '@PayrollGuidedDecisionCodes.MissingTechConfirmed') {
+          document.getElementById('create-panel')?.classList.remove('d-none');
+          return;
+        }
+
+        if (requiresComment && !comment) {
+          comment = window.prompt(btn.dataset.label + ' — toelichting:') || '';
+          const input = document.getElementById('wb-comment');
+          if (input) input.value = comment;
+        }
+        if (requiresComment && !comment.trim()) {
+          if (err) { err.textContent = 'Toelichting is verplicht.'; err.classList.remove('d-none'); }
+          return;
+        }
+        btn.disabled = true;
+        try {
+          const body = new URLSearchParams();
+          body.set('AdminCaseKey', adminCaseKey);
+          body.set('DecisionCode', decisionCode);
+          body.set('Comment', comment);
+          if (token) body.set('__RequestVerificationToken', token);
+          const response = await fetch(decideUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8', 'RequestVerificationToken': token || '' },
+            body
+          });
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) throw new Error(payload.error || 'Mislukt');
+          if (payload.openCreate) {
+            document.getElementById('create-panel')?.classList.remove('d-none');
+            btn.disabled = false;
+            return;
+          }
+          const article = document.querySelector('.queue-case[data-admin-case-key="' + CSS.escape(adminCaseKey) + '"]');
+          if (article && payload.hideRow) article.classList.add('d-none');
+          if (payload.nextKey) await loadDetail(payload.nextKey);
+          else location.reload();
+        } catch (e) {
+          if (err) { err.textContent = e.message || 'Fout'; err.classList.remove('d-none'); }
+          btn.disabled = false;
+        }
+      });
+    });
+
+    document.querySelectorAll('.wb-propose-create').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const panel = document.getElementById('create-panel');
+        const err = document.getElementById('wb-create-error');
+        err?.classList.add('d-none');
+        try {
+          const body = new URLSearchParams();
+          body.set('AdminCaseKey', document.getElementById('wb-decisions')?.dataset.adminCaseKey);
+          body.set('NewStart', panel?.querySelector('.create-start')?.value);
+          body.set('NewEnd', panel?.querySelector('.create-end')?.value);
+          body.set('CorrectionReason', panel?.querySelector('.create-reason')?.value || '');
+          if (token) body.set('__RequestVerificationToken', token);
+          const response = await fetch(createUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8', 'RequestVerificationToken': token || '' },
+            body
+          });
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) throw new Error(payload.error || 'Mislukt');
+          if (payload.actionId) {
+            window.location.href = confirmBase + (confirmBase.includes('?') ? '&' : '?') + 'ActionId=' + encodeURIComponent(payload.actionId);
+          }
+        } catch (e) {
+          if (err) { err.textContent = e.message || 'Fout'; err.classList.remove('d-none'); }
+        }
+      });
+    });
+
+    const gpsPanel = document.getElementById('gps-panel');
+    if (gpsPanel?.dataset.loading === 'true') {
+      const key = gpsPanel.dataset.adminCaseKey;
+      fetch(gpsBase + (gpsBase.includes('?') ? '&' : '?') + 'adminCaseKey=' + encodeURIComponent(key))
+        .then(r => r.json())
+        .then(payload => {
+          const status = document.getElementById('gps-inline-status');
+          if (status) status.textContent = payload.summary || 'GPS geladen';
+          if (payload.travelModeDutch) {
+            const travel = document.getElementById('travel-mode-label');
+            if (travel) travel.textContent = payload.travelModeDutch;
+          }
+          if (payload.gpsSiteSummary) {
+            const site = document.getElementById('gps-site-summary');
+            if (site) site.textContent = payload.gpsSiteSummary;
+          }
+          const list = document.getElementById('gps-events');
+          if (list && payload.events?.length) {
+            list.innerHTML = payload.events.map(ev =>
+              '<li><strong>' + (ev.at || '') + (ev.end ? '–' + ev.end : '') + '</strong> '
+              + (ev.label || '') + (ev.detail ? ' · ' + ev.detail : '') + '</li>').join('');
+          }
+          gpsPanel.dataset.loading = 'false';
+        })
+        .catch(() => {
+          const status = document.getElementById('gps-inline-status');
+          if (status) status.textContent = 'GPS laden mislukt';
+        });
+    }
+  }
+
+  document.querySelectorAll('.wb-select-case').forEach(link => {
+    link.addEventListener('click', e => {
+      e.preventDefault();
+      loadDetail(link.dataset.adminCaseKey);
+    });
+  });
+
+  if (currentKey) loadDetail(currentKey);
+})();
+</script>
+}

@@ -11,6 +11,7 @@ namespace TheBelgian.TimeControl.Core.Payroll.Findings;
 public static class MissingTechnicianControl
 {
     public static readonly TimeSpan MatchWindowPadding = TimeSpan.FromMinutes(30);
+    public static readonly TimeSpan MinimumSitePresence = TimeSpan.FromMinutes(15);
 
     public static IReadOnlyList<PayrollFinding> Evaluate(
         IReadOnlyList<NormalizedPerformanceEntry> performances,
@@ -77,7 +78,10 @@ public static class MissingTechnicianControl
                 }
 
                 gpsLookup.TryGetValue((missingId, group.Date), out var gps);
-                findings.Add(BuildFinding(group, missingId, peers, dayRows, gps));
+                var peerGps = peers
+                    .Select(peer => gpsLookup.TryGetValue((peer.ResourceId, group.Date), out var day) ? day : null)
+                    .FirstOrDefault(item => item is not null);
+                findings.Add(BuildFinding(group, missingId, peers, dayRows, gps, peerGps));
             }
         }
 
@@ -100,15 +104,95 @@ public static class MissingTechnicianControl
             _ => MissingTechnicianEvidenceClass.NoGpsData,
         };
 
+    /// <summary>
+    /// Site presence = arrival at job (inbound trip end) → departure (outbound trip start).
+    /// Never uses home departure → site arrival as payable work.
+    /// </summary>
+    public static (DateTimeOffset? Arrival, DateTimeOffset? Departure, string? Note) TryDeriveSitePresence(
+        PlannedWorkGroup group,
+        StandbyGpsDayEvidence? gps,
+        NormalizedPerformanceEntry? peer = null)
+    {
+        if (gps is null || !gps.HasVehicleMapping || gps.MappingAmbiguous || !gps.HasUsableTrips)
+        {
+            return (null, null, null);
+        }
+
+        var windowTrips = SelectWindowTrips(group, gps, peer);
+        if (windowTrips.Count == 0)
+        {
+            return (null, null, null);
+        }
+
+        // Inbound arrival = earliest trip end inside/near the job window.
+        // Outbound departure = latest trip start inside/near the job window after arrival.
+        var arrival = windowTrips
+            .OrderBy(trip => trip.End)
+            .Select(trip => (DateTimeOffset?)trip.End)
+            .FirstOrDefault();
+        if (arrival is null)
+        {
+            return (null, null, null);
+        }
+
+        var departure = windowTrips
+            .Where(trip => trip.Start >= arrival.Value)
+            .OrderByDescending(trip => trip.Start)
+            .Select(trip => (DateTimeOffset?)trip.Start)
+            .FirstOrDefault();
+
+        if (departure is null || departure <= arrival || departure.Value - arrival.Value < MinimumSitePresence)
+        {
+            return (arrival, null, "incompleteSiteStop=arrivalOnly");
+        }
+
+        return (arrival, departure, "sitePresence=arrivalDeparture");
+    }
+
+    public static MissingTechnicianTravelMode ClassifyTravelMode(
+        StandbyGpsDayEvidence? missingGps,
+        StandbyGpsDayEvidence? peerGps)
+    {
+        var hasIndependentGps = missingGps is { HasVehicleMapping: true, MappingAmbiguous: false, HasUsableTrips: true };
+        if (hasIndependentGps)
+        {
+            if (IsSameVehicle(missingGps, peerGps))
+            {
+                return MissingTechnicianTravelMode.SharedTravelProven;
+            }
+
+            return MissingTechnicianTravelMode.SeparateVehicleProven;
+        }
+
+        if (IsSameVehicle(missingGps, peerGps))
+        {
+            return MissingTechnicianTravelMode.SharedTravelProven;
+        }
+
+        // Absence of personal GPS alone is NOT proof of shared travel.
+        return MissingTechnicianTravelMode.SharedTravelPossible;
+    }
+
+    public static string TravelModeDutch(MissingTechnicianTravelMode mode) => mode switch
+    {
+        MissingTechnicianTravelMode.SharedTravelProven => "Samen gereden (sterk bewijs)",
+        MissingTechnicianTravelMode.SeparateVehicleProven => "Apart gereden (eigen GPS)",
+        MissingTechnicianTravelMode.SharedTravelPossible => "Mogelijk samen gereden",
+        _ => "GPS onvoldoende",
+    };
+
     private static PayrollFinding BuildFinding(
         PlannedWorkGroup group,
         string missingResourceId,
         List<NormalizedPerformanceEntry> peers,
         IReadOnlyList<NormalizedPerformanceEntry> dayRows,
-        StandbyGpsDayEvidence? gps)
+        StandbyGpsDayEvidence? gps,
+        StandbyGpsDayEvidence? peerGps)
     {
         var conflicting = FindConflictingPerformance(group, dayRows);
         var gpsState = ClassifyGps(group, gps);
+        var travelMode = ClassifyTravelMode(gps, peerGps);
+        var site = TryDeriveSitePresence(group, gps, peers.FirstOrDefault());
         MissingTechnicianEvidenceClass evidenceClass;
         PayrollFindingSeverity severity;
         DateTimeOffset? suggestedStart = null;
@@ -124,6 +208,8 @@ public static class MissingTechnicianControl
             .FirstOrDefault(item => !string.IsNullOrWhiteSpace(item));
         var suggestedProject = group.ProjectId
             ?? peers.Select(item => item.ProjectId).FirstOrDefault(item => !string.IsNullOrWhiteSpace(item));
+        var peerInterval = peers.FirstOrDefault(item =>
+            item.Start is not null && item.End is not null && item.End > item.Start);
 
         if (conflicting is not null)
         {
@@ -135,11 +221,44 @@ public static class MissingTechnicianControl
             evidenceClass = MissingTechnicianEvidenceClass.ContradictedByGps;
             severity = PayrollFindingSeverity.Review;
         }
-        else if (gpsState == GpsSupportState.Supports)
+        else if (travelMode == MissingTechnicianTravelMode.SeparateVehicleProven
+                 && site.Arrival is not null
+                 && site.Departure is not null)
         {
             evidenceClass = MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps;
             severity = PayrollFindingSeverity.High;
-            (suggestedStart, suggestedEnd, suggestedHours, intervalSource) = ProposeInterval(group, peers, gps, preferGps: false);
+            suggestedStart = site.Arrival;
+            suggestedEnd = site.Departure;
+            suggestedHours = RoundHours((decimal)(site.Departure.Value - site.Arrival.Value).TotalHours);
+            intervalSource = "gpsSite";
+        }
+        else if (travelMode == MissingTechnicianTravelMode.SharedTravelProven
+                 && peerInterval is not null)
+        {
+            evidenceClass = MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps;
+            severity = PayrollFindingSeverity.High;
+            suggestedStart = peerInterval.Start;
+            suggestedEnd = peerInterval.End;
+            suggestedHours = RoundHours((decimal)(peerInterval.End!.Value - peerInterval.Start!.Value).TotalHours);
+            intervalSource = "peerSharedTravel";
+        }
+        else if (gpsState == GpsSupportState.Supports
+                 && travelMode == MissingTechnicianTravelMode.SeparateVehicleProven
+                 && site.Arrival is not null
+                 && site.Departure is null)
+        {
+            // Incomplete site stop → Review, no Ready create interval.
+            evidenceClass = MissingTechnicianEvidenceClass.Ambiguous;
+            severity = PayrollFindingSeverity.Review;
+            intervalSource = "none";
+        }
+        else if (gpsState == GpsSupportState.Supports)
+        {
+            // GPS in window but site stop incomplete / ambiguous — keep High only when planning interval exists
+            // and travel mode is not claiming a false site presence. Prefer peer/planning for proposal.
+            evidenceClass = MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps;
+            severity = PayrollFindingSeverity.High;
+            (suggestedStart, suggestedEnd, suggestedHours, intervalSource) = ProposeInterval(group, peers, preferPeer: true);
         }
         else if (gpsState == GpsSupportState.NoData)
         {
@@ -148,6 +267,7 @@ public static class MissingTechnicianControl
                 ? MissingTechnicianEvidenceClass.PlanningPlusPeer
                 : MissingTechnicianEvidenceClass.NoGpsData;
             severity = PayrollFindingSeverity.Review;
+            // Workbench may offer peer interval as human choice; do not mark Ready create.
         }
         else
         {
@@ -177,12 +297,19 @@ public static class MissingTechnicianControl
             peers,
             conflicting,
             gps,
+            peerGps,
             gpsState,
             evidenceClass,
+            travelMode,
             intervalSource,
-            suggestedHfdTaakId);
+            suggestedHfdTaakId,
+            site);
         var action = evidenceClass switch
         {
+            MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps when intervalSource == "gpsSite" =>
+                "Voorstel volgt eigen GPS werfaanwezigheid (menselijke goedkeuring vereist).",
+            MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps when intervalSource == "peerSharedTravel" =>
+                "Waarschijnlijk samen gereden. Voorstel volgt de geregistreerde werkuren van de collega.",
             MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps =>
                 "Controleer of een prestatie ontbreekt; voorstel is beschikbaar (geen automatische write).",
             MissingTechnicianEvidenceClass.ContradictedByExistingPerformance =>
@@ -221,12 +348,16 @@ public static class MissingTechnicianControl
     private static (DateTimeOffset? Start, DateTimeOffset? End, decimal? Hours, string IntervalSource) ProposeInterval(
         PlannedWorkGroup group,
         List<NormalizedPerformanceEntry> peers,
-        StandbyGpsDayEvidence? gps,
-        bool preferGps)
+        bool preferPeer)
     {
-        // GPS trip min/max is travel/arrival evidence, never a payable work interval (Ayrton 08:35–10:06).
-        _ = preferGps;
-        _ = gps;
+        if (preferPeer)
+        {
+            var peer = peers.FirstOrDefault(item => item.Start is not null && item.End is not null && item.End > item.Start);
+            if (peer?.Start is not null && peer.End is not null)
+            {
+                return (peer.Start, peer.End, RoundHours((decimal)(peer.End.Value - peer.Start.Value).TotalHours), "peer");
+            }
+        }
 
         if (group.TimeFrom is not null && group.TimeTo is not null && group.TimeTo > group.TimeFrom)
         {
@@ -236,13 +367,45 @@ public static class MissingTechnicianControl
             return (start, end, RoundHours((decimal)(end - start).TotalHours), "planning");
         }
 
-        var peer = peers.FirstOrDefault(item => item.Start is not null && item.End is not null && item.End > item.Start);
-        if (peer?.Start is not null && peer.End is not null)
+        var fallbackPeer = peers.FirstOrDefault(item => item.Start is not null && item.End is not null && item.End > item.Start);
+        if (fallbackPeer?.Start is not null && fallbackPeer.End is not null)
         {
-            return (peer.Start, peer.End, RoundHours((decimal)(peer.End.Value - peer.Start.Value).TotalHours), "peer");
+            return (fallbackPeer.Start, fallbackPeer.End, RoundHours((decimal)(fallbackPeer.End.Value - fallbackPeer.Start.Value).TotalHours), "peer");
         }
 
         return (null, null, null, "none");
+    }
+
+    private static bool IsSameVehicle(StandbyGpsDayEvidence? a, StandbyGpsDayEvidence? b)
+    {
+        if (a is null || b is null)
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(a.ObjectId)
+            && !string.IsNullOrWhiteSpace(b.ObjectId)
+            && string.Equals(a.ObjectId.Trim(), b.ObjectId.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var plateA = NormalizePlate(a.RegistrationPlate);
+        var plateB = NormalizePlate(b.RegistrationPlate);
+        return plateA is not null
+            && plateB is not null
+            && string.Equals(plateA, plateB, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? NormalizePlate(string? plate)
+    {
+        if (string.IsNullOrWhiteSpace(plate))
+        {
+            return null;
+        }
+
+        var chars = plate.Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray();
+        return chars.Length == 0 ? null : new string(chars);
     }
 
     private static NormalizedPerformanceEntry? FindMatchingJobPerformance(
@@ -384,19 +547,24 @@ public static class MissingTechnicianControl
 
     private static List<StandbyGpsTripEvidence> SelectWindowTrips(
         PlannedWorkGroup group,
-        StandbyGpsDayEvidence gps)
+        StandbyGpsDayEvidence gps,
+        NormalizedPerformanceEntry? peer = null)
     {
         DateTimeOffset start;
         DateTimeOffset end;
-        if (group.TimeFrom is not null && group.TimeTo is not null)
+        var offset = gps.Trips.Count > 0 ? gps.Trips[0].Start.Offset : TimeSpan.Zero;
+        if (peer?.Start is not null && peer.End is not null)
         {
-            var offset = gps.Trips.Count > 0 ? gps.Trips[0].Start.Offset : TimeSpan.Zero;
+            start = peer.Start.Value - MatchWindowPadding;
+            end = peer.End.Value + MatchWindowPadding;
+        }
+        else if (group.TimeFrom is not null && group.TimeTo is not null)
+        {
             start = new DateTimeOffset(group.Date.ToDateTime(group.TimeFrom.Value), offset) - MatchWindowPadding;
             end = new DateTimeOffset(group.Date.ToDateTime(group.TimeTo.Value), offset) + MatchWindowPadding;
         }
         else if (gps.Trips.Count > 0)
         {
-            var offset = gps.Trips[0].Start.Offset;
             start = new DateTimeOffset(group.Date.ToDateTime(TimeOnly.MinValue), offset);
             end = new DateTimeOffset(group.Date.ToDateTime(new TimeOnly(23, 59, 59)), offset);
         }
@@ -417,10 +585,13 @@ public static class MissingTechnicianControl
         List<NormalizedPerformanceEntry> peers,
         NormalizedPerformanceEntry? conflicting,
         StandbyGpsDayEvidence? gps,
+        StandbyGpsDayEvidence? peerGps,
         GpsSupportState gpsState,
         MissingTechnicianEvidenceClass evidenceClass,
+        MissingTechnicianTravelMode travelMode,
         string intervalSource,
-        int? suggestedHfdTaakId)
+        int? suggestedHfdTaakId,
+        (DateTimeOffset? Arrival, DateTimeOffset? Departure, string? Note) site)
     {
         var sb = new StringBuilder();
         sb.Append(CultureInfo.InvariantCulture,
@@ -428,10 +599,20 @@ public static class MissingTechnicianControl
         sb.Append(CultureInfo.InvariantCulture,
             $"planned={FormatPlannedInterval(group)}; missing={missingResourceId}; ");
         sb.Append(CultureInfo.InvariantCulture,
-            $"intervalSource={intervalSource}; ");
+            $"intervalSource={intervalSource}; travelMode={travelMode}; travelNl={TravelModeDutch(travelMode)}; ");
         if (suggestedHfdTaakId is > 0)
         {
             sb.Append(CultureInfo.InvariantCulture, $"suggestedHfdTaakId={suggestedHfdTaakId.Value}; ");
+        }
+
+        if (site.Arrival is not null)
+        {
+            sb.Append(CultureInfo.InvariantCulture,
+                $"siteArrival={site.Arrival:HH:mm}; siteDeparture={(site.Departure is null ? "—" : site.Departure.Value.ToString("HH:mm", CultureInfo.InvariantCulture))}; ");
+            if (!string.IsNullOrWhiteSpace(site.Note))
+            {
+                sb.Append(CultureInfo.InvariantCulture, $"{site.Note}; ");
+            }
         }
 
         sb.Append(CultureInfo.InvariantCulture,
@@ -451,6 +632,12 @@ public static class MissingTechnicianControl
             sb.Append(CultureInfo.InvariantCulture,
                 $"gpsState={gpsState}; mapping={gps.MappingKind}; object={gps.ObjectId ?? "—"}; trips={gps.Trips.Count}; "
                 + $"sharedVehicleNote=geen aparte track bewijst geen afwezigheid");
+        }
+
+        if (peerGps is not null)
+        {
+            sb.Append(CultureInfo.InvariantCulture,
+                $"; peerGpsObject={peerGps.ObjectId ?? "—"}; peerGpsPlate={peerGps.RegistrationPlate ?? "—"}");
         }
 
         return sb.ToString();
@@ -476,4 +663,12 @@ public static class MissingTechnicianControl
         Ambiguous,
         Contradicted,
     }
+}
+
+public enum MissingTechnicianTravelMode
+{
+    SharedTravelProven = 0,
+    SeparateVehicleProven = 1,
+    SharedTravelPossible = 2,
+    GpsInsufficient = 3,
 }

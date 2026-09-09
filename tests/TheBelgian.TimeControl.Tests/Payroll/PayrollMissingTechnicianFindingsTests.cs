@@ -76,7 +76,7 @@ public sealed class PayrollMissingTechnicianFindingsTests
     }
 
     [Fact]
-    public void PlanningPeerReliableGps_HighWithProposal()
+    public void PlanningPeerReliableGps_HighWithSitePresenceProposal()
     {
         var planning = Plan("A", "B");
         var performances = new[] { Job(1, "A", "08:05", "15:50") };
@@ -93,14 +93,91 @@ public sealed class PayrollMissingTechnicianFindingsTests
         Assert.Equal(nameof(MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps), finding.GpsClassification);
         Assert.NotNull(finding.SuggestedPayableStart);
         Assert.NotNull(finding.SuggestedPayableEnd);
-        Assert.Equal(At("08:00"), finding.SuggestedPayableStart);
-        Assert.Equal(At("16:00"), finding.SuggestedPayableEnd);
+        Assert.Equal(At("08:30"), finding.SuggestedPayableStart);
+        Assert.Equal(At("15:20"), finding.SuggestedPayableEnd);
         Assert.True(finding.SuggestedPayableHours > 0m);
         Assert.Equal("P-JOB", finding.SuggestedProjectId);
         Assert.Equal("BON-1", finding.SuggestedBonNr);
-        Assert.Contains("intervalSource=planning", finding.Evidence, StringComparison.Ordinal);
+        Assert.Contains("intervalSource=gpsSite", finding.Evidence, StringComparison.Ordinal);
+        Assert.Contains("travelMode=SeparateVehicleProven", finding.Evidence, StringComparison.Ordinal);
         Assert.Contains("suggestedHfdTaakId=14", finding.Evidence, StringComparison.Ordinal);
-        Assert.DoesNotContain("intervalSource=gps", finding.Evidence, StringComparison.Ordinal);
+        Assert.DoesNotContain("intervalSource=gps;", finding.Evidence, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LackOfPersonalGps_NotTreatedAsSharedTravelProven()
+    {
+        var planning = Plan("A", "B");
+        var performances = new[] { Job(1, "A", "08:05", "15:50") };
+
+        var findings = MissingTechnicianControl.Evaluate(performances, planning, [], Included);
+        var finding = Assert.Single(findings);
+
+        Assert.Contains("travelMode=SharedTravelPossible", finding.Evidence, StringComparison.Ordinal);
+        Assert.DoesNotContain("travelMode=SharedTravelProven", finding.Evidence, StringComparison.Ordinal);
+        Assert.Null(finding.SuggestedPayableStart);
+    }
+
+    [Fact]
+    public void SharedVehicleProven_UsesPeerInterval()
+    {
+        var planning = Plan("A", "B");
+        var performances = new[] { Job(1, "A", "08:05", "15:50") };
+        var shared = MappedDay("B",
+        [
+            Trip("t1", "08:10", "08:40", km: 5m, drivingMinutes: 15),
+            Trip("t2", "15:10", "15:40", km: 5m, drivingMinutes: 15),
+        ], objectId: "VAN-9");
+        var peerGps = MappedDay("A",
+        [
+            Trip("p1", "08:00", "08:20", km: 3m, drivingMinutes: 10),
+        ], objectId: "VAN-9");
+
+        var findings = MissingTechnicianControl.Evaluate(performances, planning, [shared, peerGps], Included);
+        var finding = Assert.Single(findings);
+
+        Assert.Equal(PayrollFindingSeverity.High, finding.Severity);
+        Assert.Contains("intervalSource=peerSharedTravel", finding.Evidence, StringComparison.Ordinal);
+        Assert.Equal(At("08:05"), finding.SuggestedPayableStart);
+        Assert.Equal(At("15:50"), finding.SuggestedPayableEnd);
+    }
+
+    [Fact]
+    public void IncompleteGpsSiteStop_Review_NoReadyInterval()
+    {
+        var planning = Plan("A", "B");
+        var performances = new[] { Job(1, "A", "08:05", "15:50") };
+        var gps = MappedDay("B",
+        [
+            Trip("t1", "08:02", "08:30", km: 12m, drivingMinutes: 20),
+        ]);
+
+        var findings = MissingTechnicianControl.Evaluate(performances, planning, [gps], Included);
+        var finding = Assert.Single(findings);
+
+        Assert.Equal(PayrollFindingSeverity.Review, finding.Severity);
+        Assert.Null(finding.SuggestedPayableStart);
+        Assert.Contains("incompleteSiteStop", finding.Evidence, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TravelLeg_NeverUsedAsJobInterval()
+    {
+        var planning = Plan("A", "B");
+        var performances = new[] { Job(1, "A", "08:00", "12:00") };
+        // Outbound home→site then later departure: site = 08:09–12:14, not 07:32–08:09.
+        var gps = MappedDay("B",
+        [
+            Trip("outbound", "07:32", "08:09", km: 20m, drivingMinutes: 37),
+            Trip("leave", "12:14", "12:48", km: 18m, drivingMinutes: 30),
+        ]);
+
+        var findings = MissingTechnicianControl.Evaluate(performances, planning, [gps], Included);
+        var finding = Assert.Single(findings);
+
+        Assert.Equal(At("08:09"), finding.SuggestedPayableStart);
+        Assert.Equal(At("12:14"), finding.SuggestedPayableEnd);
+        Assert.NotEqual(At("07:32"), finding.SuggestedPayableStart);
     }
 
     [Fact]
@@ -310,16 +387,20 @@ public sealed class PayrollMissingTechnicianFindingsTests
             SortKey: id,
             IsAbsence: true);
 
-    private static StandbyGpsDayEvidence MappedDay(string resourceId, IReadOnlyList<StandbyGpsTripEvidence> trips) =>
+    private static StandbyGpsDayEvidence MappedDay(
+        string resourceId,
+        IReadOnlyList<StandbyGpsTripEvidence> trips,
+        string objectId = "OBJ-1",
+        string plate = "1-ABC-123") =>
         new(
             resourceId,
             Day,
             HasVehicleMapping: true,
             MappingAmbiguous: false,
-            ObjectId: "OBJ-1",
-            RegistrationPlate: "1-ABC-123",
+            ObjectId: objectId,
+            RegistrationPlate: plate,
             MappingReason: "Resolved",
-            Trips: trips,
+            Trips: trips.Select(trip => trip with { ObjectId = objectId, VehiclePlate = plate }).ToList(),
             MappingKind: "ObjectId");
 
     private static StandbyGpsTripEvidence Trip(

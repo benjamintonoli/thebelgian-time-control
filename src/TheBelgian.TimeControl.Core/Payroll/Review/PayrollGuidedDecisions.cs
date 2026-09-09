@@ -31,12 +31,16 @@ public static class PayrollGuidedDecisionCodes
 
     public const string MissingTechConfirmed = "MISSING_TECH_CONFIRMED";
     public const string MissingTechPlanningWrong = "MISSING_TECH_PLANNING_WRONG";
+    public const string MissingTechOtherHours = "MISSING_TECH_OTHER_HOURS";
     public const string MissingTechUncertain = "MISSING_TECH_UNCERTAIN";
 
     public const string OverlapAWrong = "OVERLAP_A_WRONG";
     public const string OverlapBWrong = "OVERLAP_B_WRONG";
     public const string OverlapBothValid = "OVERLAP_BOTH_VALID";
     public const string OverlapUncertain = "OVERLAP_UNCERTAIN";
+    public const string OverlapApplyProposal = "OVERLAP_APPLY_PROPOSAL";
+    public const string OverlapAdjustTime = "OVERLAP_ADJUST_TIME";
+    public const string OverlapDelete = "OVERLAP_DELETE";
 }
 
 public static class PayrollGuidedDecisions
@@ -90,15 +94,20 @@ public static class PayrollGuidedDecisions
         PayrollReviewCategory.MissingPerformance =>
         [
             Choice(PayrollGuidedDecisionCodes.MissingTechConfirmed, "Prestatie aanmaken", PayrollFindingStatus.NeedsFollowUp, requiresComment: false),
+            Choice(PayrollGuidedDecisionCodes.MissingTechOtherHours, "Andere uren", PayrollFindingStatus.NeedsFollowUp, requiresComment: true),
             Choice(PayrollGuidedDecisionCodes.MissingTechPlanningWrong, "Niet aanmaken", PayrollFindingStatus.Reviewed, requiresComment: false),
             Choice(PayrollGuidedDecisionCodes.MissingTechUncertain, "Onzeker", PayrollFindingStatus.NeedsFollowUp, requiresComment: true),
         ],
         PayrollReviewCategory.Overlap =>
         [
-            Choice(PayrollGuidedDecisionCodes.OverlapAWrong, "Prestatie A fout", PayrollFindingStatus.NeedsFollowUp, requiresComment: true),
-            Choice(PayrollGuidedDecisionCodes.OverlapBWrong, "Prestatie B fout", PayrollFindingStatus.NeedsFollowUp, requiresComment: true),
+            Choice(PayrollGuidedDecisionCodes.OverlapApplyProposal, "Gebruik voorstel", PayrollFindingStatus.NeedsFollowUp, requiresComment: false),
+            Choice(PayrollGuidedDecisionCodes.OverlapAdjustTime, "Tijd aanpassen", PayrollFindingStatus.NeedsFollowUp, requiresComment: false),
+            Choice(PayrollGuidedDecisionCodes.OverlapDelete, "Prestatie verwijderen", PayrollFindingStatus.NeedsFollowUp, requiresComment: false),
             Choice(PayrollGuidedDecisionCodes.OverlapBothValid, "Beide correct", PayrollFindingStatus.Reviewed, requiresComment: true),
             Choice(PayrollGuidedDecisionCodes.OverlapUncertain, "Onzeker", PayrollFindingStatus.NeedsFollowUp, requiresComment: true),
+            // Legacy aliases kept for older decisions
+            Choice(PayrollGuidedDecisionCodes.OverlapAWrong, "Prestatie A fout", PayrollFindingStatus.NeedsFollowUp, requiresComment: true),
+            Choice(PayrollGuidedDecisionCodes.OverlapBWrong, "Prestatie B fout", PayrollFindingStatus.NeedsFollowUp, requiresComment: true),
         ],
         _ =>
         [

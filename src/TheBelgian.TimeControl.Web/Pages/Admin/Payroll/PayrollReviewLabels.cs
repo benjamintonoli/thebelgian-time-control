@@ -84,6 +84,12 @@ public static class PayrollReviewLabels
             _ => classification ?? "—",
         };
 
+    public static string MissingTechnicianTravelMode(MissingTechnicianTravelMode mode) =>
+        MissingTechnicianControl.TravelModeDutch(mode);
+
+    public static string OverlapKind(OverlapKind kind) =>
+        PayrollIntelligenceWorkbenchBuilder.OverlapKindLabelNl(kind);
+
     public static string SeverityBadgeClass(PayrollFindingSeverity severity) =>
         severity switch
         {

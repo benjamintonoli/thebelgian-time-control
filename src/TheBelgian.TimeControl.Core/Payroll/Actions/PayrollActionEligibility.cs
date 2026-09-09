@@ -239,7 +239,14 @@ public static class PayrollActionEligibility
             && (findingKey.StartsWith("p300-adjust:", StringComparison.Ordinal)
                 || findingKey.StartsWith("p300-delete:", StringComparison.Ordinal)
                 || findingKey.StartsWith("p200-adjust:", StringComparison.Ordinal)
-                || findingKey.StartsWith("p200-delete:", StringComparison.Ordinal)))
+                || findingKey.StartsWith("p200-delete:", StringComparison.Ordinal)
+                || findingKey.StartsWith("p100-adjust:", StringComparison.Ordinal)
+                || findingKey.StartsWith("p100-delete:", StringComparison.Ordinal)
+                || findingKey.StartsWith("overlap-adjust:", StringComparison.Ordinal)
+                || findingKey.StartsWith("overlap-delete:", StringComparison.Ordinal)
+                || findingKey.StartsWith("missing-adjust:", StringComparison.Ordinal)
+                || findingKey.StartsWith("missing-delete:", StringComparison.Ordinal)
+                || findingKey.StartsWith("missing-create:", StringComparison.Ordinal)))
         {
             return true;
         }

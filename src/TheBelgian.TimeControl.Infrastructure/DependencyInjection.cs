@@ -336,6 +336,12 @@ public static class DependencyInjection
         services.AddSingleton<PayrollStandbyMonthContextCache>();
         services.AddSingleton<PayrollStandbyHfdCache>();
         services.AddScoped<IPayrollStandbyWorkbenchService, PayrollStandbyWorkbenchService>();
+        services.AddSingleton<PayrollIntelligenceQueueCache>();
+        services.AddSingleton<PayrollIntelligenceDayCache>();
+        services.AddSingleton<PayrollIntelligenceGpsCache>();
+        services.AddSingleton<PayrollIntelligenceGpsContextCache>();
+        services.AddSingleton<PayrollIntelligenceHfdCache>();
+        services.AddScoped<IPayrollIntelligenceWorkbenchService, PayrollIntelligenceWorkbenchService>();
         return services;
     }
 

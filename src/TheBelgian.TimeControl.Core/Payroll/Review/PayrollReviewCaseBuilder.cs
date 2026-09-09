@@ -386,6 +386,29 @@ public static class PayrollReviewCaseBuilder
     private static string MissingFriendlyState(PayrollFindingRecord finding)
     {
         var gps = finding.GpsClassification ?? string.Empty;
+        var travelRaw = PayrollIntelligenceWorkbenchBuilder.ParseToken(finding.Evidence, "travelMode");
+        if (Enum.TryParse<MissingTechnicianTravelMode>(travelRaw, ignoreCase: true, out var travelMode))
+        {
+            if (travelMode == MissingTechnicianTravelMode.SharedTravelProven
+                && (gps.Contains("PeerPlusGps", StringComparison.OrdinalIgnoreCase)
+                    || gps.Equals(nameof(MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps), StringComparison.Ordinal)
+                    || gps.Equals(nameof(MissingTechnicianEvidenceClass.PlanningPlusPeer), StringComparison.Ordinal)))
+            {
+                return "Sterk bewijs";
+            }
+
+            if (travelMode == MissingTechnicianTravelMode.SeparateVehicleProven)
+            {
+                return "Apart gereden";
+            }
+
+            if (travelMode == MissingTechnicianTravelMode.SharedTravelPossible
+                && gps.Equals(nameof(MissingTechnicianEvidenceClass.PlanningPlusPeer), StringComparison.Ordinal))
+            {
+                return "Planning + collega (mogelijk samen)";
+            }
+        }
+
         if (gps.Contains("PeerPlusGps", StringComparison.OrdinalIgnoreCase)
             || gps.Equals(nameof(MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps), StringComparison.Ordinal))
         {
