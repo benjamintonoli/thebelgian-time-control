@@ -159,6 +159,8 @@ public static class PayrollReviewCaseBuilder
                 $"overlap:{finding.FindingKey}",
             PayrollReviewCategory.MissingPerformance =>
                 $"missing:{finding.FindingKey}",
+            PayrollReviewCategory.WrongDossier =>
+                $"wrong-dossier:{finding.FindingKey}",
             PayrollReviewCategory.Project100 or PayrollReviewCategory.Project200 or PayrollReviewCategory.Project300
                 when related.Count >= 1 =>
                 $"{category}:{finding.ResourceId}:{finding.Date:yyyyMMdd}:{related[0]}",
@@ -385,7 +387,18 @@ public static class PayrollReviewCaseBuilder
 
     private static string MissingFriendlyState(PayrollFindingRecord finding)
     {
+        if (finding.FindingType == PayrollFindingType.WrongProjectBooking
+            || string.Equals(
+                finding.GpsClassification,
+                nameof(MissingTechnicianConflictClass.PlannedJobSupportedExistingBookingWrong),
+                StringComparison.Ordinal))
+        {
+            return "Mogelijk verkeerd dossier";
+        }
+
         var gps = finding.GpsClassification ?? string.Empty;
+        var siteMatch = PayrollIntelligenceWorkbenchBuilder.ParseToken(finding.Evidence, "siteMatch");
+        var conflictClass = PayrollIntelligenceWorkbenchBuilder.ParseToken(finding.Evidence, "conflictClass");
         var travelRaw = PayrollIntelligenceWorkbenchBuilder.ParseToken(finding.Evidence, "travelMode");
         if (Enum.TryParse<MissingTechnicianTravelMode>(travelRaw, ignoreCase: true, out var travelMode))
         {
@@ -397,9 +410,18 @@ public static class PayrollReviewCaseBuilder
                 return "Sterk bewijs";
             }
 
+            if (travelMode == MissingTechnicianTravelMode.SeparateVehicleProven
+                && string.Equals(siteMatch, nameof(MissingTechnicianSiteMatch.PlannedJobSiteMatch), StringComparison.Ordinal)
+                && gps.Equals(nameof(MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps), StringComparison.Ordinal))
+            {
+                return "Sterk bewijs";
+            }
+
             if (travelMode == MissingTechnicianTravelMode.SeparateVehicleProven)
             {
-                return "Apart gereden";
+                return string.IsNullOrWhiteSpace(conflictClass) || conflictClass == "None"
+                    ? "Apart gereden"
+                    : "Conflict / apart gereden";
             }
 
             if (travelMode == MissingTechnicianTravelMode.SharedTravelPossible

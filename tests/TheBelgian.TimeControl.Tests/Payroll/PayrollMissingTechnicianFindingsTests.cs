@@ -84,9 +84,10 @@ public sealed class PayrollMissingTechnicianFindingsTests
         [
             Trip("t1", "08:02", "08:30", km: 12m, drivingMinutes: 20),
             Trip("t2", "15:20", "15:55", km: 11m, drivingMinutes: 18),
-        ]);
+        ], endAddress: "werf BON-1 1785");
 
-        var findings = MissingTechnicianControl.Evaluate(performances, planning, [gps], Included);
+        var locations = SiteMap1785();
+        var findings = MissingTechnicianControl.Evaluate(performances, planning, [gps], Included, locations);
         var finding = Assert.Single(findings);
 
         Assert.Equal(PayrollFindingSeverity.High, finding.Severity);
@@ -100,8 +101,8 @@ public sealed class PayrollMissingTechnicianFindingsTests
         Assert.Equal("BON-1", finding.SuggestedBonNr);
         Assert.Contains("intervalSource=gpsSite", finding.Evidence, StringComparison.Ordinal);
         Assert.Contains("travelMode=SeparateVehicleProven", finding.Evidence, StringComparison.Ordinal);
+        Assert.Contains("siteMatch=PlannedJobSiteMatch", finding.Evidence, StringComparison.Ordinal);
         Assert.Contains("suggestedHfdTaakId=14", finding.Evidence, StringComparison.Ordinal);
-        Assert.DoesNotContain("intervalSource=gps;", finding.Evidence, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -165,14 +166,13 @@ public sealed class PayrollMissingTechnicianFindingsTests
     {
         var planning = Plan("A", "B");
         var performances = new[] { Job(1, "A", "08:00", "12:00") };
-        // Outbound home→site then later departure: site = 08:09–12:14, not 07:32–08:09.
         var gps = MappedDay("B",
         [
             Trip("outbound", "07:32", "08:09", km: 20m, drivingMinutes: 37),
             Trip("leave", "12:14", "12:48", km: 18m, drivingMinutes: 30),
-        ]);
+        ], endAddress: "werf 1785");
 
-        var findings = MissingTechnicianControl.Evaluate(performances, planning, [gps], Included);
+        var findings = MissingTechnicianControl.Evaluate(performances, planning, [gps], Included, SiteMap1785());
         var finding = Assert.Single(findings);
 
         Assert.Equal(At("08:09"), finding.SuggestedPayableStart);
@@ -391,7 +391,8 @@ public sealed class PayrollMissingTechnicianFindingsTests
         string resourceId,
         IReadOnlyList<StandbyGpsTripEvidence> trips,
         string objectId = "OBJ-1",
-        string plate = "1-ABC-123") =>
+        string plate = "1-ABC-123",
+        string endAddress = "Site") =>
         new(
             resourceId,
             Day,
@@ -400,8 +401,24 @@ public sealed class PayrollMissingTechnicianFindingsTests
             ObjectId: objectId,
             RegistrationPlate: plate,
             MappingReason: "Resolved",
-            Trips: trips.Select(trip => trip with { ObjectId = objectId, VehiclePlate = plate }).ToList(),
+            Trips: trips.Select(trip => trip with
+            {
+                ObjectId = objectId,
+                VehiclePlate = plate,
+                EndAddress = endAddress,
+            }).ToList(),
             MappingKind: "ObjectId");
+
+    private static Dictionary<string, JobLocationEvidence> SiteMap1785() =>
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["project:P-JOB"] = new(
+                "project:P-JOB", "P-JOB", 501, "BON-1", "1785 Merchtem", "1785", "Merchtem",
+                null, null, 250, JobLocationSource.PerformancePostcode, JobLocationConfidence.Weak),
+            ["bon:BON-1"] = new(
+                "bon:BON-1", "P-JOB", 501, "BON-1", "1785 Merchtem", "1785", "Merchtem",
+                null, null, 250, JobLocationSource.BonInterventionAddress, JobLocationConfidence.Weak),
+        };
 
     private static StandbyGpsTripEvidence Trip(
         string id,

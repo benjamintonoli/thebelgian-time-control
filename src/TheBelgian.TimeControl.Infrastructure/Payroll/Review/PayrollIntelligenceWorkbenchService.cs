@@ -893,7 +893,9 @@ internal sealed class PayrollIntelligenceWorkbenchService(
 
     private static void EnsureCategory(PayrollReviewCategory category)
     {
-        if (category is not (PayrollReviewCategory.Overlap or PayrollReviewCategory.MissingPerformance))
+        if (category is not (PayrollReviewCategory.Overlap
+            or PayrollReviewCategory.MissingPerformance
+            or PayrollReviewCategory.WrongDossier))
         {
             throw new InvalidOperationException($"Unsupported intelligence workbench category: {category}");
         }

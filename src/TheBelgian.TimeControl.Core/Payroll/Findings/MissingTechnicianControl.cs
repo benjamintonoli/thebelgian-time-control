@@ -17,7 +17,8 @@ public static class MissingTechnicianControl
         IReadOnlyList<NormalizedPerformanceEntry> performances,
         IReadOnlyList<PayrollPlanningReservation> planning,
         IReadOnlyList<StandbyGpsDayEvidence> gpsDays,
-        IReadOnlySet<string> includedResourceIds)
+        IReadOnlySet<string> includedResourceIds,
+        IReadOnlyDictionary<string, JobLocationEvidence>? jobLocations = null)
     {
         var findings = new List<PayrollFinding>();
         var groups = PlannedWorkGroupBuilder.Build(planning);
@@ -28,6 +29,7 @@ public static class MissingTechnicianControl
             .Where(item => !item.IsCalendarSynthetic)
             .GroupBy(item => (item.ResourceId, item.Date))
             .ToDictionary(group => group.Key, group => group.ToList());
+        jobLocations ??= new Dictionary<string, JobLocationEvidence>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var group in groups)
         {
@@ -56,8 +58,6 @@ public static class MissingTechnicianControl
                 .OrderBy(item => item.SourceEntryId)
                 .ToList();
 
-            // Core rule: peer job performance is required. GPS alone never creates a finding
-            // (PlanningPlusGps remains a classification label for diagnostics / tests).
             if (peers.Count == 0)
             {
                 continue;
@@ -81,7 +81,7 @@ public static class MissingTechnicianControl
                 var peerGps = peers
                     .Select(peer => gpsLookup.TryGetValue((peer.ResourceId, group.Date), out var day) ? day : null)
                     .FirstOrDefault(item => item is not null);
-                findings.Add(BuildFinding(group, missingId, peers, dayRows, gps, peerGps));
+                findings.Add(BuildFinding(group, missingId, peers, dayRows, gps, peerGps, jobLocations));
             }
         }
 
@@ -187,14 +187,60 @@ public static class MissingTechnicianControl
         List<NormalizedPerformanceEntry> peers,
         IReadOnlyList<NormalizedPerformanceEntry> dayRows,
         StandbyGpsDayEvidence? gps,
-        StandbyGpsDayEvidence? peerGps)
+        StandbyGpsDayEvidence? peerGps,
+        IReadOnlyDictionary<string, JobLocationEvidence> jobLocations)
     {
-        var conflicting = FindConflictingPerformance(group, dayRows);
         var gpsState = ClassifyGps(group, gps);
         var travelMode = ClassifyTravelMode(gps, peerGps);
-        var site = TryDeriveSitePresence(group, gps, peers.FirstOrDefault());
+        var peer = peers[0];
+        var site = TryDeriveSitePresence(group, gps, peer);
+        var hasCompleteSite = site.Arrival is not null && site.Departure is not null;
+        var proposed = MissingTechnicianSiteConflictAnalyzer.ProposedInterval(
+            site.Arrival,
+            site.Departure,
+            group,
+            peer);
+
+        NormalizedPerformanceEntry? materialConflict = null;
+        if (proposed.Start is not null && proposed.End is not null)
+        {
+            materialConflict = MissingTechnicianSiteConflictAnalyzer.FindMaterialConflict(
+                dayRows,
+                proposed.Start.Value,
+                proposed.End.Value,
+                group,
+                IsCredibleJobPerformance);
+        }
+
+        // Legacy planning-window candidate (for diagnostics only when material conflict is null).
+        var planningWindowConflict = FindConflictingPerformance(group, dayRows);
+
+        var plannedLocation = ResolveJobLocation(jobLocations, group.ProjectId, group.ProjectNumber, peer.BonNr, peer);
+        var existingLocation = materialConflict is null
+            ? null
+            : ResolveJobLocation(
+                jobLocations,
+                materialConflict.ProjectId,
+                materialConflict.ProjectNumber,
+                materialConflict.BonNr,
+                materialConflict);
+
+        var windowTrips = gps is null ? [] : SelectWindowTrips(group, gps, peer);
+        var stop = MissingTechnicianSiteConflictAnalyzer.PreferStopPoint(windowTrips, site.Arrival);
+        var siteMatch = MissingTechnicianSiteConflictAnalyzer.ClassifySiteMatch(
+            plannedLocation,
+            existingLocation,
+            stop.Lat,
+            stop.Lon,
+            stop.Address);
+        var conflictClass = MissingTechnicianSiteConflictAnalyzer.ClassifyConflict(
+            materialConflict,
+            siteMatch,
+            hasCompleteSite);
+
         MissingTechnicianEvidenceClass evidenceClass;
         PayrollFindingSeverity severity;
+        PayrollFindingType findingType = PayrollFindingType.MissingPlannedTechnicianPerformance;
         DateTimeOffset? suggestedStart = null;
         DateTimeOffset? suggestedEnd = null;
         decimal? suggestedHours = null;
@@ -210,27 +256,54 @@ public static class MissingTechnicianControl
             ?? peers.Select(item => item.ProjectId).FirstOrDefault(item => !string.IsNullOrWhiteSpace(item));
         var peerInterval = peers.FirstOrDefault(item =>
             item.Start is not null && item.End is not null && item.End > item.Start);
+        string title = "Mogelijk ontbrekende prestatie";
 
-        if (conflicting is not null)
-        {
-            evidenceClass = MissingTechnicianEvidenceClass.ContradictedByExistingPerformance;
-            severity = PayrollFindingSeverity.Review;
-        }
-        else if (gpsState == GpsSupportState.Contradicted)
+        if (gpsState == GpsSupportState.Contradicted && materialConflict is null)
         {
             evidenceClass = MissingTechnicianEvidenceClass.ContradictedByGps;
             severity = PayrollFindingSeverity.Review;
         }
+        else if (conflictClass == MissingTechnicianConflictClass.PlannedJobSupportedExistingBookingWrong
+                 && hasCompleteSite
+                 && travelMode == MissingTechnicianTravelMode.SeparateVehicleProven)
+        {
+            // Distinct business issue: wrong dossier / wrong project booking.
+            findingType = PayrollFindingType.WrongProjectBooking;
+            evidenceClass = MissingTechnicianEvidenceClass.ContradictedByExistingPerformance;
+            severity = PayrollFindingSeverity.High;
+            suggestedStart = site.Arrival;
+            suggestedEnd = site.Departure;
+            suggestedHours = RoundHours((decimal)(site.Departure!.Value - site.Arrival!.Value).TotalHours);
+            intervalSource = "gpsSiteWrongDossier";
+            title = "Mogelijk verkeerde project/bon geboekt";
+        }
+        else if (materialConflict is not null)
+        {
+            evidenceClass = MissingTechnicianEvidenceClass.ContradictedByExistingPerformance;
+            severity = PayrollFindingSeverity.Review;
+        }
         else if (travelMode == MissingTechnicianTravelMode.SeparateVehicleProven
-                 && site.Arrival is not null
-                 && site.Departure is not null)
+                 && hasCompleteSite
+                 && siteMatch == MissingTechnicianSiteMatch.PlannedJobSiteMatch)
         {
             evidenceClass = MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps;
             severity = PayrollFindingSeverity.High;
             suggestedStart = site.Arrival;
             suggestedEnd = site.Departure;
-            suggestedHours = RoundHours((decimal)(site.Departure.Value - site.Arrival.Value).TotalHours);
+            suggestedHours = RoundHours((decimal)(site.Departure!.Value - site.Arrival!.Value).TotalHours);
             intervalSource = "gpsSite";
+        }
+        else if (travelMode == MissingTechnicianTravelMode.SeparateVehicleProven
+                 && hasCompleteSite
+                 && siteMatch is MissingTechnicianSiteMatch.LocationUnknown
+                     or MissingTechnicianSiteMatch.NeitherMatch
+                     or MissingTechnicianSiteMatch.BothPossible
+                     or MissingTechnicianSiteMatch.ExistingBookedJobSiteMatch)
+        {
+            // Complete stop without proven planned-job geofence match → Review, not High.
+            evidenceClass = MissingTechnicianEvidenceClass.Ambiguous;
+            severity = PayrollFindingSeverity.Review;
+            intervalSource = "none";
         }
         else if (travelMode == MissingTechnicianTravelMode.SharedTravelProven
                  && peerInterval is not null)
@@ -247,27 +320,26 @@ public static class MissingTechnicianControl
                  && site.Arrival is not null
                  && site.Departure is null)
         {
-            // Incomplete site stop → Review, no Ready create interval.
             evidenceClass = MissingTechnicianEvidenceClass.Ambiguous;
             severity = PayrollFindingSeverity.Review;
             intervalSource = "none";
         }
-        else if (gpsState == GpsSupportState.Supports)
+        else if (travelMode == MissingTechnicianTravelMode.SharedTravelPossible)
         {
-            // GPS in window but site stop incomplete / ambiguous — keep High only when planning interval exists
-            // and travel mode is not claiming a false site presence. Prefer peer/planning for proposal.
-            evidenceClass = MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps;
-            severity = PayrollFindingSeverity.High;
-            (suggestedStart, suggestedEnd, suggestedHours, intervalSource) = ProposeInterval(group, peers, preferPeer: true);
+            // Possible shared travel is never auto-High; admin may opt into peer hours.
+            evidenceClass = gpsState == GpsSupportState.NoData
+                ? (gps is null
+                    ? MissingTechnicianEvidenceClass.PlanningPlusPeer
+                    : MissingTechnicianEvidenceClass.NoGpsData)
+                : MissingTechnicianEvidenceClass.Ambiguous;
+            severity = PayrollFindingSeverity.Review;
         }
         else if (gpsState == GpsSupportState.NoData)
         {
-            // Peer present + no independent GPS (shared vehicle possible) → Review, not absence.
             evidenceClass = gps is null
                 ? MissingTechnicianEvidenceClass.PlanningPlusPeer
                 : MissingTechnicianEvidenceClass.NoGpsData;
             severity = PayrollFindingSeverity.Review;
-            // Workbench may offer peer interval as human choice; do not mark Ready create.
         }
         else
         {
@@ -275,7 +347,8 @@ public static class MissingTechnicianControl
             severity = PayrollFindingSeverity.Review;
         }
 
-        if (evidenceClass is not MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps)
+        if (evidenceClass is not MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps
+            && intervalSource != "gpsSiteWrongDossier")
         {
             suggestedStart = null;
             suggestedEnd = null;
@@ -286,16 +359,17 @@ public static class MissingTechnicianControl
             intervalSource = "none";
         }
 
-        var peer = peers[0];
         var planned = FormatPlannedInterval(group);
         var description =
-            $"Planning {planned} (kalender {group.IdCalendar}); collega {peer.ResourceId} heeft prestatie "
-            + $"{FormatPerfInterval(peer)}; geen matching jobprestatie voor resource {missingResourceId}.";
+            findingType == PayrollFindingType.WrongProjectBooking
+                ? $"Planning {planned}; GPS ondersteunt geplande job, bestaande boeking lijkt verkeerd dossier."
+                : $"Planning {planned} (kalender {group.IdCalendar}); collega {peer.ResourceId} heeft prestatie "
+                  + $"{FormatPerfInterval(peer)}; geen matching jobprestatie voor resource {missingResourceId}.";
         var evidence = BuildEvidence(
             group,
             missingResourceId,
             peers,
-            conflicting,
+            materialConflict ?? planningWindowConflict,
             gps,
             peerGps,
             gpsState,
@@ -303,37 +377,52 @@ public static class MissingTechnicianControl
             travelMode,
             intervalSource,
             suggestedHfdTaakId,
-            site);
-        var action = evidenceClass switch
-        {
-            MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps when intervalSource == "gpsSite" =>
-                "Voorstel volgt eigen GPS werfaanwezigheid (menselijke goedkeuring vereist).",
-            MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps when intervalSource == "peerSharedTravel" =>
-                "Waarschijnlijk samen gereden. Voorstel volgt de geregistreerde werkuren van de collega.",
-            MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps =>
-                "Controleer of een prestatie ontbreekt; voorstel is beschikbaar (geen automatische write).",
-            MissingTechnicianEvidenceClass.ContradictedByExistingPerformance =>
-                "Geen voorstel: conflicterende prestatie in hetzelfde venster.",
-            MissingTechnicianEvidenceClass.ContradictedByGps =>
-                "Geen voorstel: GPS lijkt elders actief.",
-            _ => "Controleer planning vs prestaties; GPS/shared vehicle kan ontbrekende track verklaren.",
-        };
+            site,
+            siteMatch,
+            conflictClass,
+            plannedLocation,
+            existingLocation,
+            proposed.Start,
+            proposed.End);
+        var action = findingType == PayrollFindingType.WrongProjectBooking
+            ? "Mogelijk verkeerde project/bon geboekt. Vervangplan: verwijderen + correcte prestatie aanmaken (menselijke goedkeuring)."
+            : evidenceClass switch
+            {
+                MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps when intervalSource == "gpsSite" =>
+                    "Voorstel volgt eigen GPS werfaanwezigheid (menselijke goedkeuring vereist).",
+                MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps when intervalSource == "peerSharedTravel" =>
+                    "Waarschijnlijk samen gereden. Voorstel volgt de geregistreerde werkuren van de collega.",
+                MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps =>
+                    "Controleer of een prestatie ontbreekt; voorstel is beschikbaar (geen automatische write).",
+                MissingTechnicianEvidenceClass.ContradictedByExistingPerformance =>
+                    MissingTechnicianSiteConflictAnalyzer.FormatConflictNl(conflictClass),
+                MissingTechnicianEvidenceClass.ContradictedByGps =>
+                    "Geen voorstel: GPS lijkt elders actief.",
+                _ => "Controleer planning vs prestaties; GPS/shared vehicle kan ontbrekende track verklaren.",
+            };
+
+        var related = peers.Select(item => item.SourceEntryId)
+            .Concat(materialConflict is null ? [] : new[] { materialConflict.SourceEntryId })
+            .Concat(planningWindowConflict is null || materialConflict?.SourceEntryId == planningWindowConflict.SourceEntryId
+                ? []
+                : new[] { planningWindowConflict.SourceEntryId })
+            .Distinct()
+            .OrderBy(id => id)
+            .ToArray();
 
         return new PayrollFinding(
-            FindingKey: $"missing-tech:{group.IdCalendar}:{group.Date:yyyyMMdd}:{missingResourceId}",
+            FindingKey: findingType == PayrollFindingType.WrongProjectBooking
+                ? $"wrong-dossier:{group.IdCalendar}:{group.Date:yyyyMMdd}:{missingResourceId}"
+                : $"missing-tech:{group.IdCalendar}:{group.Date:yyyyMMdd}:{missingResourceId}",
             ResourceId: missingResourceId,
             Date: group.Date,
-            FindingType: PayrollFindingType.MissingPlannedTechnicianPerformance,
+            FindingType: findingType,
             Severity: severity,
-            Title: "Mogelijk ontbrekende prestatie",
+            Title: title,
             Description: description,
             Evidence: evidence,
             SuggestedAction: action,
-            RelatedPerformanceIds: peers.Select(item => item.SourceEntryId)
-                .Concat(conflicting is null ? [] : new[] { conflicting.SourceEntryId })
-                .Distinct()
-                .OrderBy(id => id)
-                .ToArray(),
+            RelatedPerformanceIds: related,
             PlannedHours: group.TimeFrom is not null && group.TimeTo is not null && group.TimeTo > group.TimeFrom
                 ? (decimal)(group.TimeTo.Value.ToTimeSpan() - group.TimeFrom.Value.ToTimeSpan()).TotalHours
                 : null,
@@ -342,7 +431,45 @@ public static class MissingTechnicianControl
             SuggestedPayableHours: suggestedHours,
             SuggestedProjectId: suggestedProject,
             SuggestedBonNr: suggestedBon,
-            GpsClassification: evidenceClass.ToString());
+            GpsClassification: findingType == PayrollFindingType.WrongProjectBooking
+                ? nameof(MissingTechnicianConflictClass.PlannedJobSupportedExistingBookingWrong)
+                : evidenceClass.ToString());
+    }
+
+    private static JobLocationEvidence? ResolveJobLocation(
+        IReadOnlyDictionary<string, JobLocationEvidence> locations,
+        string? projectId,
+        int? projectNumber,
+        string? bonNr,
+        NormalizedPerformanceEntry? performance)
+    {
+        if (!string.IsNullOrWhiteSpace(bonNr)
+            && locations.TryGetValue("bon:" + bonNr.Trim(), out var byBon))
+        {
+            return byBon;
+        }
+
+        if (!string.IsNullOrWhiteSpace(projectId)
+            && locations.TryGetValue("project:" + projectId.Trim(), out var byProject))
+        {
+            return byProject;
+        }
+
+        if (projectNumber is not null
+            && locations.TryGetValue("projnr:" + projectNumber.Value.ToString(CultureInfo.InvariantCulture), out var byNr))
+        {
+            return byNr;
+        }
+
+        if (performance is not null
+            && locations.TryGetValue("perf:" + performance.SourceEntryId.ToString(CultureInfo.InvariantCulture), out var byPerf))
+        {
+            return byPerf;
+        }
+
+        return performance is null
+            ? null
+            : MissingTechnicianSiteConflictAnalyzer.FromPerformancePostcode(performance, "auto");
     }
 
     private static (DateTimeOffset? Start, DateTimeOffset? End, decimal? Hours, string IntervalSource) ProposeInterval(
@@ -591,7 +718,13 @@ public static class MissingTechnicianControl
         MissingTechnicianTravelMode travelMode,
         string intervalSource,
         int? suggestedHfdTaakId,
-        (DateTimeOffset? Arrival, DateTimeOffset? Departure, string? Note) site)
+        (DateTimeOffset? Arrival, DateTimeOffset? Departure, string? Note) site,
+        MissingTechnicianSiteMatch siteMatch,
+        MissingTechnicianConflictClass conflictClass,
+        JobLocationEvidence? plannedLocation,
+        JobLocationEvidence? existingLocation,
+        DateTimeOffset? proposedStart,
+        DateTimeOffset? proposedEnd)
     {
         var sb = new StringBuilder();
         sb.Append(CultureInfo.InvariantCulture,
@@ -600,6 +733,30 @@ public static class MissingTechnicianControl
             $"planned={FormatPlannedInterval(group)}; missing={missingResourceId}; ");
         sb.Append(CultureInfo.InvariantCulture,
             $"intervalSource={intervalSource}; travelMode={travelMode}; travelNl={TravelModeDutch(travelMode)}; ");
+        sb.Append(CultureInfo.InvariantCulture,
+            $"siteMatch={siteMatch}; conflictClass={conflictClass}; ");
+        sb.Append(CultureInfo.InvariantCulture,
+            $"siteMatchNl={MissingTechnicianSiteConflictAnalyzer.FormatSiteMatchNl(siteMatch)}; ");
+        sb.Append(CultureInfo.InvariantCulture,
+            $"conflictNl={MissingTechnicianSiteConflictAnalyzer.FormatConflictNl(conflictClass)}; ");
+        if (proposedStart is not null && proposedEnd is not null)
+        {
+            sb.Append(CultureInfo.InvariantCulture,
+                $"proposedInterval={proposedStart:HH:mm}-{proposedEnd:HH:mm}; ");
+        }
+
+        if (plannedLocation is not null)
+        {
+            sb.Append(CultureInfo.InvariantCulture,
+                $"plannedSite={plannedLocation.Postcode ?? plannedLocation.AddressLabel ?? "—"} src={plannedLocation.Source} conf={plannedLocation.Confidence}; ");
+        }
+
+        if (existingLocation is not null)
+        {
+            sb.Append(CultureInfo.InvariantCulture,
+                $"existingSite={existingLocation.Postcode ?? existingLocation.AddressLabel ?? "—"} src={existingLocation.Source} conf={existingLocation.Confidence}; ");
+        }
+
         if (suggestedHfdTaakId is > 0)
         {
             sb.Append(CultureInfo.InvariantCulture, $"suggestedHfdTaakId={suggestedHfdTaakId.Value}; ");

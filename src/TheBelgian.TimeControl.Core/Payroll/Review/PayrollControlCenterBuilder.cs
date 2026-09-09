@@ -23,6 +23,7 @@ public static class PayrollControlCenterBuilder
         PayrollReviewCategory.Project100,
         PayrollReviewCategory.Standby,
         PayrollReviewCategory.MissingPerformance,
+        PayrollReviewCategory.WrongDossier,
         PayrollReviewCategory.Overlap,
         PayrollReviewCategory.Other,
     ];
@@ -161,6 +162,7 @@ public static class PayrollControlCenterBuilder
         PayrollReviewCategory.Standby => "./StandbyWorkbench",
         PayrollReviewCategory.Overlap => "./OverlapWorkbench",
         PayrollReviewCategory.MissingPerformance => "./MissingTechnicianWorkbench",
+        PayrollReviewCategory.WrongDossier => "./MissingTechnicianWorkbench",
         _ => "./Queue",
     };
 
@@ -265,7 +267,8 @@ public static class PayrollControlCenterBuilder
             return ($"High {high} / Review {review}", high);
         }
 
-        if (category == PayrollReviewCategory.MissingPerformance)
+        if (category == PayrollReviewCategory.MissingPerformance
+            || category == PayrollReviewCategory.WrongDossier)
         {
             var high = openOrFollow.Count(item => item.Severity == PayrollFindingSeverity.High);
             var review = openOrFollow.Count(item => item.Severity == PayrollFindingSeverity.Review);
@@ -464,6 +467,7 @@ public static class PayrollControlCenterBuilder
         PayrollReviewCategory.Project100 => "OPLEIDING / PROJECT 100",
         PayrollReviewCategory.Standby => "WACHTDIENST",
         PayrollReviewCategory.MissingPerformance => "ONTBREKENDE PRESTATIES",
+        PayrollReviewCategory.WrongDossier => "MOGELIJK VERKEERD DOSSIER",
         PayrollReviewCategory.Overlap => "DUBBELE UREN",
         _ => "OTHER",
     };

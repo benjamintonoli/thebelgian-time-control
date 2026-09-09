@@ -33,6 +33,7 @@ public static class PayrollGuidedDecisionCodes
     public const string MissingTechPlanningWrong = "MISSING_TECH_PLANNING_WRONG";
     public const string MissingTechOtherHours = "MISSING_TECH_OTHER_HOURS";
     public const string MissingTechUncertain = "MISSING_TECH_UNCERTAIN";
+    public const string MissingTechWrongBooking = "MISSING_TECH_WRONG_BOOKING";
 
     public const string OverlapAWrong = "OVERLAP_A_WRONG";
     public const string OverlapBWrong = "OVERLAP_B_WRONG";
@@ -52,6 +53,7 @@ public static class PayrollGuidedDecisions
         PayrollReviewCategory.Project100 => "Klopt deze toolbox/opleiding en de duur?",
         PayrollReviewCategory.Standby => "Hoe verliep deze wachtdienst?",
         PayrollReviewCategory.MissingPerformance => "Heeft deze technieker hier effectief gewerkt?",
+        PayrollReviewCategory.WrongDossier => "Is de huidige boeking op het verkeerde project/BON gezet?",
         PayrollReviewCategory.Overlap => "Zijn deze uren dubbel geboekt?",
         _ => "Wat is de juiste beoordeling voor deze controle?",
     };
@@ -94,7 +96,15 @@ public static class PayrollGuidedDecisions
         PayrollReviewCategory.MissingPerformance =>
         [
             Choice(PayrollGuidedDecisionCodes.MissingTechConfirmed, "Prestatie aanmaken", PayrollFindingStatus.NeedsFollowUp, requiresComment: false),
+            Choice(PayrollGuidedDecisionCodes.MissingTechWrongBooking, "Huidige boeking lijkt fout", PayrollFindingStatus.NeedsFollowUp, requiresComment: false),
             Choice(PayrollGuidedDecisionCodes.MissingTechOtherHours, "Andere uren", PayrollFindingStatus.NeedsFollowUp, requiresComment: true),
+            Choice(PayrollGuidedDecisionCodes.MissingTechPlanningWrong, "Niet aanmaken", PayrollFindingStatus.Reviewed, requiresComment: false),
+            Choice(PayrollGuidedDecisionCodes.MissingTechUncertain, "Onzeker", PayrollFindingStatus.NeedsFollowUp, requiresComment: true),
+        ],
+        PayrollReviewCategory.WrongDossier =>
+        [
+            Choice(PayrollGuidedDecisionCodes.MissingTechWrongBooking, "Huidige boeking lijkt fout", PayrollFindingStatus.NeedsFollowUp, requiresComment: false),
+            Choice(PayrollGuidedDecisionCodes.MissingTechConfirmed, "Prestatie aanmaken", PayrollFindingStatus.NeedsFollowUp, requiresComment: false),
             Choice(PayrollGuidedDecisionCodes.MissingTechPlanningWrong, "Niet aanmaken", PayrollFindingStatus.Reviewed, requiresComment: false),
             Choice(PayrollGuidedDecisionCodes.MissingTechUncertain, "Onzeker", PayrollFindingStatus.NeedsFollowUp, requiresComment: true),
         ],

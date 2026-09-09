@@ -115,6 +115,14 @@ public static partial class PayrollIntelligenceWorkbenchBuilder
 
         var mainTaskId = PayrollActionEligibility.ParseSuggestedHfdTaakId(finding.Evidence);
         var (canCreate, createBlock) = EvaluateCreateGate(finding, mainTaskId);
+        var siteMatchRaw = ParseToken(finding.Evidence, "siteMatch");
+        var conflictRaw = ParseToken(finding.Evidence, "conflictClass");
+        Enum.TryParse<MissingTechnicianSiteMatch>(siteMatchRaw, ignoreCase: true, out var siteMatch);
+        Enum.TryParse<MissingTechnicianConflictClass>(conflictRaw, ignoreCase: true, out var conflictClass);
+        var isWrongDossier = finding.FindingType == PayrollFindingType.WrongProjectBooking
+            || conflictClass == MissingTechnicianConflictClass.PlannedJobSupportedExistingBookingWrong;
+        var conflictToken = ParseToken(finding.Evidence, "conflict");
+        var plannedSite = ParseToken(finding.Evidence, "plannedSite");
 
         return new PayrollIntelligenceCaseDetail(
             adminCase,
@@ -143,10 +151,22 @@ public static partial class PayrollIntelligenceWorkbenchBuilder
                 finding.SuggestedProjectId,
                 finding.SuggestedBonNr,
                 mainTaskId,
-                canCreate,
-                createBlock,
+                canCreate && !isWrongDossier,
+                isWrongDossier
+                    ? "Vervangplan: eerst bestaande boeking verwijderen, daarna correcte prestatie aanmaken (Create feature-gated)."
+                    : createBlock,
                 finding.Evidence,
-                finding.SuggestedAction),
+                finding.SuggestedAction,
+                siteMatch,
+                MissingTechnicianSiteConflictAnalyzer.FormatSiteMatchNl(siteMatch),
+                conflictClass,
+                MissingTechnicianSiteConflictAnalyzer.FormatConflictNl(conflictClass),
+                plannedSite,
+                conflictToken,
+                isWrongDossier,
+                isWrongDossier
+                    ? "1) DeleteExistingPerformance op huidige boeking  2) CreatePerformance op geplande job/BON met GPS-interval"
+                    : null),
             BuildGpsContext(gps, gpsPending));
     }
 

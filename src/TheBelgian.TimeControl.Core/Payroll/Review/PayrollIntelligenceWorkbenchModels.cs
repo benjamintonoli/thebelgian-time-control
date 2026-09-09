@@ -78,7 +78,15 @@ public sealed record PayrollMissingWorkbenchDetail(
     bool CanProposeCreate,
     string? CreateBlockReason,
     string FindingEvidence,
-    string SuggestedAction);
+    string SuggestedAction,
+    MissingTechnicianSiteMatch SiteMatch = MissingTechnicianSiteMatch.LocationUnknown,
+    string SiteMatchNl = "",
+    MissingTechnicianConflictClass ConflictClass = MissingTechnicianConflictClass.None,
+    string ConflictClassNl = "",
+    string? PlannedSiteLabel = null,
+    string? ExistingBookingSummary = null,
+    bool IsWrongDossier = false,
+    string? ReplacementPlanNl = null);
 
 public sealed record PayrollIntelligenceGpsContext(
     bool Available,

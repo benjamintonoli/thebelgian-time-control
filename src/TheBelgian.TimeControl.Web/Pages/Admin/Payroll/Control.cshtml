@@ -16,23 +16,32 @@
     string FmtMoney(decimal? value) =>
         value is null ? "—" : "€ " + value.Value.ToString("0.00", nl);
     string CardHref(PayrollControlCard card) =>
-        card.Category is PayrollReviewCategory.Project300
-            or PayrollReviewCategory.Project200
-            or PayrollReviewCategory.Project100
-            or PayrollReviewCategory.Standby
-            or PayrollReviewCategory.Overlap
-            or PayrollReviewCategory.MissingPerformance
-            ? Url.Page(card.NavigationPage, new { year = Model.Year, month = Model.Month })!
-            : Url.Page("./Queue", new { year = Model.Year, month = Model.Month, Category = card.Category })!;
+        card.Category is PayrollReviewCategory.MissingPerformance or PayrollReviewCategory.WrongDossier
+            ? Url.Page(card.NavigationPage, new { year = Model.Year, month = Model.Month, Category = card.Category })!
+            : card.Category is PayrollReviewCategory.Project300
+                or PayrollReviewCategory.Project200
+                or PayrollReviewCategory.Project100
+                or PayrollReviewCategory.Standby
+                or PayrollReviewCategory.Overlap
+                ? Url.Page(card.NavigationPage, new { year = Model.Year, month = Model.Month })!
+                : Url.Page("./Queue", new { year = Model.Year, month = Model.Month, Category = card.Category })!;
     string PriorityHref(PayrollControlPriorityItem item) =>
-        item.Category is PayrollReviewCategory.Project300
-            or PayrollReviewCategory.Project200
-            or PayrollReviewCategory.Project100
-            or PayrollReviewCategory.Standby
-            or PayrollReviewCategory.Overlap
-            or PayrollReviewCategory.MissingPerformance
-            ? Url.Page(item.NavigationPage, new { year = Model.Year, month = Model.Month, Focus = item.FocusKey, Scope = PayrollReviewQueueScope.Open })!
-            : Url.Page("./Queue", new { year = Model.Year, month = Model.Month, Category = item.Category, Focus = item.FocusKey })!;
+        item.Category is PayrollReviewCategory.MissingPerformance or PayrollReviewCategory.WrongDossier
+            ? Url.Page(item.NavigationPage, new
+            {
+                year = Model.Year,
+                month = Model.Month,
+                Focus = item.FocusKey,
+                Scope = PayrollReviewQueueScope.Open,
+                Category = item.Category,
+            })!
+            : item.Category is PayrollReviewCategory.Project300
+                or PayrollReviewCategory.Project200
+                or PayrollReviewCategory.Project100
+                or PayrollReviewCategory.Standby
+                or PayrollReviewCategory.Overlap
+                ? Url.Page(item.NavigationPage, new { year = Model.Year, month = Model.Month, Focus = item.FocusKey, Scope = PayrollReviewQueueScope.Open })!
+                : Url.Page("./Queue", new { year = Model.Year, month = Model.Month, Category = item.Category, Focus = item.FocusKey })!;
 }
 
 <div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">

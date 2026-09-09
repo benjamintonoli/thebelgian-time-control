@@ -17,6 +17,8 @@ public enum PayrollFindingType
     StandbyAmbiguousEvidence = 13,
     StandbyNoGpsData = 14,
     MissingPlannedTechnicianPerformance = 15,
+    /// <summary>Existing performance likely booked on wrong project/BON vs planned+GPS site.</summary>
+    WrongProjectBooking = 16,
 }
 
 public enum PayrollFindingSeverity

@@ -19,10 +19,10 @@ public sealed class MissingTechnicianWorkbenchModel(
     IOptions<AdminReviewWorkflowOptions> reviewOptions,
     ILogger<MissingTechnicianWorkbenchModel> logger) : PageModel
 {
-    private const PayrollReviewCategory Category = PayrollReviewCategory.MissingPerformance;
-
     [BindProperty(SupportsGet = true)] public int Year { get; set; }
     [BindProperty(SupportsGet = true)] public int Month { get; set; }
+    [BindProperty(SupportsGet = true)] public PayrollReviewCategory Category { get; set; } =
+        PayrollReviewCategory.MissingPerformance;
     [BindProperty(SupportsGet = true)] public string? Focus { get; set; }
     [BindProperty(SupportsGet = true)] public string? Search { get; set; }
     [BindProperty(SupportsGet = true)] public string Sort { get; set; } = "default";
@@ -51,6 +51,8 @@ public sealed class MissingTechnicianWorkbenchModel(
             return NotFound();
         }
 
+        NormalizeCategory();
+
         if (!string.IsNullOrWhiteSpace(FlashSuccess))
         {
             Message = FlashSuccess;
@@ -67,6 +69,7 @@ public sealed class MissingTechnicianWorkbenchModel(
             return NotFound();
         }
 
+        NormalizeCategory();
         Workbench = await workbenchService.GetCoreDetailAsync(
             Year,
             Month,
@@ -251,6 +254,7 @@ public sealed class MissingTechnicianWorkbenchModel(
 
     private async Task LoadShellAsync(CancellationToken cancellationToken)
     {
+        NormalizeCategory();
         Workbench = await workbenchService.GetShellAsync(
             Year,
             Month,
@@ -259,6 +263,14 @@ public sealed class MissingTechnicianWorkbenchModel(
             Focus,
             cancellationToken);
         GpsHints = BuildHints(Workbench);
+    }
+
+    private void NormalizeCategory()
+    {
+        if (Category is not (PayrollReviewCategory.MissingPerformance or PayrollReviewCategory.WrongDossier))
+        {
+            Category = PayrollReviewCategory.MissingPerformance;
+        }
     }
 
     private PayrollReviewQueueFilter BuildFilter() =>

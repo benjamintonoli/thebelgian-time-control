@@ -40,6 +40,61 @@ else
         </section>
 
         <section class="mb-3 border rounded p-3">
+            <div class="text-uppercase small text-muted fw-semibold mb-2">Vergelijking</div>
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <div class="small text-muted fw-semibold">GEPLANDE JOB</div>
+                    <div>Project @(missing.SuggestedProjectId ?? "—")</div>
+                    <div>BON @(missing.SuggestedBonNr ?? "—")</div>
+                    <div>Site @(missing.PlannedSiteLabel ?? "—")</div>
+                    <div class="small text-muted mt-1">Peer @(missing.PeerIntervalSummary ?? "—")</div>
+                </div>
+                <div class="col-md-4">
+                    <div class="small text-muted fw-semibold">HUIDIGE BOEKING</div>
+                    @if (!string.IsNullOrWhiteSpace(missing.ExistingBookingSummary))
+                    {
+                        <div>@missing.ExistingBookingSummary</div>
+                    }
+                    else
+                    {
+                        <div class="text-muted">Geen conflicterende boeking in voorstelinterval.</div>
+                    }
+                </div>
+                <div class="col-md-4">
+                    <div class="small text-muted fw-semibold">TRACK &amp; TRACE</div>
+                    <div>
+                        Aankomst werf:
+                        @(missing.GpsSiteStart is null ? "onbekend" : FmtTime(missing.GpsSiteStart))
+                    </div>
+                    <div>
+                        Vertrek werf:
+                        @(missing.GpsSiteStart is not null && missing.GpsSiteEnd is null
+                            ? "onbekend"
+                            : (missing.GpsSiteEnd is null ? "—" : FmtTime(missing.GpsSiteEnd)))
+                    </div>
+                    <div class="fw-semibold mt-1">@missing.SiteMatchNl</div>
+                    <div class="small text-muted">@missing.ConflictClassNl</div>
+                </div>
+            </div>
+            <div class="mt-3">
+                <div class="text-uppercase small text-muted fw-semibold mb-1">CONCLUSIE</div>
+                <div class="fw-semibold">@missing.SiteMatchNl</div>
+                <div class="small">@missing.SuggestedAction</div>
+            </div>
+            @if (missing.IsWrongDossier)
+            {
+                <div class="alert alert-warning small mt-2 mb-0">
+                    <strong>Mogelijk verkeerde project/bon geboekt.</strong>
+                    @if (!string.IsNullOrWhiteSpace(missing.ReplacementPlanNl))
+                    {
+                        <div class="mt-1">@missing.ReplacementPlanNl</div>
+                    }
+                    Geen directe Project/BON UPDATE — alleen Delete + Create na goedkeuring.
+                </div>
+            }
+        </section>
+
+        <section class="mb-3 border rounded p-3">
             <div class="text-uppercase small text-muted fw-semibold mb-1">Collega-interval</div>
             @if (missing.PeerIntervalSummary is not null)
             {
@@ -47,6 +102,10 @@ else
                 <div class="small text-muted">
                     @(missing.PeerResourceId ?? "—")
                     @if (missing.PeerPerformanceId is > 0) { <span>· #@missing.PeerPerformanceId</span> }
+                    @if (missing.TravelMode == MissingTechnicianTravelMode.SharedTravelPossible)
+                    {
+                        <span>· mogelijk samen gereden (handmatige keuze)</span>
+                    }
                 </div>
             }
             else
@@ -60,10 +119,14 @@ else
             <div id="gps-site-summary">
                 @if (missing.GpsSiteStart is not null)
                 {
-                    <span>@FmtTime(missing.GpsSiteStart)–@FmtTime(missing.GpsSiteEnd)</span>
+                    <div>Aankomst werf: @FmtTime(missing.GpsSiteStart)</div>
+                    <div>
+                        Vertrek werf:
+                        @(missing.GpsSiteEnd is null ? "onbekend" : FmtTime(missing.GpsSiteEnd))
+                    </div>
                     @if (!string.IsNullOrWhiteSpace(missing.GpsSiteNote))
                     {
-                        <span class="text-muted">· @missing.GpsSiteNote</span>
+                        <div class="small text-muted">@missing.GpsSiteNote</div>
                     }
                 }
                 else

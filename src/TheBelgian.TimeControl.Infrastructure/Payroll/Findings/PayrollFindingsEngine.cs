@@ -30,11 +30,13 @@ public static class PayrollFindingsEngine
             ?? performances.Select(item => item.ResourceId)
                 .Concat(planning.Select(item => item.ResourceId))
                 .ToHashSet(StringComparer.Ordinal);
+        var locations = MissingTechnicianJobLocationBuilder.FromPerformances(performances);
         var missing = MissingTechnicianControl.Evaluate(
             performances,
             planning,
             standbyGps ?? [],
-            included);
+            included,
+            locations);
         var findings = special.Concat(overlaps).Concat(standby).Concat(missing)
             .OrderBy(item => item.ResourceId, StringComparer.Ordinal)
             .ThenByDescending(item => item.Severity)

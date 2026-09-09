@@ -14,6 +14,7 @@ public enum PayrollReviewCategory
     Overlap = 5,
     MissingPerformance = 6,
     Other = 7,
+    WrongDossier = 8,
 }
 
 public enum PayrollReviewCaseActionability
@@ -130,6 +131,7 @@ public static class PayrollReviewCategories
             => PayrollReviewCategory.Project100,
         PayrollFindingType.OverlappingPerformances => PayrollReviewCategory.Overlap,
         PayrollFindingType.MissingPlannedTechnicianPerformance => PayrollReviewCategory.MissingPerformance,
+        PayrollFindingType.WrongProjectBooking => PayrollReviewCategory.WrongDossier,
         PayrollFindingType.StandbyPhoneExceeds15Min
             or PayrollFindingType.StandbyStartMismatch
             or PayrollFindingType.StandbyEndMismatch
@@ -150,6 +152,7 @@ public static class PayrollReviewCategories
         PayrollReviewCategory.Standby => "Wachtdienst",
         PayrollReviewCategory.Overlap => "Dubbele uren",
         PayrollReviewCategory.MissingPerformance => "Ontbrekende prestatie",
+        PayrollReviewCategory.WrongDossier => "Mogelijk verkeerd dossier",
         PayrollReviewCategory.Other => "Overig",
         _ => category.ToString(),
     };
@@ -178,6 +181,7 @@ public static class PayrollReviewCategories
             PayrollFindingType.Project100ExceedsPlannedDuration => "Meer geboekt dan gepland",
             PayrollFindingType.OverlappingPerformances => "Dubbele / overlappende uren",
             PayrollFindingType.MissingPlannedTechnicianPerformance => "Mogelijk ontbrekende prestatie",
+            PayrollFindingType.WrongProjectBooking => "Mogelijk verkeerde project/bon",
             PayrollFindingType.StandbyPhoneExceeds15Min => "Telefonisch > 15 min",
             PayrollFindingType.StandbyStartMismatch => "Start wijkt af van GPS",
             PayrollFindingType.StandbyEndMismatch => "Einde wijkt af van GPS",

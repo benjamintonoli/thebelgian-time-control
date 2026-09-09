@@ -277,6 +277,16 @@ public static class PayrollActionEligibility
                 "Payrollmaand is afgesloten; geen create-voorstel.");
         }
 
+        if (finding.FindingType == PayrollFindingType.WrongProjectBooking
+            || string.Equals(
+                finding.GpsClassification,
+                nameof(MissingTechnicianConflictClass.PlannedJobSupportedExistingBookingWrong),
+                StringComparison.Ordinal))
+        {
+            return Block(actionType, evidence, semantics, PayrollActionBlockReasonCode.ConflictingPerformance,
+                "Mogelijk verkeerd dossier: geen directe create. Vervangplan = Delete + Create na goedkeuring (geen Project/BON UPDATE).");
+        }
+
         if (IsNoGps(finding))
         {
             return Block(actionType, evidence, PayrollIntervalSemantics.Ambiguous,
