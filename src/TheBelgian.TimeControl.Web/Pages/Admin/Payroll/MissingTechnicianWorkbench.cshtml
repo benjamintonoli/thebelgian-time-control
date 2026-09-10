@@ -3,7 +3,7 @@
 @using TheBelgian.TimeControl.Core.Payroll.Findings
 @using TheBelgian.TimeControl.Core.Payroll.Review
 @{
-    ViewData["Title"] = $"Missing technician {Model.Month:00}/{Model.Year}";
+    ViewData["Title"] = $"Ontbrekende prestaties {Model.Month:00}/{Model.Year}";
     var wb = Model.Workbench;
     string ScopeHref(PayrollReviewQueueScope scope) =>
         Url.Page("./MissingTechnicianWorkbench", new
@@ -21,8 +21,8 @@
 <div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
     <div>
         <div class="text-uppercase small text-muted fw-semibold">Looncontrole · Ontbrekende prestaties</div>
-        <h1 class="h3 mb-1">Missing technician @Model.Month.ToString("00")/@Model.Year</h1>
-        <p class="text-muted mb-0">Queue links · collega/GPS rechts · create via ActionConfirm. Geen automatische Plenion-writes.</p>
+        <h1 class="h3 mb-1">Ontbrekende prestaties @Model.Month.ToString("00")/@Model.Year</h1>
+        <p class="text-muted mb-0">Lijst links · detail rechts · create via goedkeuring. Geen automatische Plenion-writes.</p>
     </div>
     <div class="d-flex flex-wrap gap-2">
         <a class="btn btn-sm btn-outline-secondary" asp-page="./Control" asp-route-year="@Model.Year" asp-route-month="@Model.Month">Control</a>
@@ -46,6 +46,7 @@ else
 
     <div class="btn-group btn-group-sm mb-3" role="group">
         <a class="btn @(Model.Scope == PayrollReviewQueueScope.Open ? "btn-dark" : "btn-outline-secondary")" href="@ScopeHref(PayrollReviewQueueScope.Open)">Te beoordelen</a>
+        <a class="btn @(Model.Scope == PayrollReviewQueueScope.FollowUp ? "btn-dark" : "btn-outline-secondary")" href="@ScopeHref(PayrollReviewQueueScope.FollowUp)">Opvolging</a>
         <a class="btn @(Model.Scope == PayrollReviewQueueScope.Closed ? "btn-dark" : "btn-outline-secondary")" href="@ScopeHref(PayrollReviewQueueScope.Closed)">Afgehandeld</a>
         <a class="btn @(Model.Scope == PayrollReviewQueueScope.All ? "btn-dark" : "btn-outline-secondary")" href="@ScopeHref(PayrollReviewQueueScope.All)">Alles</a>
     </div>
@@ -73,21 +74,24 @@ else
     <form id="wb-af" class="d-none">@Html.AntiForgeryToken()</form>
 
     <div class="timecontrol-cockpit payroll-intel-workbench">
-        <aside class="review-queue review-queue-sticky" aria-label="Missing queue">
-            <div class="queue-title"><strong>Missing queue</strong><span>@wb.Cases.Count</span></div>
+        <aside class="review-queue review-queue-sticky" aria-label="Ontbrekende prestaties">
+            <div class="queue-title"><strong>Queue</strong><span>@wb.Cases.Count</span></div>
             <div class="queue-report-form">
                 <div class="queue-items" id="intel-queue-items">
                     @foreach (var item in wb.Cases)
                     {
                         var active = string.Equals(wb.SelectedKey, item.AdminCaseKey, StringComparison.Ordinal) ? "active" : null;
                         <article class="queue-case @active" data-admin-case-key="@item.AdminCaseKey">
-                            <a class="queue-case-link wb-select-case" href="#" data-admin-case-key="@item.AdminCaseKey" aria-current="@(active is null ? null : "true")">
+                            <a class="queue-case-link wb-select-case"
+                               href="@Url.Page("./MissingTechnicianWorkbench", new { year = Model.Year, month = Model.Month, Scope = Model.Scope, Search = Model.Search, Sort = Model.Sort, Focus = item.AdminCaseKey, Category = Model.Category })"
+                               data-admin-case-key="@item.AdminCaseKey"
+                               aria-current="@(active is null ? null : "true")">
                                 <div class="queue-case-top">
                                     <strong>@(item.DisplayName ?? item.ResourceId)</strong>
                                     <span>@PayrollDisplayFormatting.DateWithWeekdayShort(item.Date)</span>
                                 </div>
                                 <div class="queue-facts">
-                                    <span>@(item.FriendlyState ?? item.IssueSummary ?? "—")</span>
+                                    <span>@(item.IssueSummary ?? item.FriendlyState ?? "Ontbrekende prestatie")</span>
                                 </div>
                                 <div class="queue-case-bottom">
                                     @{
@@ -101,6 +105,7 @@ else
                                         };
                                     }
                                     <span class="queue-status-dot @(openish ? "text-warning" : "text-success")">●</span>
+                                    <span class="small text-muted">@PayrollGuidedDecisions.AdminStatusLabel(item.WorkflowStatus)</span>
                                     @if (!string.IsNullOrEmpty(hintText))
                                     {
                                         <span class="queue-gps-hint text-muted">@hintText</span>
@@ -118,10 +123,24 @@ else
         </aside>
 
         <main class="case-detail position-relative" id="intel-case-detail">
-            <div class="empty-detail p-4">
-                <h2 class="h5">Context laden…</h2>
-                <p class="text-muted mb-0">Selecteer een case of wacht op detail.</p>
-            </div>
+            @if (wb.Detail?.Missing is not null)
+            {
+                @await Html.PartialAsync("_MissingTechnicianDetail", Model)
+            }
+            else if (wb.Cases.Count == 0)
+            {
+                <div class="empty-detail p-4">
+                    <h2 class="h5">Geen cases</h2>
+                    <p class="text-muted mb-0">Pas filters aan of kies een andere tab.</p>
+                </div>
+            }
+            else
+            {
+                <div class="empty-detail p-4">
+                    <h2 class="h5">Selecteer een case</h2>
+                    <p class="text-muted mb-0">Kies links een medewerker om het voorstel te bekijken.</p>
+                </div>
+            }
         </main>
     </div>
 }
@@ -305,7 +324,17 @@ else
     });
   });
 
-  if (currentKey) loadDetail(currentKey);
+  if (currentKey) {
+    // Detail may already be server-rendered; still wire actions and refresh Focus.
+    if (document.querySelector('.missing-detail-body')) {
+      wireDetail();
+      const urlObj = new URL(window.location.href);
+      urlObj.searchParams.set('Focus', currentKey);
+      history.replaceState(null, '', urlObj.pathname + urlObj.search);
+    } else {
+      loadDetail(currentKey);
+    }
+  }
 })();
 </script>
 }

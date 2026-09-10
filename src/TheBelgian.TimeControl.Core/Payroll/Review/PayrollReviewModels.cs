@@ -32,6 +32,8 @@ public enum PayrollReviewQueueScope
     /// <summary>Reviewed + Resolved + Dismissed.</summary>
     Closed = 1,
     All = 2,
+    /// <summary>NeedsFollowUp only.</summary>
+    FollowUp = 3,
 }
 
 /// <summary>

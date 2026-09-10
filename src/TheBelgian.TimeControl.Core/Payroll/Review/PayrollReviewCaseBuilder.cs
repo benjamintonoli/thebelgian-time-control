@@ -62,6 +62,7 @@ public static class PayrollReviewCaseBuilder
         {
             PayrollReviewQueueScope.Open => query.Where(item => PayrollReviewCategories.IsUnresolved(item.WorkflowStatus)),
             PayrollReviewQueueScope.Closed => query.Where(item => PayrollReviewCategories.IsClosed(item.WorkflowStatus)),
+            PayrollReviewQueueScope.FollowUp => query.Where(item => item.WorkflowStatus == PayrollFindingStatus.NeedsFollowUp),
             _ => query,
         };
 

@@ -43,16 +43,28 @@ else
             <div class="text-uppercase small text-muted fw-semibold">@expl.Headline</div>
             <h2 class="h4 mb-1">@(selected.DisplayName ?? selected.ResourceId)</h2>
             <div class="text-muted">@PayrollDisplayFormatting.DateWithWeekday(selected.Date)</div>
-            <div class="mt-2">
+            <div class="mt-2 d-flex flex-wrap gap-2">
+                <span class="badge text-bg-light text-dark border">@PayrollReviewLabels.Category(selected.Category)</span>
                 <span class="badge text-bg-light text-dark border">@PayrollGuidedDecisions.AdminStatusLabel(selected.WorkflowStatus)</span>
             </div>
         </header>
 
+        @if (!string.IsNullOrWhiteSpace(expl.NarrativeNl))
+        {
+            <div class="tc-mt-narrative">@expl.NarrativeNl</div>
+        }
+
         <section class="border rounded p-3 mb-3">
+            <div class="text-uppercase small text-muted fw-semibold mb-2">Jobcontext</div>
             <div class="row g-2">
                 <div class="col-md-6">
                     <div class="small text-muted">Klant / werf</div>
                     <div class="fw-semibold">@(expl.CustomerSiteLabel ?? "—")</div>
+                    @if (!string.IsNullOrWhiteSpace(expl.PlanningSubject)
+                         && !string.Equals(expl.PlanningSubject, expl.CustomerSiteLabel, StringComparison.OrdinalIgnoreCase))
+                    {
+                        <div class="small text-muted mt-1">@expl.PlanningSubject</div>
+                    }
                 </div>
                 <div class="col-md-3">
                     <div class="small text-muted">Project</div>
@@ -63,10 +75,16 @@ else
                     <div class="fw-semibold">@(missing.SuggestedBonNr ?? "—")</div>
                 </div>
             </div>
-            @if (!string.IsNullOrWhiteSpace(expl.PlannedSiteLabel))
-            {
-                <div class="small text-muted mt-2">Site: @expl.PlannedSiteLabel</div>
-            }
+            <div class="row g-2 mt-2">
+                <div class="col-md-6">
+                    <div class="small text-muted">Site</div>
+                    <div>@(expl.PlannedSiteLabel ?? "—")</div>
+                </div>
+                <div class="col-md-6">
+                    <div class="small text-muted">Geplande uren</div>
+                    <div>@(expl.PlanningInterval ?? "—")</div>
+                </div>
+            </div>
         </section>
 
         <section class="border rounded p-3 mb-3 tc-mt-why">
@@ -98,6 +116,9 @@ else
             <div class="text-uppercase small text-muted fw-semibold mb-2">@expl.PeerRoleLabel</div>
             <div class="fw-semibold">@(expl.PeerDisplayName ?? "—")</div>
             <div>Uren: @(expl.PeerInterval ?? "—")</div>
+            <div class="small text-muted mt-1">
+                Reiswijze: @PayrollReviewLabels.MissingTechnicianTravelMode(missing.TravelMode)
+            </div>
             <div class="small text-muted">Zelfde job · Project @(missing.SuggestedProjectId ?? "—") · BON @(missing.SuggestedBonNr ?? "—")</div>
             @if (!string.IsNullOrWhiteSpace(expl.LeadTechnicianName))
             {
@@ -159,7 +180,7 @@ else
             @if (!string.IsNullOrWhiteSpace(expl.ExistingOtherBookingNl))
             {
                 <div class="alert alert-secondary small mt-3 mb-0">
-                    <strong>Andere boeking controleren</strong>
+                    <strong>Bestaande boeking nakijken</strong>
                     <div>@expl.ExistingOtherBookingNl</div>
                 </div>
             }

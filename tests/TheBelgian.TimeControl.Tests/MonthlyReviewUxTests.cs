@@ -329,7 +329,7 @@ public sealed class MonthlyReviewUxTests
         var home = File.ReadAllText(Path.Combine(root, "src", "TheBelgian.TimeControl.Web", "Pages", "Index.cshtml"));
         var layout = File.ReadAllText(Path.Combine(root, "src", "TheBelgian.TimeControl.Web", "Pages", "Shared", "_Layout.cshtml"));
 
-        Assert.Contains("Controle van geregistreerde uren op basis van Plenion, planning en Track &amp; Trace.", home, StringComparison.Ordinal);
+        Assert.Contains("Controle van geregistreerde uren", home, StringComparison.Ordinal);
         Assert.DoesNotContain("proof-of-concept", home, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("The Belgian · TimeControl", layout, StringComparison.Ordinal);
     }

@@ -39,9 +39,11 @@ public sealed class AdminUxV2Tests
     public void HomeDashboard_ZeroCountCardsRemainAccessible()
     {
         var markup = File.ReadAllText(Path.Combine(FindRepoRoot(), "src", "TheBelgian.TimeControl.Web", "Pages", "Index.cshtml"));
-        Assert.Contains("tc-home-card-muted", markup, StringComparison.Ordinal);
-        Assert.Contains("te beoordelen", markup, StringComparison.Ordinal);
-        Assert.Contains("asp-page=\"@card.NavigationPage\"", markup, StringComparison.Ordinal);
+        Assert.Contains("CardToneClass", markup, StringComparison.Ordinal);
+        Assert.Contains("CardSubtitle", markup, StringComparison.Ordinal);
+        Assert.Contains("CardHref(card)", markup, StringComparison.Ordinal);
+        Assert.Contains("tc-tone-muted", File.ReadAllText(Path.Combine(
+            FindRepoRoot(), "src", "TheBelgian.TimeControl.Web", "Pages", "Admin", "Payroll", "PayrollNavUrls.cs")), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -73,10 +75,13 @@ public sealed class AdminUxV2Tests
     {
         Assert.Contains(
             PayrollGuidedDecisions.ChoicesFor(PayrollReviewCategory.MissingPerformance),
-            item => item.Label == "Andere boeking controleren");
+            item => item.Label == "Bestaande boeking nakijken");
         Assert.DoesNotContain(
             PayrollGuidedDecisions.ChoicesFor(PayrollReviewCategory.MissingPerformance),
             item => item.Label == "Huidige boeking lijkt fout");
+        Assert.Contains(
+            PayrollGuidedDecisions.ChoicesFor(PayrollReviewCategory.MissingPerformance),
+            item => item.Label == "Andere uren voorstellen");
         Assert.Equal(
             "Voorstel klaar voor controle",
             PayrollGuidedDecisions.ActionabilityHint(PayrollReviewCaseActionability.ReadyProposal, null));

@@ -96,14 +96,14 @@ public static class PayrollGuidedDecisions
         PayrollReviewCategory.MissingPerformance =>
         [
             Choice(PayrollGuidedDecisionCodes.MissingTechConfirmed, "Prestatie aanmaken", PayrollFindingStatus.NeedsFollowUp, requiresComment: false),
-            Choice(PayrollGuidedDecisionCodes.MissingTechWrongBooking, "Andere boeking controleren", PayrollFindingStatus.NeedsFollowUp, requiresComment: false),
-            Choice(PayrollGuidedDecisionCodes.MissingTechOtherHours, "Andere uren", PayrollFindingStatus.NeedsFollowUp, requiresComment: true),
+            Choice(PayrollGuidedDecisionCodes.MissingTechWrongBooking, "Bestaande boeking nakijken", PayrollFindingStatus.NeedsFollowUp, requiresComment: false),
+            Choice(PayrollGuidedDecisionCodes.MissingTechOtherHours, "Andere uren voorstellen", PayrollFindingStatus.NeedsFollowUp, requiresComment: true),
             Choice(PayrollGuidedDecisionCodes.MissingTechPlanningWrong, "Niet aanmaken", PayrollFindingStatus.Reviewed, requiresComment: false),
             Choice(PayrollGuidedDecisionCodes.MissingTechUncertain, "Onzeker", PayrollFindingStatus.NeedsFollowUp, requiresComment: true),
         ],
         PayrollReviewCategory.WrongDossier =>
         [
-            Choice(PayrollGuidedDecisionCodes.MissingTechWrongBooking, "Andere boeking controleren", PayrollFindingStatus.NeedsFollowUp, requiresComment: false),
+            Choice(PayrollGuidedDecisionCodes.MissingTechWrongBooking, "Bestaande boeking nakijken", PayrollFindingStatus.NeedsFollowUp, requiresComment: false),
             Choice(PayrollGuidedDecisionCodes.MissingTechConfirmed, "Prestatie aanmaken", PayrollFindingStatus.NeedsFollowUp, requiresComment: false),
             Choice(PayrollGuidedDecisionCodes.MissingTechPlanningWrong, "Niet aanmaken", PayrollFindingStatus.Reviewed, requiresComment: false),
             Choice(PayrollGuidedDecisionCodes.MissingTechUncertain, "Onzeker", PayrollFindingStatus.NeedsFollowUp, requiresComment: true),

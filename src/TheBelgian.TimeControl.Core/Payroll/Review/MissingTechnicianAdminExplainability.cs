@@ -66,7 +66,6 @@ public static class MissingTechnicianAdminExplainability
             excursionAway,
             proposed,
             timingSourcePrimary);
-        var timeline = BuildTimeline(siteArrival, siteDeparture, excursionInterval, excursionAway);
         var continuityAdmin = DeriveContinuityAdmin(workContinuity, continuityNl, excursionClass);
         var readinessNl = canProposeCreate
             ? "Voorstel klaar voor controle. Na jouw goedkeuring kan deze prestatie in Plenion worden aangemaakt."
@@ -76,6 +75,15 @@ public static class MissingTechnicianAdminExplainability
                 ? $"Taak {mainTaskId} — {label}"
                 : $"Taak {mainTaskId}"
             : null;
+        var narrative = BuildNarrative(
+            timingSourcePrimary,
+            peerDisplayName ?? peerResourceId,
+            peerStart,
+            peerEnd,
+            travelMode,
+            proposed,
+            existingBooking,
+            allocationReview);
 
         return new MissingTechnicianAdminExplanation(
             Headline: "ONTBREKENDE PRESTATIE",
@@ -91,10 +99,11 @@ public static class MissingTechnicianAdminExplainability
             TimingSourceSupporting: timingSourceSupporting,
             WhyIntro: "WAAROM WORDT DIT VOORGESTELD?",
             WhyBullets: whyBullets,
+            NarrativeNl: narrative,
             TimelineTitle: travelMode == MissingTechnicianTravelMode.SeparateVehicleProven
                 ? "TRACK & TRACE — EIGEN VOERTUIG"
-                : "TRACK & TRACE",
-            TimelineLines: timeline,
+                : "DAGTIJDLIJN",
+            TimelineLines: BuildTimeline(siteArrival, siteDeparture, excursionInterval, excursionAway, existingBooking),
             WorkContinuityTitle: "WERKCONTINUÏTEIT",
             WorkContinuityNl: continuityAdmin,
             AllocationReviewNl: allocationReview
@@ -237,12 +246,13 @@ public static class MissingTechnicianAdminExplainability
         string? arrival,
         string? departure,
         string? excursionInterval,
-        string? excursionAway)
+        string? excursionAway,
+        string? existingBooking)
     {
         var lines = new List<string>();
         if (!string.IsNullOrWhiteSpace(arrival))
         {
-            lines.Add($"{arrival}  Aankomst werf");
+            lines.Add($"{arrival}  Aankomst werf / geplande job");
         }
 
         if (!string.IsNullOrWhiteSpace(excursionInterval)
@@ -254,13 +264,12 @@ public static class MissingTechnicianAdminExplainability
                 lines.Add($"{parts[0]}  Tijdelijk weg van werf");
                 if (!string.IsNullOrWhiteSpace(excursionAway) && excursionAway != "—")
                 {
-                    var mid = InferMidpointLabel(parts[0], parts[1], excursionAway);
-                    lines.Add(mid);
-                    lines.Add($"{parts[1]}  Terug werf");
+                    lines.Add(InferMidpointLabel(parts[0], parts[1], excursionAway));
+                    lines.Add($"{parts[1]}  Terug op werf");
                 }
                 else
                 {
-                    lines.Add($"{parts[1]}  Terug werf");
+                    lines.Add($"{parts[1]}  Terug op werf");
                 }
             }
         }
@@ -270,7 +279,67 @@ public static class MissingTechnicianAdminExplainability
             lines.Add($"{departure}  Vertrek werf");
         }
 
+        var other = FormatExistingBooking(existingBooking);
+        if (!string.IsNullOrWhiteSpace(other))
+        {
+            lines.Add($"Daarna  {other}");
+        }
+
         return lines;
+    }
+
+    private static string BuildNarrative(
+        string timingPrimary,
+        string? peerName,
+        TimeOnly? peerStart,
+        TimeOnly? peerEnd,
+        MissingTechnicianTravelMode travelMode,
+        string? proposed,
+        string? existingBooking,
+        bool allocationReview)
+    {
+        var parts = new List<string>();
+        if (timingPrimary.Contains("eigen", StringComparison.OrdinalIgnoreCase))
+        {
+            parts.Add("Dit voorstel is gebaseerd op de eigen Track & Trace van deze technieker.");
+        }
+        else if (timingPrimary.Contains("Collega", StringComparison.OrdinalIgnoreCase))
+        {
+            parts.Add("Dit voorstel steunt vooral op de uren van de collega op dezelfde job.");
+        }
+        else
+        {
+            parts.Add($"Dit voorstel is gebaseerd op: {timingPrimary}.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(peerName))
+        {
+            var hours = FormatInterval(peerStart, peerEnd);
+            parts.Add(string.IsNullOrWhiteSpace(hours)
+                ? $"Collega op dezelfde geplande job: {peerName}."
+                : $"De collega op dezelfde geplande job ({peerName}) heeft {hours} geboekt.");
+        }
+
+        parts.Add(travelMode == MissingTechnicianTravelMode.SeparateVehicleProven
+            ? "Deze technieker reed apart (eigen voertuig)."
+            : $"Reiswijze: {MissingTechnicianControl.TravelModeDutch(travelMode)}.");
+
+        if (!string.IsNullOrWhiteSpace(proposed))
+        {
+            parts.Add($"Daardoor stelt het systeem {proposed} voor.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(existingBooking))
+        {
+            parts.Add("Er is nog een andere prestatie later op de dag, zonder overlap met dit voorstel.");
+        }
+
+        if (allocationReview)
+        {
+            parts.Add("Projectallocatie blijft na te kijken.");
+        }
+
+        return string.Join(' ', parts);
     }
 
     private static string InferMidpointLabel(string start, string end, string away)
@@ -453,6 +522,7 @@ public sealed record MissingTechnicianAdminExplanation(
     string? TimingSourceSupporting,
     string WhyIntro,
     IReadOnlyList<string> WhyBullets,
+    string NarrativeNl,
     string TimelineTitle,
     IReadOnlyList<string> TimelineLines,
     string WorkContinuityTitle,
