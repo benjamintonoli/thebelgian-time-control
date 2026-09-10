@@ -646,10 +646,23 @@ public sealed class ActionConfirmModel(
     {
         if (result.Status == PayrollProposedActionStatus.Stale)
         {
-            return "De prestatie is ondertussen gewijzigd. Controleer de gegevens opnieuw.";
+            return "DIT VOORSTEL IS INTUSSEN GEWIJZIGD. Aanmaken niet gelukt omdat het voorstel niet meer overeenkomt met de actuele bevinding.";
         }
 
         var detail = result.Message ?? string.Empty;
+        if (detail.Contains("Plenion kon de prestatie-create niet uitvoeren", StringComparison.OrdinalIgnoreCase)
+            || detail.Contains("ODBC", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Aanmaken niet gelukt. Plenion heeft de prestatie niet aanvaard (schrijfservice/databasefout). Uw voorstel is bewaard.";
+        }
+
+        if (detail.Contains("niet beschikbaar", StringComparison.OrdinalIgnoreCase)
+            || detail.Contains("niet bereikbaar", StringComparison.OrdinalIgnoreCase)
+            || detail.Contains("timeout", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Aanmaken niet gelukt. De schrijfservice was tijdelijk niet bereikbaar. Uw voorstel is bewaard.";
+        }
+
         if (detail.Contains("gekoppelde", StringComparison.OrdinalIgnoreCase)
             || detail.Contains("afhankelijkheid", StringComparison.OrdinalIgnoreCase)
             || detail.Contains("dependencies", StringComparison.OrdinalIgnoreCase)
@@ -678,14 +691,12 @@ public sealed class ActionConfirmModel(
             return "Er bestaat al een equivalente prestatie. Er is niets nieuws aangemaakt.";
         }
 
-        if (result.ActionId != Guid.Empty && detail.Contains("create", StringComparison.OrdinalIgnoreCase))
+        if (!string.IsNullOrWhiteSpace(detail))
         {
-            return detail;
+            return "Aanmaken niet gelukt. " + detail + " Uw voorstel is bewaard.";
         }
 
-        return string.IsNullOrWhiteSpace(detail)
-            ? "De actie kon niet worden uitgevoerd. Er is niets gewijzigd."
-            : detail;
+        return "Aanmaken niet gelukt. Uw voorstel is bewaard. Er is niets gewijzigd in Plenion.";
     }
 
     private static string MapException(Exception exception)

@@ -52,7 +52,21 @@
 
 @if (!string.IsNullOrWhiteSpace(Model.Error))
 {
-    <div class="alert alert-danger">@Model.Error</div>
+    <div class="alert alert-danger">
+        <strong>AANMAKEN NIET GELUKT</strong>
+        <div class="mt-1">@Model.Error</div>
+        @if (view?.CreateProposal is not null)
+        {
+            <div class="mt-2 small">
+                Uw voorstel is bewaard:
+                @view.CreateProposal.Start.ToString("HH:mm")–@view.CreateProposal.End.ToString("HH:mm")
+                · Project @view.CreateProposal.ProjectId
+                · BON @(view.CreateProposal.BonNr ?? "—")
+                · Taak @view.CreateProposal.MainTaskId
+            </div>
+            <div class="small text-muted mt-1">ActionId @view.ActionId · Status @PayrollActionEligibility.UiStatusLabel(view.Status)</div>
+        }
+    </div>
 }
 @if (!string.IsNullOrWhiteSpace(Model.Message))
 {
@@ -109,7 +123,19 @@ else
         <div><strong>Status:</strong> @PayrollActionEligibility.UiStatusLabel(view.Status)</div>
         @if (view.Status == PayrollProposedActionStatus.Stale)
         {
-            <div class="alert alert-secondary py-2 mt-2 mb-0">Oud voorstel — niet meer uitvoerbaar.</div>
+            <div class="alert alert-secondary py-2 mt-2">
+                <strong>DIT VOORSTEL IS INTUSSEN GEWIJZIGD</strong>
+                <div class="small mt-1">Oud voorstel — niet meer uitvoerbaar.</div>
+                @if (view.CreateProposal is not null)
+                {
+                    <div class="small">Vorige: @view.CreateProposal.Start.ToString("HH:mm")–@view.CreateProposal.End.ToString("HH:mm")</div>
+                }
+                <a class="btn btn-sm btn-outline-primary mt-2"
+                   asp-page="./MissingTechnicianWorkbench"
+                   asp-route-year="@view.Year"
+                   asp-route-month="@view.Month"
+                   asp-route-Scope="Open">Nieuw voorstel bekijken</a>
+            </div>
         }
         @if (!string.IsNullOrWhiteSpace(view.BlockReason))
         {
@@ -267,7 +293,35 @@ else
         </div>
     </div>
 
-    @if (canEditCreate)
+    @if (canEditCreate && isCreate)
+    {
+        <details class="mb-4" style="max-width: 40rem;">
+            <summary class="small text-muted">Voorstel wijzigen</summary>
+            <form method="post"
+                  asp-page="/Admin/Payroll/ActionConfirm"
+                  asp-page-handler="UpdateCreate"
+                  asp-route-ActionId="@Model.ActionId"
+                  class="border rounded p-3 mt-2">
+                <input type="hidden" asp-for="ActionId" />
+                <div class="row g-2 mb-2">
+                    <div class="col-4">
+                        <label class="form-label" asp-for="EditStart">VAN</label>
+                        <input class="form-control" type="time" asp-for="EditStart" />
+                    </div>
+                    <div class="col-4">
+                        <label class="form-label" asp-for="EditEnd">TOT</label>
+                        <input class="form-control" type="time" asp-for="EditEnd" />
+                    </div>
+                    <div class="col-4">
+                        <label class="form-label" asp-for="EditMainTaskId">IDHFDTAAK</label>
+                        <input class="form-control" type="number" min="1" asp-for="EditMainTaskId" />
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-sm btn-outline-primary">Voorstel opslaan</button>
+            </form>
+        </details>
+    }
+    else if (canEditCreate)
     {
         <form method="post"
               asp-page="/Admin/Payroll/ActionConfirm"
@@ -277,7 +331,6 @@ else
               style="max-width: 40rem;">
             <input type="hidden" asp-for="ActionId" />
             <h2 class="h6">Voorstel bijwerken</h2>
-            <p class="small text-muted">Corrigeer VAN/TOT of kies een toegelaten activiteit vóór definitieve goedkeuring.</p>
             <div class="row g-2 mb-2">
                 <div class="col-4">
                     <label class="form-label" asp-for="EditStart">VAN</label>
@@ -292,7 +345,6 @@ else
                     <input class="form-control" type="number" min="1" asp-for="EditMainTaskId" />
                 </div>
             </div>
-            <p class="small text-muted mb-2">Niet toegelaten: 5, 10, 18, 23 (reis/wacht/niet-job). PWS controleert of de taak bestaat.</p>
             <button type="submit" class="btn btn-sm btn-outline-primary">Voorstel opslaan</button>
         </form>
     }
@@ -327,8 +379,13 @@ else
                         class="btn btn-primary"
                         disabled="@(!view.CanExecute)"
                         data-confirm="Er wordt een nieuwe urenprestatie in Plenion aangemaakt. Doorgaan?">
-                    Definitief aanmaken
+                    @(view.Status == PayrollProposedActionStatus.Failed ? "Opnieuw proberen" : "Definitief aanmaken")
                 </button>
+                <a class="btn btn-outline-secondary"
+                   asp-page="./MissingTechnicianWorkbench"
+                   asp-route-year="@view.Year"
+                   asp-route-month="@view.Month"
+                   asp-route-Scope="Open">Terug naar dossier</a>
             }
             else if (isAdjust)
             {

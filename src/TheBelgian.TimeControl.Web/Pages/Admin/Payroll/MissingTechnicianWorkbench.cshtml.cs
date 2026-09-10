@@ -257,9 +257,9 @@ public sealed class MissingTechnicianWorkbenchModel(
     private async Task LoadShellAsync(CancellationToken cancellationToken)
     {
         NormalizeCategory();
-        // Load full selected-case detail on first paint so the right panel is never empty
-        // while waiting for the async Detail handler (Project300-style list/detail).
-        Workbench = await workbenchService.GetCoreDetailAsync(
+        // Fast first paint: admin-case list from cache/SQLite only. Selected detail loads via
+        // Detail handler (persisted evidence; no GPS/PowerFleet N+1 on shell).
+        Workbench = await workbenchService.GetShellAsync(
             Year,
             Month,
             Category,

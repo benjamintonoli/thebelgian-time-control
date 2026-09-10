@@ -52,7 +52,8 @@ public sealed class AdminUxV3Tests
             "Admin",
             "Payroll",
             "MissingTechnicianWorkbench.cshtml.cs"));
-        Assert.Contains("GetCoreDetailAsync", code, StringComparison.Ordinal);
+        Assert.Contains("GetShellAsync", code, StringComparison.Ordinal);
+        Assert.Contains("GetCoreDetailAsync", code, StringComparison.Ordinal); // selected detail handler
     }
 
     [Fact]
@@ -66,11 +67,11 @@ public sealed class AdminUxV3Tests
             "Admin",
             "Payroll",
             "_MissingTechnicianDetail.cshtml"));
-        Assert.Contains("NarrativeNl", markup, StringComparison.Ordinal);
-        Assert.Contains("WhyIntro", markup, StringComparison.Ordinal);
-        Assert.Contains("Jobcontext", markup, StringComparison.Ordinal);
+        Assert.Contains("Waarom dit voorstel?", markup, StringComparison.Ordinal);
+        Assert.Contains("Voorgestelde prestatie", markup, StringComparison.Ordinal);
         Assert.Contains("Technische details", markup, StringComparison.Ordinal);
-        Assert.Contains("Bestaande boeking nakijken", markup, StringComparison.Ordinal);
+        Assert.Contains("Prestatie aanmaken", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Create controleren", markup, StringComparison.Ordinal);
     }
 
     [Fact]

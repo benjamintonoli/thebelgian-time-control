@@ -252,7 +252,7 @@ public sealed class PayrollDeleteBrowserFlowTests
 
         Assert.IsType<PageResult>(result);
         Assert.Equal(1, actions.ExecuteCalls);
-        Assert.Contains("ondertussen gewijzigd", page.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("INTUSSEN GEWIJZIGD", page.Error, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

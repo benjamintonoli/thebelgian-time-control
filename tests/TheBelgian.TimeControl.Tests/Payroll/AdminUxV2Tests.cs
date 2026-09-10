@@ -58,13 +58,11 @@ public sealed class AdminUxV2Tests
             "Payroll",
             "_MissingTechnicianDetail.cshtml"));
         Assert.Contains("MissingTechnicianAdminExplainability", markup, StringComparison.Ordinal);
-        Assert.Contains("WhyIntro", markup, StringComparison.Ordinal);
-        Assert.Contains("BookingStatusNl", markup, StringComparison.Ordinal);
         Assert.Contains("TimingSourcePrimary", markup, StringComparison.Ordinal);
-        Assert.Contains("PeerRoleLabel", markup, StringComparison.Ordinal);
         Assert.Contains("Technische details", markup, StringComparison.Ordinal);
-        Assert.Contains("WorkContinuityTitle", markup, StringComparison.Ordinal);
-        Assert.Contains("Tijdsvoorstel op basis van", markup, StringComparison.Ordinal);
+        Assert.Contains("Waarom dit voorstel?", markup, StringComparison.Ordinal);
+        Assert.Contains("Voorgestelde prestatie", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Create controleren", markup, StringComparison.Ordinal);
         Assert.DoesNotContain("Automatische correctie niet beschikbaar", markup, StringComparison.Ordinal);
         Assert.DoesNotContain("Geboekt: voorstel", markup, StringComparison.Ordinal);
         Assert.Contains("EvidenceClass:", markup, StringComparison.Ordinal);

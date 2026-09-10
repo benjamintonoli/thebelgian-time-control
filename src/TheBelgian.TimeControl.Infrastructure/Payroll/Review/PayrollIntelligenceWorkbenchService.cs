@@ -641,7 +641,9 @@ internal sealed class PayrollIntelligenceWorkbenchService(
             };
         }
 
-        var peerRows = await LoadPeerRowsAsync(finding, cancellationToken);
+        var peerRows = Array.Empty<NormalizedPerformanceEntry>();
+        // First paint uses persisted finding evidence only — no Plenion N+1 day reads.
+        // Live GPS enrichment stays on the selected-case GPS handler.
         gpsCache.TryGet(adminCase.ResourceId, adminCase.Date, out var cachedGps, out var gpsHit);
         string? peerDisplayName = null;
         var peerMatch = System.Text.RegularExpressions.Regex.Match(
@@ -834,11 +836,11 @@ internal sealed class PayrollIntelligenceWorkbenchService(
             .FirstOrDefaultAsync(cancellationToken);
 
         var now = timeProvider.GetUtcNow();
-        // Stale/Applied/Failed/Cancelled stay immutable for audit — always mint a new ActionId.
+        // Stale/Applied/Cancelled/Executing stay immutable for audit — mint a new ActionId.
+        // Failed is reused so transient Core/Plenion failures keep the same idempotent ActionId.
         if (existing is null
             || existing.Status is PayrollProposedActionStatus.Applied
                 or PayrollProposedActionStatus.Cancelled
-                or PayrollProposedActionStatus.Failed
                 or PayrollProposedActionStatus.Stale
                 or PayrollProposedActionStatus.Executing)
         {
@@ -858,6 +860,13 @@ internal sealed class PayrollIntelligenceWorkbenchService(
         existing.ActionType = actionType;
         existing.Status = PayrollProposedActionStatus.ReadyForApproval;
         existing.BlockReason = null;
+        existing.ExecutionResult = null;
+        existing.PwsReference = null;
+        existing.ResultPerformanceId = null;
+        existing.ApprovedAtUtc = null;
+        existing.ApprovedBy = null;
+        existing.ExecutedAtUtc = null;
+        existing.ExecutedBy = null;
         existing.EvidenceSnapshotJson = JsonSerializer.Serialize(evidence, JsonOptions);
         existing.ProposalSnapshotJson = JsonSerializer.Serialize(proposal, JsonOptions);
         existing.SourceRevision = sourceRevision;

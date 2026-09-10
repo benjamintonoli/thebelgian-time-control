@@ -91,7 +91,19 @@ else
                                     <span>@PayrollDisplayFormatting.DateWithWeekdayShort(item.Date)</span>
                                 </div>
                                 <div class="queue-facts">
-                                    <span>@(item.IssueSummary ?? item.FriendlyState ?? "Ontbrekende prestatie")</span>
+                                    @{
+                                        var sourceBadge = item.FriendlyState switch
+                                        {
+                                            "Sterk bewijs" => ("EIGEN GPS", "tc-badge-gps"),
+                                            var s when s is not null && s.Contains("conflict", StringComparison.OrdinalIgnoreCase) => ("CONFLICT", "tc-badge-warn"),
+                                            var s when s is not null && s.Contains("collega", StringComparison.OrdinalIgnoreCase) => ("COLLEGA", "tc-badge-peer"),
+                                            var s when s is not null && s.Contains("GPS", StringComparison.OrdinalIgnoreCase) => ("GPS + PLANNING", "tc-badge-gps"),
+                                            var s when s is not null && s.Contains("nazicht", StringComparison.OrdinalIgnoreCase) => ("NAZICHT", "tc-badge-warn"),
+                                            _ => ("VOORSTEL", "tc-badge-ready"),
+                                        };
+                                    }
+                                    <span class="tc-source-badge @sourceBadge.Item2">@sourceBadge.Item1</span>
+                                    <span class="text-muted">@(item.KeyFact ?? item.IssueSummary)</span>
                                 </div>
                                 <div class="queue-case-bottom">
                                     @{
@@ -152,6 +164,12 @@ else
 @@media (min-width: 992px) {
   .payroll-intel-workbench { grid-template-columns: minmax(240px, 30%) minmax(0, 70%); }
 }
+.tc-source-badge { display:inline-block; font-size:.68rem; font-weight:600; letter-spacing:.02em; padding:.1rem .35rem; border-radius:.25rem; margin-right:.35rem; }
+.tc-badge-gps { background:#e8f1fb; color:#1d4f91; }
+.tc-badge-peer { background:#eeeaf6; color:#4b3f6b; }
+.tc-badge-warn { background:#f8f1e4; color:#8a5a12; }
+.tc-badge-ready { background:#e8f5ee; color:#1f6b45; }
+.tc-mt-recommend { background: linear-gradient(180deg, #f7fafc 0%, #fff 100%); }
 </style>
 <script>
 (function () {
@@ -172,7 +190,7 @@ else
     document.querySelectorAll('.queue-case').forEach(el => {
       el.classList.toggle('active', el.dataset.adminCaseKey === key);
     });
-    detailHost.innerHTML = '<div class="empty-detail p-4"><h2 class="h5">Context laden…</h2></div>';
+    detailHost.innerHTML = '<div class="empty-detail p-4"><h2 class="h5">Dossier laden…</h2></div>';
     const url = detailUrl + (detailUrl.includes('?') ? '&' : '?') + 'adminCaseKey=' + encodeURIComponent(key);
     const response = await fetch(url, { headers: { 'Accept': 'text/html' } });
     if (!response.ok) {
@@ -194,14 +212,12 @@ else
       const end = document.getElementById('create-panel')?.dataset.peerEnd;
       if (start) document.querySelector('.create-start').value = start;
       if (end) document.querySelector('.create-end').value = end;
-      document.getElementById('create-panel')?.classList.remove('d-none');
     });
     document.getElementById('wb-use-gps')?.addEventListener('click', () => {
       const start = document.getElementById('create-panel')?.dataset.gpsStart;
       const end = document.getElementById('create-panel')?.dataset.gpsEnd;
       if (start) document.querySelector('.create-start').value = start;
       if (end) document.querySelector('.create-end').value = end;
-      document.getElementById('create-panel')?.classList.remove('d-none');
     });
 
     document.querySelectorAll('.wb-decide').forEach(btn => {
@@ -213,11 +229,6 @@ else
         const decisionCode = btn.dataset.decision;
         const requiresComment = btn.dataset.requiresComment === 'true';
         let comment = document.getElementById('wb-comment')?.value?.trim() || '';
-
-        if (decisionCode === '@PayrollGuidedDecisionCodes.MissingTechConfirmed') {
-          document.getElementById('create-panel')?.classList.remove('d-none');
-          return;
-        }
 
         if (requiresComment && !comment) {
           comment = window.prompt(btn.dataset.label + ' — toelichting:') || '';
@@ -242,11 +253,6 @@ else
           });
           const payload = await response.json();
           if (!response.ok || !payload.ok) throw new Error(payload.error || 'Mislukt');
-          if (payload.openCreate) {
-            document.getElementById('create-panel')?.classList.remove('d-none');
-            btn.disabled = false;
-            return;
-          }
           const article = document.querySelector('.queue-case[data-admin-case-key="' + CSS.escape(adminCaseKey) + '"]');
           if (article && payload.hideRow) article.classList.add('d-none');
           if (payload.nextKey) await loadDetail(payload.nextKey);
@@ -263,6 +269,7 @@ else
         const panel = document.getElementById('create-panel');
         const err = document.getElementById('wb-create-error');
         err?.classList.add('d-none');
+        btn.disabled = true;
         try {
           const body = new URLSearchParams();
           body.set('AdminCaseKey', document.getElementById('wb-decisions')?.dataset.adminCaseKey);
@@ -282,6 +289,7 @@ else
           }
         } catch (e) {
           if (err) { err.textContent = e.message || 'Fout'; err.classList.remove('d-none'); }
+          btn.disabled = false;
         }
       });
     });
@@ -294,19 +302,11 @@ else
         .then(payload => {
           const status = document.getElementById('gps-inline-status');
           if (status) status.textContent = payload.summary || 'GPS geladen';
-          if (payload.travelModeDutch) {
-            const travel = document.getElementById('travel-mode-label');
-            if (travel) travel.textContent = payload.travelModeDutch;
-          }
-          if (payload.gpsSiteSummary) {
-            const site = document.getElementById('gps-site-summary');
-            if (site) site.textContent = payload.gpsSiteSummary;
-          }
           const list = document.getElementById('gps-events');
           if (list && payload.events?.length) {
             list.innerHTML = payload.events.map(ev =>
               '<li><strong>' + (ev.at || '') + (ev.end ? '–' + ev.end : '') + '</strong> '
-              + (ev.label || '') + (ev.detail ? ' · ' + ev.detail : '') + '</li>').join('');
+              + (ev.label || '') + '</li>').join('');
           }
           gpsPanel.dataset.loading = 'false';
         })
@@ -318,23 +318,21 @@ else
   }
 
   document.querySelectorAll('.wb-select-case').forEach(link => {
-    link.addEventListener('click', e => {
-      e.preventDefault();
-      loadDetail(link.dataset.adminCaseKey);
+    link.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      const key = link.dataset.adminCaseKey;
+      if (key) loadDetail(key);
     });
   });
 
   if (currentKey) {
-    // Detail may already be server-rendered; still wire actions and refresh Focus.
-    if (document.querySelector('.missing-detail-body')) {
-      wireDetail();
-      const urlObj = new URL(window.location.href);
-      urlObj.searchParams.set('Focus', currentKey);
-      history.replaceState(null, '', urlObj.pathname + urlObj.search);
-    } else {
-      loadDetail(currentKey);
-    }
+    loadDetail(currentKey);
+  } else {
+    const first = document.querySelector('.queue-case-link')?.dataset.adminCaseKey;
+    if (first) loadDetail(first);
   }
+
+  wireDetail();
 })();
 </script>
 }

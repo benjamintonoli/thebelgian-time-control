@@ -277,13 +277,14 @@ internal sealed class PayrollActionService(
 
         var executionEnabled = actionsOptions.Value.ExecutionEnabled;
         string? gateMessage = null;
-        var canExecute = action.Status == PayrollProposedActionStatus.ReadyForApproval;
+        var canExecute = action.Status is PayrollProposedActionStatus.ReadyForApproval
+            or PayrollProposedActionStatus.Failed;
         if (!executionEnabled)
         {
             canExecute = false;
             gateMessage = "Uitvoering staat uit (PayrollActions:ExecutionEnabled=false). Voorstel is wel zichtbaar.";
         }
-        else if (action.Status != PayrollProposedActionStatus.ReadyForApproval)
+        else if (action.Status is not (PayrollProposedActionStatus.ReadyForApproval or PayrollProposedActionStatus.Failed))
         {
             canExecute = false;
             gateMessage = action.BlockReason ?? $"Status {action.Status} laat geen uitvoering toe.";
@@ -348,6 +349,17 @@ internal sealed class PayrollActionService(
         var action = await context.PayrollProposedActionRecords
             .SingleOrDefaultAsync(item => item.ActionId == actionId, cancellationToken)
             ?? throw new InvalidOperationException("Payrollactie niet gevonden.");
+
+        // Transient Failed creates may be retried with the same ActionId (idempotency key).
+        if (action.Status == PayrollProposedActionStatus.Failed
+            && action.ActionType == PayrollProposedActionType.CreateMissingPerformance)
+        {
+            action.Status = PayrollProposedActionStatus.ReadyForApproval;
+            action.BlockReason = null;
+            action.ExecutionResult = null;
+            action.UpdatedAtUtc = timeProvider.GetUtcNow();
+            await context.SaveChangesAsync(cancellationToken);
+        }
 
         if (action.Status != PayrollProposedActionStatus.ReadyForApproval)
         {
