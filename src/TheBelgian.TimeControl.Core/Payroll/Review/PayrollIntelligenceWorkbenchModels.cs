@@ -93,7 +93,9 @@ public sealed record PayrollMissingWorkbenchDetail(
     string? ExcursionSummary = null,
     string? OperationalSite = null,
     bool AllocationReview = false,
-    string? PauseNoteNl = null);
+    string? PauseNoteNl = null,
+    string? PeerDisplayName = null,
+    MissingTechnicianAdminExplanation? Explanation = null);
 
 public sealed record PayrollIntelligenceGpsContext(
     bool Available,

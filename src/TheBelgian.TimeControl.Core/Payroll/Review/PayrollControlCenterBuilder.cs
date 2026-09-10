@@ -464,7 +464,7 @@ public static class PayrollControlCenterBuilder
     {
         PayrollReviewCategory.Project300 => "PROJECT 300",
         PayrollReviewCategory.Project200 => "PROJECT 200",
-        PayrollReviewCategory.Project100 => "OPLEIDING / PROJECT 100",
+        PayrollReviewCategory.Project100 => "OPLEIDING",
         PayrollReviewCategory.Standby => "WACHTDIENST",
         PayrollReviewCategory.MissingPerformance => "ONTBREKENDE PRESTATIES",
         PayrollReviewCategory.WrongDossier => "MOGELIJK VERKEERD DOSSIER",

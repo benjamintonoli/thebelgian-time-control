@@ -5,6 +5,7 @@
 @{
     var isAdmin = Context.Request.Path.StartsWithSegments("/Admin");
     var signedInUser = CurrentUserContext.CurrentUser;
+    var path = Context.Request.Path.Value ?? "";
 }
 <!DOCTYPE html>
 <html lang="nl">
@@ -28,13 +29,10 @@
                 <div class="navbar-collapse collapse d-sm-inline-flex justify-content-between">
                     <ul class="navbar-nav flex-grow-1 align-items-sm-center">
                         <li class="nav-item">
-                            <a class="nav-link text-dark" asp-page="/Admin/TimeControl/Index">Time Control</a>
+                            <a class="nav-link text-dark" asp-page="/Index">Overzicht</a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link text-dark" asp-page="/Admin/TimeControl/VehicleAssignments">Voertuiginitialisatie</a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link text-dark" asp-page="/Admin/Reviews/Index">Reviews</a>
+                            <a class="nav-link text-dark" asp-page="/Admin/Payroll/Index">Looncontrole</a>
                         </li>
                         <li class="nav-item">
                             <a class="nav-link text-dark"
@@ -43,13 +41,17 @@
                                asp-route-category="Completed">Afgehandeld</a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link text-dark" asp-page="/Admin/Patterns/Index">Patronen</a>
+                            <a class="nav-link text-dark" asp-page="/Admin/Payroll/Employees">Medewerkers</a>
                         </li>
-                        <li class="nav-item">
-                            <a class="nav-link text-dark" asp-page="/Admin/Payroll/Employees">Payroll medewerkers</a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link text-dark" asp-page="/Admin/Payroll/Index">Payroll shadow</a>
+                        <li class="nav-item dropdown">
+                            <a class="nav-link dropdown-toggle text-dark" href="#" id="beheerNav" role="button"
+                               data-bs-toggle="dropdown" aria-expanded="false">Beheer</a>
+                            <ul class="dropdown-menu" aria-labelledby="beheerNav">
+                                <li><a class="dropdown-item" asp-page="/Admin/TimeControl/VehicleAssignments">Voertuiginitialisatie</a></li>
+                                <li><a class="dropdown-item" asp-page="/Admin/Patterns/Index">Patronen</a></li>
+                                <li><a class="dropdown-item" asp-page="/Admin/Reviews/Index">Reviews (klassiek)</a></li>
+                                <li><a class="dropdown-item" asp-page="/Admin/TimeControl/Index">Urencontrole-cockpit</a></li>
+                            </ul>
                         </li>
                         @if (HostEnvironment.IsDevelopment())
                         {
@@ -65,7 +67,7 @@
                             </li>
                         }
                     </ul>
-                    @if (isAdmin)
+                    @if (isAdmin || path == "/" || path.Equals("/Index", StringComparison.OrdinalIgnoreCase))
                     {
                         <div class="small text-muted text-sm-end">
                             @if (signedInUser is not null)
@@ -90,14 +92,14 @@
             </div>
         </nav>
     </header>
-    <div class="@(isAdmin ? "admin-shell" : "container")">
+    <div class="@(isAdmin || path == "/" ? "admin-shell" : "container")">
         <main role="main" class="pb-3">
             @RenderBody()
         </main>
     </div>
 
     <footer class="border-top footer text-muted">
-        <div class="@(isAdmin ? "admin-shell" : "container")">
+        <div class="@(isAdmin || path == "/" ? "admin-shell" : "container")">
             &copy; 2026 The Belgian · TimeControl
         </div>
     </footer>

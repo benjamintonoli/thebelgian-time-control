@@ -29,9 +29,9 @@ public static class PayrollReviewLabels
         status switch
         {
             PayrollShadowMonthStatus.WaitingForData => "Wacht op data",
-            PayrollShadowMonthStatus.ReadyForReview => "Klaar voor review",
-            PayrollShadowMonthStatus.InReview => "Review bezig",
-            PayrollShadowMonthStatus.Finalized => "Afgesloten",
+            PayrollShadowMonthStatus.ReadyForReview => "Klaar voor finalisatie",
+            PayrollShadowMonthStatus.InReview => "In behandeling",
+            PayrollShadowMonthStatus.Finalized => "Gefinaliseerd",
             _ => status.ToString(),
         };
 

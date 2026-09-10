@@ -483,6 +483,46 @@ body > header {
   .trip-context-grid { grid-template-columns: 1fr; }
 }
 
+.tc-home {
+  max-width: 56rem;
+}
+
+.tc-home-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 0.35rem 1rem;
+}
+
+.tc-home-card {
+  color: inherit;
+  border-color: #dee2e6;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+
+.tc-home-card:hover {
+  border-color: #258cfb;
+  box-shadow: 0 0 0 0.15rem rgba(37, 140, 251, 0.15);
+}
+
+.tc-home-card-muted {
+  opacity: 0.62;
+}
+
+.tc-mt-detail .tc-mt-proposal {
+  border-color: #258cfb;
+  background: #f8fbff;
+}
+
+.tc-mt-timeline li {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+
+.tc-mt-why ul {
+  padding-left: 1.1rem;
+}
+
 @media (max-width: 800px) {
   .cockpit-heading { display: block; }
   .cockpit-safety { display: inline-block; margin-top: .75rem; white-space: normal; }

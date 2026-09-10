@@ -1,19 +1,39 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using TheBelgian.TimeControl.Core.Interfaces;
+using TheBelgian.TimeControl.Core.Payroll;
+using TheBelgian.TimeControl.Core.Payroll.Review;
 
 namespace TheBelgian.TimeControl.Web.Pages;
 
-public class IndexModel : PageModel
+public class IndexModel(
+    IPayrollShadowService payrollShadowService,
+    IPayrollControlCenterService controlCenterService,
+    ILogger<IndexModel> logger) : PageModel
 {
-    private readonly ILogger<IndexModel> _logger;
+    public PayrollControlCenterPage? Center { get; private set; }
 
-    public IndexModel(ILogger<IndexModel> logger)
+    public string? Error { get; private set; }
+
+    public async Task OnGetAsync(CancellationToken cancellationToken)
     {
-        _logger = logger;
-    }
+        try
+        {
+            var months = await payrollShadowService.ListMonthsAsync(cancellationToken);
+            var canonical = PayrollShadowPeriodSelection.SelectCanonical(months);
+            if (canonical is null)
+            {
+                Center = null;
+                return;
+            }
 
-    public void OnGet()
-    {
-
+            Center = await controlCenterService.GetAsync(canonical.Year, canonical.Month, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Home dashboard kon looncontrole-status niet laden.");
+            Error = "Looncontrole-overzicht tijdelijk niet beschikbaar.";
+            Center = null;
+        }
     }
 }

@@ -2,18 +2,18 @@
 @model TheBelgian.TimeControl.Web.Pages.Admin.Payroll.IndexModel
 @using TheBelgian.TimeControl.Core.Payroll.Models
 @{
-    ViewData["Title"] = "Payroll shadow";
+    ViewData["Title"] = "Looncontrole";
 }
 
 <div class="cockpit-heading mb-4">
     <div>
-        <div class="text-uppercase small text-muted fw-semibold">Payroll shadow</div>
-        <h1 class="mb-1">Loonshadow-maanden</h1>
-        <p class="text-muted mb-0">Legacy shadow-berekening met expliciete eligibility en adminreview. Geen Acerta-export.</p>
+        <div class="text-uppercase small text-muted fw-semibold">Looncontrole</div>
+        <h1 class="mb-1">Looncontrole-maanden</h1>
+        <p class="text-muted mb-0">Controle van geregistreerde uren op basis van Plenion, planning en Track &amp; Trace.</p>
     </div>
     <div class="cockpit-safety">
-        <a asp-page="./Employees">Payroll medewerkers</a>
-        · Suggesties ≠ beslissing · Geen Plenion-writes
+        <a asp-page="./Employees">Medewerkers</a>
+        · Suggesties ≠ beslissing · Geen automatische Plenion-writes
     </div>
 </div>
 

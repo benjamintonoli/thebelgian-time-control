@@ -8,171 +8,161 @@
     var selected = wb?.Detail?.AdminCase;
     var detail = wb?.Detail;
     var missing = detail?.Missing;
+    var expl = missing?.Explanation
+        ?? (missing is null
+            ? null
+            : MissingTechnicianAdminExplainability.Build(
+                missing.FindingEvidence,
+                missing.PeerResourceId,
+                missing.PeerDisplayName,
+                missing.PeerStart,
+                missing.PeerEnd,
+                missing.ProposalStart,
+                missing.ProposalEnd,
+                missing.ProposalHours,
+                missing.SuggestedProjectId,
+                missing.SuggestedBonNr,
+                missing.SuggestedMainTaskId,
+                missing.TravelMode,
+                missing.CanProposeCreate));
     string FmtTime(TimeOnly? value) => value?.ToString("HH:mm") ?? "—";
     string FmtHours(decimal? hours) => hours is null ? "—" : hours.Value.ToString("0.##", nl) + " u";
 }
 
-@if (detail is null || selected is null || missing is null)
+@if (detail is null || selected is null || missing is null || expl is null)
 {
     <div class="empty-detail p-4">
-        <h2 class="h5">Geen missing-detail</h2>
+        <h2 class="h5">Geen ontbrekende-prestatie detail</h2>
         <p class="text-muted mb-0">Selecteer een case in de queue.</p>
     </div>
 }
 else
 {
-    <div class="missing-detail-body" data-admin-case-key="@selected.AdminCaseKey">
-        <div class="d-flex justify-content-between flex-wrap gap-2 mb-3">
-            <div>
-                <h2 class="h4 mb-1">@(selected.DisplayName ?? selected.ResourceId)</h2>
-                <div class="text-muted">@PayrollDisplayFormatting.DateWithWeekday(selected.Date)</div>
+    <div class="missing-detail-body tc-mt-detail" data-admin-case-key="@selected.AdminCaseKey">
+        <header class="mb-3">
+            <div class="text-uppercase small text-muted fw-semibold">@expl.Headline</div>
+            <h2 class="h4 mb-1">@(selected.DisplayName ?? selected.ResourceId)</h2>
+            <div class="text-muted">@PayrollDisplayFormatting.DateWithWeekday(selected.Date)</div>
+            <div class="mt-2">
+                <span class="badge text-bg-light text-dark border">@PayrollGuidedDecisions.AdminStatusLabel(selected.WorkflowStatus)</span>
             </div>
-            <span class="badge text-bg-light text-dark border">@PayrollGuidedDecisions.AdminStatusLabel(selected.WorkflowStatus)</span>
-        </div>
+        </header>
 
-        <section class="mb-3">
-            <div class="text-uppercase small text-muted fw-semibold mb-1">Bewijs</div>
-            <div class="fs-5 fw-semibold">@missing.EvidenceClassLabel</div>
-            <div class="mt-1">
-                Reiswijze: <strong id="travel-mode-label">@PayrollReviewLabels.MissingTechnicianTravelMode(missing.TravelMode)</strong>
-            </div>
-            <div class="small text-muted mt-1">Bron voorstel: @missing.ProposalSource · @missing.SuggestedAction</div>
-        </section>
-
-        <section class="mb-3 border rounded p-3">
-            <div class="text-uppercase small text-muted fw-semibold mb-2">Vergelijking</div>
-            <div class="row g-3">
-                <div class="col-md-4">
-                    <div class="small text-muted fw-semibold">GEPLANDE JOB</div>
-                    <div>Project @(missing.SuggestedProjectId ?? "—")</div>
-                    <div>BON @(missing.SuggestedBonNr ?? "—")</div>
-                    <div>Site @(missing.PlannedSiteLabel ?? "—")</div>
-                    <div class="small text-muted mt-1">Peer @(missing.PeerIntervalSummary ?? "—")</div>
+        <section class="border rounded p-3 mb-3">
+            <div class="row g-2">
+                <div class="col-md-6">
+                    <div class="small text-muted">Klant / werf</div>
+                    <div class="fw-semibold">@(expl.CustomerSiteLabel ?? "—")</div>
                 </div>
-                <div class="col-md-4">
-                    <div class="small text-muted fw-semibold">HUIDIGE BOEKING</div>
-                    @if (!string.IsNullOrWhiteSpace(missing.ExistingBookingSummary))
-                    {
-                        <div>@missing.ExistingBookingSummary</div>
-                    }
-                    else
-                    {
-                        <div class="text-muted">Geen conflicterende boeking in voorstelinterval.</div>
-                    }
+                <div class="col-md-3">
+                    <div class="small text-muted">Project</div>
+                    <div class="fw-semibold">@(missing.SuggestedProjectId ?? "—")</div>
                 </div>
-                <div class="col-md-4">
-                    <div class="small text-muted fw-semibold">TRACK &amp; TRACE</div>
-                    <div>
-                        Aankomst werf:
-                        @(missing.GpsSiteStart is null ? "onbekend" : FmtTime(missing.GpsSiteStart))
-                    </div>
-                    <div>
-                        Vertrek werf:
-                        @(missing.GpsSiteStart is not null && missing.GpsSiteEnd is null
-                            ? "onbekend"
-                            : (missing.GpsSiteEnd is null ? "—" : FmtTime(missing.GpsSiteEnd)))
-                    </div>
-                    <div class="fw-semibold mt-1">@missing.SiteMatchNl</div>
-                    <div class="small text-muted">@missing.ConflictClassNl</div>
+                <div class="col-md-3">
+                    <div class="small text-muted">BON</div>
+                    <div class="fw-semibold">@(missing.SuggestedBonNr ?? "—")</div>
                 </div>
             </div>
-            <div class="mt-3">
-                <div class="text-uppercase small text-muted fw-semibold mb-1">CONCLUSIE</div>
-                <div class="fw-semibold">@missing.SiteMatchNl</div>
-                <div class="small">@missing.SuggestedAction</div>
-            </div>
-            @if (missing.IsWrongDossier)
+            @if (!string.IsNullOrWhiteSpace(expl.PlannedSiteLabel))
             {
-                <div class="alert alert-warning small mt-2 mb-0">
-                    <strong>Mogelijk verkeerde project/bon geboekt.</strong>
-                    @if (!string.IsNullOrWhiteSpace(missing.ReplacementPlanNl))
-                    {
-                        <div class="mt-1">@missing.ReplacementPlanNl</div>
-                    }
-                    Geen directe Project/BON UPDATE — alleen Delete + Create na goedkeuring.
-                </div>
+                <div class="small text-muted mt-2">Site: @expl.PlannedSiteLabel</div>
             }
         </section>
 
-        <section class="mb-3 border rounded p-3">
-            <div class="text-uppercase small text-muted fw-semibold mb-1">Collega-interval</div>
-            @if (missing.PeerIntervalSummary is not null)
+        <section class="border rounded p-3 mb-3 tc-mt-why">
+            <div class="text-uppercase small text-muted fw-semibold mb-2">@expl.WhyIntro</div>
+            <ul class="mb-2">
+                @foreach (var bullet in expl.WhyBullets)
+                {
+                    <li>@bullet</li>
+                }
+            </ul>
+            <div class="small">
+                <strong>Tijdsvoorstel op basis van:</strong> @expl.TimingSourcePrimary
+                @if (!string.IsNullOrWhiteSpace(expl.TimingSourceSupporting))
+                {
+                    <span class="text-muted"> · ondersteund door @expl.TimingSourceSupporting</span>
+                }
+            </div>
+            @if (!string.IsNullOrWhiteSpace(expl.HqExcursionNl))
             {
-                <div class="fs-5">@missing.PeerIntervalSummary</div>
-                <div class="small text-muted">
-                    @(missing.PeerResourceId ?? "—")
-                    @if (missing.PeerPerformanceId is > 0) { <span>· #@missing.PeerPerformanceId</span> }
-                    @if (missing.TravelMode == MissingTechnicianTravelMode.SharedTravelPossible)
+                <div class="small mt-2">@expl.HqExcursionNl</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(expl.AllocationReviewNl))
+            {
+                <div class="small mt-1 text-warning-emphasis">@expl.AllocationReviewNl</div>
+            }
+        </section>
+
+        <section class="border rounded p-3 mb-3">
+            <div class="text-uppercase small text-muted fw-semibold mb-2">@expl.PeerRoleLabel</div>
+            <div class="fw-semibold">@(expl.PeerDisplayName ?? "—")</div>
+            <div>Uren: @(expl.PeerInterval ?? "—")</div>
+            <div class="small text-muted">Zelfde job · Project @(missing.SuggestedProjectId ?? "—") · BON @(missing.SuggestedBonNr ?? "—")</div>
+            @if (!string.IsNullOrWhiteSpace(expl.LeadTechnicianName))
+            {
+                <div class="mt-2">Hoofdtechnieker: <strong>@expl.LeadTechnicianName</strong></div>
+            }
+        </section>
+
+        @if (expl.TimelineLines.Count > 0)
+        {
+            <section class="border rounded p-3 mb-3">
+                <div class="text-uppercase small text-muted fw-semibold mb-2">@expl.TimelineTitle</div>
+                <ul class="list-unstyled mb-0 tc-mt-timeline">
+                    @foreach (var line in expl.TimelineLines)
                     {
-                        <span>· mogelijk samen gereden (handmatige keuze)</span>
+                        <li>@line</li>
                     }
-                </div>
+                </ul>
+            </section>
+        }
+
+        <section class="border rounded p-3 mb-3">
+            <div class="text-uppercase small text-muted fw-semibold mb-1">@expl.WorkContinuityTitle</div>
+            <p class="mb-0">@expl.WorkContinuityNl</p>
+        </section>
+
+        <section class="border rounded p-3 mb-3 tc-mt-proposal">
+            <div class="text-uppercase small text-muted fw-semibold mb-2">@expl.ProposalTitle</div>
+            <div class="fs-4 fw-semibold">@(expl.ProposalInterval ?? $"{FmtTime(missing.ProposalStart)}–{FmtTime(missing.ProposalEnd)}")</div>
+            @if (!string.IsNullOrWhiteSpace(expl.ProposalHoursLabel))
+            {
+                <div class="fs-5">@expl.ProposalHoursLabel</div>
             }
             else
             {
-                <div class="text-muted">Geen peer-interval beschikbaar.</div>
+                <div class="fs-5">@FmtHours(missing.ProposalHours)</div>
             }
-        </section>
-
-        <section class="mb-3 border rounded p-3">
-            <div class="text-uppercase small text-muted fw-semibold mb-1">GPS werf-aanwezigheid</div>
-            <div id="gps-site-summary">
-                @if (missing.GpsSiteStart is not null)
-                {
-                    <div><strong>WERF</strong> — aankomst @FmtTime(missing.GpsSiteStart)
-                        @if (missing.GpsSiteEnd is not null) { <span>· vertrek @FmtTime(missing.GpsSiteEnd)</span> }
-                    </div>
-                    @if (!string.IsNullOrWhiteSpace(missing.GpsSiteNote))
-                    {
-                        <div class="small text-muted">@missing.GpsSiteNote</div>
-                    }
-                }
-                else
-                {
-                    <span class="text-muted">Nog geen GPS-werfvenster.</span>
-                }
+            <div class="mt-2">
+                Project @(expl.ProposalProject ?? "—")
+                @if (!string.IsNullOrWhiteSpace(expl.ProposalBon)) { <span>· BON @expl.ProposalBon</span> }
             </div>
-            @if (!string.IsNullOrWhiteSpace(missing.ExcursionSummary) && !string.Equals(missing.ExcursionClass, "none", StringComparison.OrdinalIgnoreCase))
+            @if (!string.IsNullOrWhiteSpace(expl.ProposalTaskLabel))
             {
-                <div class="mt-3">
-                    <div class="text-uppercase small text-muted fw-semibold mb-1">Tijdelijke verplaatsing</div>
-                    <div>@missing.ExcursionSummary</div>
-                    <div class="small text-muted mt-1">Classificatie: @(missing.ExcursionClass ?? "—")</div>
+                <div>@expl.ProposalTaskLabel</div>
+            }
+            <div class="small mt-2">@expl.ProposalWhyLine</div>
+            @if (!string.IsNullOrWhiteSpace(expl.PlanningInterval))
+            {
+                <div class="small text-muted">Planning: @expl.PlanningInterval</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(expl.PeerInterval))
+            {
+                <div class="small text-muted">Collega: @expl.PeerInterval</div>
+            }
+            <div class="mt-3">
+                <div class="fw-semibold">@expl.BookingStatusNl</div>
+                <div class="small">Voorgestelde prestatie: @(expl.ProposalInterval ?? $"{FmtTime(missing.ProposalStart)}–{FmtTime(missing.ProposalEnd)}")</div>
+                <div class="small text-muted mt-1">@expl.ReadinessNl</div>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(expl.ExistingOtherBookingNl))
+            {
+                <div class="alert alert-secondary small mt-3 mb-0">
+                    <strong>Andere boeking controleren</strong>
+                    <div>@expl.ExistingOtherBookingNl</div>
                 </div>
             }
-            @if (!string.IsNullOrWhiteSpace(missing.WorkContinuityNl) || !string.IsNullOrWhiteSpace(missing.WorkContinuity))
-            {
-                <div class="mt-3">
-                    <div class="text-uppercase small text-muted fw-semibold mb-1">Werkcontinuïteit</div>
-                    <div class="fw-semibold">@(missing.WorkContinuity ?? "—")</div>
-                    @if (!string.IsNullOrWhiteSpace(missing.WorkContinuityNl))
-                    {
-                        <div class="mt-1">@missing.WorkContinuityNl</div>
-                    }
-                    @if (!string.IsNullOrWhiteSpace(missing.OperationalSite))
-                    {
-                        <div class="small text-muted mt-1">Operationele site: @missing.OperationalSite</div>
-                    }
-                    <div class="small mt-1">
-                        Projectallocatie:
-                        @(missing.AllocationReview ? "NA TE KIJKEN (uren niet inkorten)" : "OK / niet van toepassing")
-                    </div>
-                    @if (!string.IsNullOrWhiteSpace(missing.PauseNoteNl))
-                    {
-                        <div class="small text-muted mt-1">@missing.PauseNoteNl</div>
-                    }
-                </div>
-            }
-        </section>
-
-        <section class="mb-3 border rounded p-3">
-            <div class="text-uppercase small text-muted fw-semibold mb-1">Voorstel VAN/TOT</div>
-            <div class="fs-5">@FmtTime(missing.ProposalStart)–@FmtTime(missing.ProposalEnd) · @FmtHours(missing.ProposalHours)</div>
-            <div class="small text-muted mt-1">
-                Project @(missing.SuggestedProjectId ?? "—")
-                @if (!string.IsNullOrWhiteSpace(missing.SuggestedBonNr)) { <span>· BON @missing.SuggestedBonNr</span> }
-                @if (missing.SuggestedMainTaskId is > 0) { <span>· HFDTAAK @missing.SuggestedMainTaskId</span> }
-            </div>
             <div class="d-flex flex-wrap gap-2 mt-3">
                 <button type="button" class="btn btn-sm btn-outline-secondary" id="wb-use-peer"
                         @(missing.PeerStart is null || missing.PeerEnd is null ? "disabled" : null)>
@@ -185,30 +175,50 @@ else
             </div>
         </section>
 
-        <section class="mb-4">
-            @if (detail.GpsContext.IsLoading)
-            {
-                <div class="small text-muted mb-2" id="gps-inline-status">GPS-context laden…</div>
-            }
-            else
-            {
-                <div class="small text-muted mb-2" id="gps-inline-status">@detail.GpsContext.Summary</div>
-            }
-            <div id="gps-panel"
-                 data-admin-case-key="@selected.AdminCaseKey"
-                 data-loading="@(detail.GpsContext.IsLoading ? "true" : "false")">
-                <ul class="list-unstyled small mb-0" id="gps-events">
-                    @foreach (var ev in detail.GpsContext.Events)
+        <details class="mb-4">
+            <summary class="small text-muted">Technische details</summary>
+            <div class="border rounded p-3 mt-2 small">
+                <div>EvidenceClass: @missing.EvidenceClass</div>
+                <div>TravelMode: @missing.TravelMode</div>
+                <div>ProposalSource: @missing.ProposalSource</div>
+                <div>SiteMatch: @missing.SiteMatch · @missing.SiteMatchNl</div>
+                <div>ConflictClass: @missing.ConflictClass · @missing.ConflictClassNl</div>
+                <div>WorkContinuity: @(missing.WorkContinuity ?? "—")</div>
+                <div>Excursion: @(missing.ExcursionClass ?? "—") · @(missing.ExcursionSummary ?? "—")</div>
+                <div>AllocationReview: @missing.AllocationReview</div>
+                <div>OperationalSite: @(missing.OperationalSite ?? "—")</div>
+                <div class="mt-2 text-muted">@missing.FindingEvidence</div>
+                @if (detail.GpsContext.IsLoading)
+                {
+                    <div class="mt-2" id="gps-inline-status">GPS-context laden…</div>
+                }
+                else
+                {
+                    <div class="mt-2" id="gps-inline-status">@detail.GpsContext.Summary</div>
+                }
+                <div id="gps-panel"
+                     data-admin-case-key="@selected.AdminCaseKey"
+                     data-loading="@(detail.GpsContext.IsLoading ? "true" : "false")">
+                    <ul class="list-unstyled mb-0" id="gps-events">
+                        @foreach (var ev in detail.GpsContext.Events)
+                        {
+                            <li>
+                                <strong>@ev.At.ToString("HH:mm")@(ev.End is null ? "" : "–" + ev.End.Value.ToString("HH:mm"))</strong>
+                                @ev.Label
+                                @if (!string.IsNullOrWhiteSpace(ev.Detail)) { <span class="text-muted">· @ev.Detail</span> }
+                            </li>
+                        }
+                    </ul>
+                </div>
+            <div id="travel-mode-label" class="d-none">@PayrollReviewLabels.MissingTechnicianTravelMode(missing.TravelMode)</div>
+                <div id="gps-site-summary" class="d-none">
+                    @if (missing.GpsSiteStart is not null)
                     {
-                        <li>
-                            <strong>@ev.At.ToString("HH:mm")@(ev.End is null ? "" : "–" + ev.End.Value.ToString("HH:mm"))</strong>
-                            @ev.Label
-                            @if (!string.IsNullOrWhiteSpace(ev.Detail)) { <span class="text-muted">· @ev.Detail</span> }
-                        </li>
+                        <span>@FmtTime(missing.GpsSiteStart)|@(missing.GpsSiteEnd is null ? "" : FmtTime(missing.GpsSiteEnd))</span>
                     }
-                </ul>
+                </div>
             </div>
-        </section>
+        </details>
 
         <section class="mb-3 @(missing.CanProposeCreate ? "d-none" : "d-none")" id="create-panel"
                  data-peer-start="@(missing.PeerStart?.ToString("HH:mm"))"
@@ -236,10 +246,17 @@ else
         <section class="border-top pt-3 sticky-bottom bg-white p200-sticky-decisions" id="wb-decisions" data-admin-case-key="@selected.AdminCaseKey">
             <div class="text-uppercase small text-muted fw-semibold mb-2">Beslissing</div>
             <div class="d-flex flex-wrap gap-2 mb-2">
+                @{
+                    var primaryCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        PayrollGuidedDecisionCodes.MissingTechConfirmed,
+                    };
+                }
                 @foreach (var choice in selected.Choices)
                 {
+                    var isPrimary = primaryCodes.Contains(choice.DecisionCode);
                     <button type="button"
-                            class="btn btn-sm btn-outline-dark wb-decide"
+                            class="btn btn-sm @(isPrimary ? "btn-primary" : "btn-outline-dark") wb-decide"
                             data-decision="@choice.DecisionCode"
                             data-label="@choice.Label"
                             data-requires-comment="@(choice.RequiresComment ? "true" : "false")">@choice.Label</button>

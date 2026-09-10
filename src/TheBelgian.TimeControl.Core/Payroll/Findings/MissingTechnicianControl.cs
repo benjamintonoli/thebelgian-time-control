@@ -787,7 +787,18 @@ public static class MissingTechnicianControl
         if (plannedLocation is not null)
         {
             sb.Append(CultureInfo.InvariantCulture,
-                $"plannedSite={plannedLocation.Postcode ?? plannedLocation.AddressLabel ?? "—"} src={plannedLocation.Source} conf={plannedLocation.Confidence}; ");
+                $"plannedSite={plannedLocation.AddressLabel ?? plannedLocation.Postcode ?? "—"} src={plannedLocation.Source} conf={plannedLocation.Confidence}; ");
+        }
+
+        if (!string.IsNullOrWhiteSpace(group.Subject))
+        {
+            var subject = group.Subject.Replace(";", ",", StringComparison.Ordinal).Trim();
+            if (subject.Length > 160)
+            {
+                subject = subject[..160];
+            }
+
+            sb.Append(CultureInfo.InvariantCulture, $"planningSubject={subject}; ");
         }
 
         if (existingLocation is not null)

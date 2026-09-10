@@ -36,7 +36,7 @@ public sealed class PayrollReviewWorkflowUxTests
         Assert.Equal("Te controleren", PayrollReviewLabels.ReviewStatus(PayrollEmployeeReviewStatus.Pending));
         Assert.Equal("Goedgekeurd", PayrollReviewLabels.ReviewStatus(PayrollEmployeeReviewStatus.Accepted));
         Assert.Equal("Opvolging nodig", PayrollReviewLabels.ReviewStatus(PayrollEmployeeReviewStatus.NeedsFollowUp));
-        Assert.Equal("Review bezig", PayrollReviewLabels.MonthStatus(PayrollShadowMonthStatus.InReview));
+        Assert.Equal("In behandeling", PayrollReviewLabels.MonthStatus(PayrollShadowMonthStatus.InReview));
     }
 
     [Fact]

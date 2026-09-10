@@ -397,8 +397,9 @@ public sealed class PayrollDeleteBrowserFlowTests
         Assert.Contains("Huidige prestatie", markup, StringComparison.Ordinal);
         Assert.Contains("Omschrijving:", markup, StringComparison.Ordinal);
         Assert.Contains("PerformanceId", markup, StringComparison.Ordinal);
-        Assert.DoesNotContain("view.Evidence.Evidence", markup, StringComparison.Ordinal);
         Assert.DoesNotContain("Workbench delete-voorstel", markup, StringComparison.Ordinal);
+        // Create path may surface Evidence under Technische details; delete path must not lead with raw evidence.
+        Assert.Contains("isDelete ? \"Huidige prestatie\"", markup, StringComparison.Ordinal);
     }
 
     [Fact]

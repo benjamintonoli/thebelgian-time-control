@@ -121,9 +121,12 @@ public sealed class PayrollRosterUxFixTests
     {
         var layout = File.ReadAllText(Path.Combine(FindRepoRoot(), "src", "TheBelgian.TimeControl.Web", "Pages", "Shared", "_Layout.cshtml"));
         Assert.Contains("asp-page=\"/Admin/Payroll/Index\"", layout);
-        Assert.Contains("Payroll shadow", layout);
+        Assert.Contains("Looncontrole", layout);
+        Assert.DoesNotContain(">Payroll shadow<", layout);
         Assert.DoesNotContain("asp-page=\"/Admin/Payroll\"", layout);
         Assert.Contains("asp-page=\"/Admin/Payroll/Employees\"", layout);
+        Assert.Contains("Overzicht", layout);
+        Assert.Contains("Beheer", layout);
     }
 
     [Fact]

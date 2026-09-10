@@ -643,12 +643,37 @@ internal sealed class PayrollIntelligenceWorkbenchService(
 
         var peerRows = await LoadPeerRowsAsync(finding, cancellationToken);
         gpsCache.TryGet(adminCase.ResourceId, adminCase.Date, out var cachedGps, out var gpsHit);
+        string? peerDisplayName = null;
+        var peerMatch = System.Text.RegularExpressions.Regex.Match(
+            finding.Evidence ?? string.Empty,
+            @"peers=\[([^\s#]+)#",
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        if (peerMatch.Success)
+        {
+            var peerId = peerMatch.Groups[1].Value;
+            var monthNumber = month;
+            await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+            peerDisplayName = await (
+                from emp in context.PayrollShadowEmployeeResults.AsNoTracking()
+                join shadowMonth in context.PayrollShadowMonths.AsNoTracking()
+                    on emp.ShadowMonthId equals shadowMonth.Id
+                where shadowMonth.Year == year
+                      && shadowMonth.Month == monthNumber
+                      && emp.ResourceId == peerId
+                select emp.DisplayNameSnapshot).FirstOrDefaultAsync(cancellationToken);
+            if (string.IsNullOrWhiteSpace(peerDisplayName))
+            {
+                peerDisplayName = null;
+            }
+        }
+
         return PayrollIntelligenceWorkbenchBuilder.BuildMissingDetail(
             adminCase,
             finding,
             peerRows,
             gpsHit ? cachedGps : null,
-            gpsPending: !gpsHit);
+            gpsPending: !gpsHit,
+            peerDisplayName);
     }
 
     private async Task<IReadOnlyList<NormalizedPerformanceEntry>> LoadPeerRowsAsync(

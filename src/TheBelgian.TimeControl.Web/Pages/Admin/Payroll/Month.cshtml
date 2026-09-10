@@ -3,7 +3,7 @@
 @using TheBelgian.TimeControl.Core.Payroll.Models
 @using TheBelgian.TimeControl.Core.Payroll.Review
 @{
-    ViewData["Title"] = $"Payroll shadow {Model.Month:00}/{Model.Year}";
+    ViewData["Title"] = $"Looncontrole {Model.Month:00}/{Model.Year}";
     var detail = Model.Detail;
     var summary = detail?.Summary;
     var queueSummary = Model.QueueSummary;
@@ -13,7 +13,7 @@
 
 <div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
     <div>
-        <div class="text-uppercase small text-muted fw-semibold">Payroll shadow</div>
+        <div class="text-uppercase small text-muted fw-semibold">Looncontrole</div>
         <h1>@Model.Month.ToString("00")/@Model.Year</h1>
         @if (detail is not null)
         {

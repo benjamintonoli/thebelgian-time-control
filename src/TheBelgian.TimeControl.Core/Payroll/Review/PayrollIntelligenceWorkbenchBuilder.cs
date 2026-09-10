@@ -78,7 +78,8 @@ public static partial class PayrollIntelligenceWorkbenchBuilder
         PayrollFindingRecord finding,
         IReadOnlyList<NormalizedPerformanceEntry> peerRows,
         StandbyGpsDayEvidence? gps,
-        bool gpsPending)
+        bool gpsPending,
+        string? peerDisplayName = null)
     {
         var travelMode = ParseTravelMode(finding.Evidence);
         var evidenceClass = finding.GpsClassification ?? nameof(MissingTechnicianEvidenceClass.Ambiguous);
@@ -138,6 +139,28 @@ public static partial class PayrollIntelligenceWorkbenchBuilder
                 + (string.IsNullOrWhiteSpace(excursionAway) || excursionAway == "—" ? "" : $" · {excursionAway}");
         }
 
+        var roundedHours = proposalHours is null
+            ? (decimal?)null
+            : Math.Round(proposalHours.Value, 2, MidpointRounding.AwayFromZero);
+        var canPropose = canCreate && !isWrongDossier;
+        var resolvedPeerName = FirstNonEmpty(
+            peerDisplayName,
+            ParseToken(finding.Evidence, "peerName"));
+        var explanation = MissingTechnicianAdminExplainability.Build(
+            finding.Evidence,
+            peer.ResourceId,
+            resolvedPeerName,
+            peer.Start,
+            peer.End,
+            proposalStart,
+            proposalEnd,
+            roundedHours,
+            finding.SuggestedProjectId,
+            finding.SuggestedBonNr,
+            mainTaskId,
+            travelMode,
+            canPropose);
+
         return new PayrollIntelligenceCaseDetail(
             adminCase,
             Overlap: null,
@@ -158,14 +181,12 @@ public static partial class PayrollIntelligenceWorkbenchBuilder
                 siteNote,
                 proposalStart,
                 proposalEnd,
-                proposalHours is null
-                    ? null
-                    : Math.Round(proposalHours.Value, 2, MidpointRounding.AwayFromZero),
+                roundedHours,
                 proposalSource,
                 finding.SuggestedProjectId,
                 finding.SuggestedBonNr,
                 mainTaskId,
-                canCreate && !isWrongDossier,
+                canPropose,
                 isWrongDossier
                     ? "Vervangplan: eerst bestaande boeking verwijderen, daarna correcte prestatie aanmaken (Create feature-gated)."
                     : createBlock,
@@ -187,7 +208,9 @@ public static partial class PayrollIntelligenceWorkbenchBuilder
                 excursionSummary,
                 operationalSite,
                 allocationReview,
-                pauseNote),
+                pauseNote,
+                resolvedPeerName,
+                explanation),
             BuildGpsContext(gps, gpsPending));
     }
 

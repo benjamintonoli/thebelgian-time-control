@@ -476,12 +476,12 @@ public static class PayrollReviewCaseBuilder
             var summary = proposal is null
                 ? "Voorstel klaar"
                 : $"{proposal.CurrentStart:HH:mm}–{proposal.CurrentEnd:HH:mm} → {proposal.ProposedStart:HH:mm}–{proposal.ProposedEnd:HH:mm}";
-            return (PayrollReviewCaseActionability.ReadyProposal, "Voorstel beschikbaar (geen auto-uitvoering)", null, summary);
+            return (PayrollReviewCaseActionability.ReadyProposal, "Voorstel klaar voor controle", null, summary);
         }
 
         if (action is not null && action.Status == PayrollProposedActionStatus.Blocked)
         {
-            return (PayrollReviewCaseActionability.Blocked, "Automatische correctie niet beschikbaar", null, action.BlockReason);
+            return (PayrollReviewCaseActionability.Blocked, "Nog niet klaar om automatisch voor te stellen", null, action.BlockReason);
         }
 
         if (findings.Any(item =>

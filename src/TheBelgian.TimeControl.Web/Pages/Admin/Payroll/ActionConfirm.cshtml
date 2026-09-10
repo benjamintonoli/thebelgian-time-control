@@ -1,8 +1,10 @@
 @page "/Admin/Payroll/ActionConfirm"
 @model TheBelgian.TimeControl.Web.Pages.Admin.Payroll.ActionConfirmModel
 @using TheBelgian.TimeControl.Core.Payroll.Actions
+@using TheBelgian.TimeControl.Core.Payroll.Findings
+@using TheBelgian.TimeControl.Core.Payroll.Review
 @{
-    ViewData["Title"] = "Payrollvoorstel controleren";
+    ViewData["Title"] = "Voorstel controleren";
     var view = Model.View;
     var isDelete = view?.ActionType == PayrollProposedActionType.DeleteExistingPerformance;
     var isCreate = view?.ActionType == PayrollProposedActionType.CreateMissingPerformance;
@@ -12,6 +14,40 @@
         && view.Status is not PayrollProposedActionStatus.Applied
             and not PayrollProposedActionStatus.Executing
             and not PayrollProposedActionStatus.Cancelled;
+    MissingTechnicianAdminExplanation? createExpl = null;
+    if (isCreate && view is not null)
+    {
+        var travel = PayrollIntelligenceWorkbenchBuilder.ParseTravelMode(view.Evidence.Evidence);
+        TimeOnly? start = view.CreateProposal is null ? null : TimeOnly.FromTimeSpan(view.CreateProposal.Start.TimeOfDay);
+        TimeOnly? end = view.CreateProposal is null ? null : TimeOnly.FromTimeSpan(view.CreateProposal.End.TimeOfDay);
+        TimeOnly? peerStart = null;
+        TimeOnly? peerEnd = null;
+        var peerTok = System.Text.RegularExpressions.Regex.Match(
+            view.Evidence.Evidence ?? string.Empty,
+            @"peers=\[[^\s#]+#\d+:(\d{2}:\d{2})-(\d{2}:\d{2})");
+        if (peerTok.Success)
+        {
+            _ = TimeOnly.TryParse(peerTok.Groups[1].Value, out var ps);
+            _ = TimeOnly.TryParse(peerTok.Groups[2].Value, out var pe);
+            peerStart = ps;
+            peerEnd = pe;
+        }
+
+        createExpl = MissingTechnicianAdminExplainability.Build(
+            view.Evidence.Evidence,
+            peerResourceId: null,
+            peerDisplayName: null,
+            peerStart,
+            peerEnd,
+            start,
+            end,
+            view.CreateProposal?.Hours,
+            view.CreateProposal?.ProjectId ?? view.Evidence.SuggestedProjectId,
+            view.CreateProposal?.BonNr ?? view.Evidence.SuggestedBonNr,
+            view.CreateProposal?.MainTaskId,
+            travel,
+            canProposeCreate: true);
+    }
 }
 
 @if (!string.IsNullOrWhiteSpace(Model.Error))
@@ -81,6 +117,39 @@ else
         }
     </div>
 
+    @if (isCreate && createExpl is not null)
+    {
+        <section class="border rounded p-3 mb-3">
+            <h2 class="h6 text-uppercase">Waarom</h2>
+            <ul class="mb-2">
+                @foreach (var bullet in createExpl.WhyBullets)
+                {
+                    <li>@bullet</li>
+                }
+            </ul>
+            @if (!string.IsNullOrWhiteSpace(createExpl.PlanningInterval))
+            {
+                <div class="small">Planning: @createExpl.PlanningInterval</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(createExpl.PeerInterval))
+            {
+                <div class="small">Collega: @createExpl.PeerInterval</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(createExpl.ProposalInterval))
+            {
+                <div class="small">Eigen Track &amp; Trace / voorstel: @createExpl.ProposalInterval</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(createExpl.HqExcursionNl))
+            {
+                <div class="small mt-1">@createExpl.HqExcursionNl</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(createExpl.AllocationReviewNl))
+            {
+                <div class="small text-warning-emphasis mt-1">@createExpl.AllocationReviewNl</div>
+            }
+        </section>
+    }
+
     <div class="row g-3 mb-4">
         <div class="col-md-6">
             <section class="border rounded p-3 h-100">
@@ -111,9 +180,21 @@ else
                 else if (isCreate)
                 {
                     <p class="mb-1"><strong>ONTBREKENDE PRESTATIE</strong></p>
-                    <p class="mb-1 small">@PayrollReviewLabels.MissingTechnicianEvidence(view.Evidence.GpsClassification)</p>
-                    <p class="mb-1 small">@view.Evidence.Description</p>
-                    <p class="mb-0 small text-muted">Geen bestaande PROJ_Prest voor deze medewerker op dit interval.</p>
+                    <p class="mb-1">Nog niet geregistreerd in Plenion</p>
+                    @if (createExpl is not null)
+                    {
+                        <p class="mb-1 small">Tijdsvoorstel op basis van: @createExpl.TimingSourcePrimary</p>
+                        @if (!string.IsNullOrWhiteSpace(createExpl.TimingSourceSupporting))
+                        {
+                            <p class="mb-1 small text-muted">Ondersteund door: @createExpl.TimingSourceSupporting</p>
+                        }
+                        <p class="mb-0 small text-muted">@createExpl.ReadinessNl</p>
+                    }
+                    <details class="mt-2">
+                        <summary class="small text-muted">Technische details</summary>
+                        <p class="mb-1 small">@PayrollReviewLabels.MissingTechnicianEvidence(view.Evidence.GpsClassification)</p>
+                        <p class="mb-0 small text-muted">@view.Evidence.Evidence</p>
+                    </details>
                 }
                 else
                 {
@@ -132,7 +213,7 @@ else
         </div>
         <div class="col-md-6">
             <section class="border rounded p-3 h-100 @(isDelete ? "border-danger" : "")">
-                <h2 class="h6">Voorstel</h2>
+                <h2 class="h6">@(isCreate ? "Aan te maken" : "Voorstel")</h2>
                 @if (view.DeleteProposal is not null)
                 {
                     <p class="mb-1"><strong>Prestatie definitief verwijderen</strong></p>
@@ -149,15 +230,14 @@ else
                 }
                 else if (view.CreateProposal is not null)
                 {
-                    <p class="mb-1"><strong>Nieuwe prestatie aanmaken</strong></p>
+                    <p class="mb-1 fs-5 fw-semibold">@view.CreateProposal.Start.ToString("HH:mm")–@view.CreateProposal.End.ToString("HH:mm")</p>
                     <ul class="small mb-0">
                         <li>Medewerker: @(view.DisplayName ?? view.CreateProposal.ResourceId)</li>
                         <li>Datum: @PayrollDisplayFormatting.DateWithWeekday(view.CreateProposal.Date)</li>
                         <li>Project: @view.CreateProposal.ProjectId</li>
                         <li>BON: @(view.CreateProposal.BonNr ?? "—")</li>
-                        <li>VAN–TOT: @view.CreateProposal.Start.ToString("HH:mm")–@view.CreateProposal.End.ToString("HH:mm")</li>
                         <li>Duur: @view.CreateProposal.Hours.ToString("0.##") u</li>
-                        <li>Activiteit (IDHFDTAAK): @view.CreateProposal.MainTaskId</li>
+                        <li>Taak: @view.CreateProposal.MainTaskId</li>
                     </ul>
                 }
                 else if (view.AdjustProposal is not null)
