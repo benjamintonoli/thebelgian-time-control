@@ -284,36 +284,56 @@ else
                         <div class="small text-muted mb-2">Ondersteund door: @cp.SupportingEvidenceNl</div>
                     }
                     <div class="small border-top pt-2">
-                        <div><strong>Pauzecontrole:</strong> @(cp.PauseExplanationNl ?? "—")</div>
-                        <div><strong>Overlapcontrole:</strong> @(cp.OverlapExplanationNl ?? "—")</div>
+                        <div class="text-uppercase fw-semibold mb-1">Dagpauze</div>
+                        @{
+                            var pauseMin = (int)cp.Pause.TotalMinutes;
+                            var dayNeedsPause = cp.GrossHours > 4m
+                                || (cp.End - cp.Start).TotalHours > 4;
+                        }
+                        @if (dayNeedsPause || pauseMin > 0)
+                        {
+                            <div>Dag langer dan 4 uur: minstens 30 min pauze vereist</div>
+                            <div>Deze creatie: @pauseMin min</div>
+                        }
+                        else
+                        {
+                            <div>Dag van hoogstens 4 uur: geen verplichte 30 min pauze</div>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(cp.PauseExplanationNl))
+                        {
+                            <div class="text-muted">@cp.PauseExplanationNl</div>
+                        }
+                        <div class="mt-2 text-uppercase fw-semibold">Overlapcontrole</div>
+                        <div>@(cp.OverlapExplanationNl ?? "Geen dubbele geregistreerde tijd.")</div>
                     </div>
                 }
                 else if (view.AdjustProposal is not null)
                 {
                     var ap = view.AdjustProposal;
+                    var currentPauseMin = (int)(ap.CurrentPause ?? TimeSpan.Zero).TotalMinutes;
+                    var proposedPauseMin = (int)(ap.ProposedPause ?? TimeSpan.Zero).TotalMinutes;
+                    var afterPauseMin = proposedPauseMin; // target row after correction; other-day pause shown via explanation
                     <p class="mb-1 text-uppercase small text-muted fw-semibold">Prestatie aanpassen</p>
                     <ul class="small mb-2">
                         <li>Prestatie #@ap.PerformanceId</li>
                         <li>Huidig: @ap.CurrentStart.ToString("HH:mm")–@ap.CurrentEnd.ToString("HH:mm")
-                            · Pauze @(ap.CurrentPause is { } cpz ? $"{(int)cpz.TotalMinutes} min" : "—")
+                            · Pauze @currentPauseMin min
                             · ATL @(ap.CurrentAtl?.ToString("0.####") ?? "—")</li>
                         <li>Voorstel: @ap.ProposedStart.ToString("HH:mm")–@ap.ProposedEnd.ToString("HH:mm")
-                            · Pauze @(ap.ProposedPause is { } pp ? $"{(int)pp.TotalMinutes} min" : "—")
+                            · Pauze @proposedPauseMin min
                             · ATL @(ap.ProposedAtl?.ToString("0.####") ?? "—")</li>
                     </ul>
-                    @if (!string.IsNullOrWhiteSpace(ap.PauseExplanationNl) || !string.IsNullOrWhiteSpace(ap.OverlapExplanationNl))
-                    {
-                        <div class="small border-top pt-2">
-                            @if (!string.IsNullOrWhiteSpace(ap.PauseExplanationNl))
-                            {
-                                <div><strong>Pauzecontrole:</strong> @ap.PauseExplanationNl</div>
-                            }
-                            @if (!string.IsNullOrWhiteSpace(ap.OverlapExplanationNl))
-                            {
-                                <div><strong>Overlapcontrole:</strong> @ap.OverlapExplanationNl</div>
-                            }
-                        </div>
-                    }
+                    <div class="small border-top pt-2 mb-2">
+                        <div class="text-uppercase fw-semibold mb-1">Dagpauze</div>
+                        <div>Dag langer dan 4 uur: minstens 30 min pauze vereist</div>
+                        <div>Reeds aanwezig: @currentPauseMin min</div>
+                        <div>Deze correctie: @proposedPauseMin min</div>
+                        <div>Na correctie: @afterPauseMin min</div>
+                    </div>
+                    <div class="small">
+                        <div class="text-uppercase fw-semibold mb-1">Overlapcontrole</div>
+                        <div>@(ap.OverlapExplanationNl ?? "Geen dubbele tijd na correctie")</div>
+                    </div>
                 }
                 else
                 {

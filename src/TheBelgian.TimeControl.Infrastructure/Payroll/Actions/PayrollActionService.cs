@@ -480,6 +480,24 @@ internal sealed class PayrollActionService(
                 return FailResult(action, action.BlockReason!);
             }
 
+            var workbenchDay = SameDayRows(performances, DateOnly.FromDateTime(storedAdjust.CurrentStart.Date));
+            var workbenchDaily = PayrollDailyWriteRevalidation.ValidateAdjust(
+                workbenchDay,
+                new PayrollDailyWriteRevalidation.AdjustCheck(
+                    storedAdjust.PerformanceId,
+                    storedAdjust.ProposedStart.TimeOfDay,
+                    storedAdjust.ProposedEnd.TimeOfDay,
+                    storedAdjust.ProposedPause,
+                    storedAdjust.CurrentStart.TimeOfDay,
+                    storedAdjust.CurrentEnd.TimeOfDay,
+                    storedAdjust.CurrentPause));
+            if (!workbenchDaily.IsSafe)
+            {
+                MarkStale(action, workbenchDaily.StaleReasonNl!);
+                await context.SaveChangesAsync(cancellationToken);
+                return FailResult(action, action.BlockReason!);
+            }
+
             var nowAdjust = timeProvider.GetUtcNow();
             action.Status = PayrollProposedActionStatus.Executing;
             action.Comment = comment.Trim();
@@ -609,6 +627,45 @@ internal sealed class PayrollActionService(
         // Prefer the snapshotted proposal the admin reviewed.
         var createProposal = storedCreate ?? eligibility.CreateProposal;
         var adjustProposal = storedAdjust ?? eligibility.AdjustProposal;
+
+        if (createProposal is not null
+            && action.ActionType == PayrollProposedActionType.CreateMissingPerformance)
+        {
+            var createDaily = PayrollDailyWriteRevalidation.ValidateCreate(
+                SameDayRows(performances, createProposal.Date),
+                new PayrollDailyWriteRevalidation.CreateCheck(
+                    createProposal.Start.TimeOfDay,
+                    createProposal.End.TimeOfDay,
+                    createProposal.Pause));
+            if (!createDaily.IsSafe)
+            {
+                MarkStale(action, createDaily.StaleReasonNl!);
+                await context.SaveChangesAsync(cancellationToken);
+                return FailResult(action, action.BlockReason!);
+            }
+        }
+
+        if (adjustProposal is not null
+            && action.ActionType == PayrollProposedActionType.AdjustExistingPerformanceTime)
+        {
+            var adjustDaily = PayrollDailyWriteRevalidation.ValidateAdjust(
+                SameDayRows(performances, DateOnly.FromDateTime(adjustProposal.CurrentStart.Date)),
+                new PayrollDailyWriteRevalidation.AdjustCheck(
+                    adjustProposal.PerformanceId,
+                    adjustProposal.ProposedStart.TimeOfDay,
+                    adjustProposal.ProposedEnd.TimeOfDay,
+                    adjustProposal.ProposedPause,
+                    adjustProposal.CurrentStart.TimeOfDay,
+                    adjustProposal.CurrentEnd.TimeOfDay,
+                    adjustProposal.CurrentPause));
+            if (!adjustDaily.IsSafe)
+            {
+                MarkStale(action, adjustDaily.StaleReasonNl!);
+                await context.SaveChangesAsync(cancellationToken);
+                return FailResult(action, action.BlockReason!);
+            }
+        }
+
         var now = timeProvider.GetUtcNow();
         action.Status = PayrollProposedActionStatus.Executing;
         action.Comment = comment.Trim();
@@ -1352,6 +1409,25 @@ internal sealed class PayrollActionService(
         action.BlockReason = reason;
         action.UpdatedAtUtc = DateTimeOffset.UtcNow;
     }
+
+    private static List<PayrollDailyWriteRevalidation.SameDayRow> SameDayRows(
+        IReadOnlyList<NormalizedPerformanceEntry> performances,
+        DateOnly date) =>
+        performances
+            .Where(row =>
+                row.Date == date
+                && row.Start is not null
+                && row.End is not null
+                && row.End > row.Start)
+            .Select(row => new PayrollDailyWriteRevalidation.SameDayRow(
+                row.SourceEntryId,
+                row.Start!.Value.TimeOfDay,
+                row.End!.Value.TimeOfDay,
+                row.Pause.ExactMinutes is { } minutes
+                    ? TimeSpan.FromMinutes((double)minutes)
+                    : TimeSpan.Zero))
+            .ToList();
+
 
     private static PayrollActionExecutionResult FailResult(PayrollProposedActionRecord action, string message) =>
         new(action.ActionId, action.Status, message, action.PwsReference, action.ResultPerformanceId);

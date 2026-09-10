@@ -20,8 +20,8 @@ public static class PayrollCreateProposalSemantics
         && string.Equals(NormalizeProject(stored.ProjectId), NormalizeProject(current.ProjectId), StringComparison.Ordinal)
         && string.Equals(NormalizeBon(stored.BonNr), NormalizeBon(current.BonNr), StringComparison.Ordinal)
         && WallClockMinute(stored.Start) == WallClockMinute(current.Start)
-        && WallClockMinute(stored.End) == WallClockMinute(current.End)
-        && stored.Pause == current.Pause;
+        && WallClockMinute(stored.End) == WallClockMinute(current.End);
+    // Pause is owned by daily-write revalidation at execute time — not by finding eligibility.
 
     /// <summary>
     /// Canonical fingerprint of the executable create mutation contract (no volatile display/workflow fields).

@@ -88,17 +88,19 @@ public sealed class PayrollActionServiceTests
             "26501760",
             evidence: "suggestedHfdTaakId=9; class=PlanningPlusPeerPlusGps");
 
-        // Bashi-like: workbench stored proposal used +00:00 minute truncation.
+        // Bashi-like: workbench stored proposal used +00:00 minute truncation + daily pause.
         var stored = new PayrollActionCreateProposal(
             "100",
             new DateOnly(2026, 8, 14),
             new DateTimeOffset(2026, 8, 14, 7, 55, 0, TimeSpan.Zero),
             new DateTimeOffset(2026, 8, 14, 14, 46, 0, TimeSpan.Zero),
-            6.85m,
+            6.35m,
             "40167",
             "26501760",
             9,
-            PayrollIntervalSemantics.PayableWork);
+            PayrollIntervalSemantics.PayableWork,
+            Pause: TimeSpan.FromMinutes(30),
+            GrossHours: 6.85m);
         var ready = await fx.SeedReadyCreateActionAsync(finding, stored);
 
         // Workflow-only: finding already NeedsFollowUp + MISSING_TECH_CONFIRMED.

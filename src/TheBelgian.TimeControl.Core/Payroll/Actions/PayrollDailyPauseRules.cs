@@ -56,7 +56,7 @@ public static class PayrollDailyPauseRules
         string explanation;
         if (required == TimeSpan.Zero)
         {
-            explanation = "Dag ≤4 uur: geen verplichte 30 min pauze.";
+            explanation = "Dag van hoogstens 4 uur: geen verplichte 30 min pauze.";
         }
         else if (deficit == TimeSpan.Zero && assign == TimeSpan.Zero)
         {
@@ -64,20 +64,20 @@ public static class PayrollDailyPauseRules
         }
         else if (deficit == TimeSpan.Zero && assign > MandatoryMinimumPause)
         {
-            explanation = $"Dag >4 uur: bestaande pauze {Format(assign)} behouden (≥30 min).";
+            explanation = $"Dag langer dan 4 uur: bestaande pauze {Format(assign)} behouden (≥30 min).";
         }
         else if (otherPause > TimeSpan.Zero && assign > TimeSpan.Zero)
         {
             explanation =
-                $"Dag >4 uur: minimum 30 min pauze; {Format(assign)} op deze rij (bestaand elders {Format(otherPause)}).";
+                $"Dag langer dan 4 uur: minstens 30 min pauze; {Format(assign)} op deze rij (bestaand elders {Format(otherPause)}).";
         }
         else if (assign >= MandatoryMinimumPause)
         {
-            explanation = "Dag >4 uur: minimum 30 min pauze toegepast.";
+            explanation = "Dag langer dan 4 uur: minstens 30 min pauze toegepast.";
         }
         else
         {
-            explanation = $"Dag >4 uur: pauze {Format(assign)} toegepast.";
+            explanation = $"Dag langer dan 4 uur: pauze {Format(assign)} toegepast.";
         }
 
         return new DayPausePlan(
