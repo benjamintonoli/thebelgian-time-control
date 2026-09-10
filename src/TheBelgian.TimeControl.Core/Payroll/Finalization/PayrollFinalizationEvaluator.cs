@@ -23,6 +23,7 @@ public static class PayrollFinalizationBlockerCodes
 /// <summary>
 /// Exception-based month finalization rules (V2).
 /// Employee ReviewStatus=Pending is informational only — never a blocker.
+/// Safety still validates underlying review cases; admin workload presentation uses AdminCases.
 /// </summary>
 public static class PayrollFinalizationEvaluator
 {
@@ -46,6 +47,16 @@ public static class PayrollFinalizationEvaluator
         var reviewed = reviewCases.Count(item => item.WorkflowStatus == PayrollFindingStatus.Reviewed);
         var resolved = reviewCases.Count(item => item.WorkflowStatus == PayrollFindingStatus.Resolved);
         var dismissed = reviewCases.Count(item => item.WorkflowStatus == PayrollFindingStatus.Dismissed);
+
+        var adminCases = PayrollAdminCaseBuilder.Build(reviewCases);
+        var openAdmin = adminCases.Count(item => item.WorkflowStatus == PayrollFindingStatus.Open);
+        var followUpAdmin = adminCases.Count(item => item.WorkflowStatus == PayrollFindingStatus.NeedsFollowUp);
+        var unresolvedAdmin = openAdmin + followUpAdmin;
+        var underlyingUnresolved = openCases + followUpCases;
+        var categoryWorkloads = BuildCategoryWorkloads(
+            adminCases.Where(item => PayrollReviewCategories.IsUnresolved(item.WorkflowStatus)).ToList());
+        var openCategoryWorkloads = BuildCategoryWorkloads(
+            adminCases.Where(item => item.WorkflowStatus == PayrollFindingStatus.Open).ToList());
 
         var blockers = new List<PayrollFinalizationBlocker>();
 
@@ -107,21 +118,21 @@ public static class PayrollFinalizationEvaluator
 
         if (openCases > 0)
         {
-            var detail = FormatUnresolvedCategories(reviewCases, PayrollFindingStatus.Open);
+            var detail = FormatAdminCategoryWorkload(openCategoryWorkloads);
             blockers.Add(new(
                 PayrollFinalizationBlockerCodes.OpenReviewCases,
-                openCases,
+                openAdmin > 0 ? openAdmin : openCases,
                 detail is null
-                    ? $"{openCases} openstaande payrollcontroles."
-                    : $"{openCases} openstaande payrollcontroles. Nog af te handelen: {detail}"));
+                    ? $"{openAdmin} dossiers te beoordelen ({openCases} onderliggende controles)."
+                    : $"{openAdmin} dossiers te beoordelen ({openCases} onderliggende controles). Nog af te handelen: {detail}"));
         }
 
         if (followUpCases > 0)
         {
             blockers.Add(new(
                 PayrollFinalizationBlockerCodes.FollowUpReviewCases,
-                followUpCases,
-                $"{followUpCases} payrollcontrole(s) met opvolging nodig."));
+                followUpAdmin > 0 ? followUpAdmin : followUpCases,
+                $"{followUpAdmin} dossiers in opvolging ({followUpCases} onderliggende controles)."));
         }
 
         if (employeeFollowUp > 0)
@@ -155,7 +166,12 @@ public static class PayrollFinalizationEvaluator
             financials,
             shadowMonth.CalculationVersion ?? string.Empty,
             !string.IsNullOrWhiteSpace(shadowMonth.ConfigurationSnapshotJson),
-            blockers.Select(item => item.FriendlyMessage).ToArray());
+            blockers.Select(item => item.FriendlyMessage).ToArray(),
+            openAdmin,
+            followUpAdmin,
+            unresolvedAdmin,
+            underlyingUnresolved,
+            categoryWorkloads);
     }
 
     public static string BuildAuditSnapshotJson(
@@ -178,6 +194,10 @@ public static class PayrollFinalizationEvaluator
             ["reviewReviewed"] = blockers.ReviewedReviewCases,
             ["reviewResolved"] = blockers.ResolvedReviewCases,
             ["reviewDismissed"] = blockers.DismissedReviewCases,
+            ["adminOpen"] = blockers.OpenAdminCases,
+            ["adminFollowUp"] = blockers.FollowUpAdminCases,
+            ["adminUnresolved"] = blockers.UnresolvedAdminCases,
+            ["underlyingUnresolved"] = blockers.UnderlyingUnresolvedReviewCases,
             ["needsDecision"] = blockers.NeedsDecision,
             ["missingAcerta"] = blockers.MissingAcertaIncluded,
             ["employeeNeedsFollowUp"] = blockers.NeedsFollowUpIncluded,
@@ -211,16 +231,27 @@ public static class PayrollFinalizationEvaluator
             included.Sum(item => item.KmAmount ?? 0m),
             included.Sum(item => item.Code414Amount ?? 0m));
 
-    private static string? FormatUnresolvedCategories(
-        IReadOnlyList<PayrollReviewCase> reviewCases,
-        PayrollFindingStatus status)
+    private static PayrollFinalizationCategoryWorkload[] BuildCategoryWorkloads(
+        IReadOnlyList<PayrollAdminCase> adminCases)
     {
-        var parts = reviewCases
-            .Where(item => item.WorkflowStatus == status)
+        return adminCases
             .GroupBy(item => item.Category)
             .OrderByDescending(group => group.Count())
             .ThenBy(group => group.Key)
-            .Select(group => $"{group.Count()} {PayrollReviewCategories.DisplayName(group.Key)}")
+            .Select(group => new PayrollFinalizationCategoryWorkload(
+                group.Key,
+                PayrollReviewCategories.DisplayName(group.Key),
+                group.Count(),
+                group.Sum(item => item.UnderlyingReviewCaseCount)))
+            .ToArray();
+    }
+
+    private static string? FormatAdminCategoryWorkload(
+        IReadOnlyList<PayrollFinalizationCategoryWorkload> workloads)
+    {
+        var parts = workloads
+            .Select(item =>
+                $"{item.AdminCases} {item.DisplayName} ({item.UnderlyingReviewCases} controles)")
             .ToArray();
         return parts.Length == 0 ? null : string.Join(" · ", parts);
     }

@@ -568,12 +568,10 @@ internal sealed class PayrollActionService(
 
         if (storedCreate is not null && eligibility.CreateProposal is not null)
         {
-            var proposed = eligibility.CreateProposal;
-            if (storedCreate.MainTaskId != proposed.MainTaskId
-                || storedCreate.ProjectId != proposed.ProjectId
-                || storedCreate.Start != proposed.Start
-                || storedCreate.End != proposed.End
-                || !string.Equals(storedCreate.BonNr, proposed.BonNr, StringComparison.Ordinal))
+            // Semantic material match — ignore offset/seconds and finding workflow metadata.
+            if (!PayrollCreateProposalSemantics.AreMateriallyEquivalent(
+                    storedCreate,
+                    eligibility.CreateProposal))
             {
                 MarkStale(action, "Voorstel wijkt af van actuele bevinding; nieuw voorstel vereist.");
                 await context.SaveChangesAsync(cancellationToken);

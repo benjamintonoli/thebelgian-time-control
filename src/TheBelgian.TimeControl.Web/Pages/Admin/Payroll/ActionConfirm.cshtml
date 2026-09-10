@@ -107,6 +107,10 @@ else
     <div class="mb-3">
         <div><strong>Medewerker:</strong> @(view.DisplayName ?? view.ResourceId)</div>
         <div><strong>Status:</strong> @PayrollActionEligibility.UiStatusLabel(view.Status)</div>
+        @if (view.Status == PayrollProposedActionStatus.Stale)
+        {
+            <div class="alert alert-secondary py-2 mt-2 mb-0">Oud voorstel — niet meer uitvoerbaar.</div>
+        }
         @if (!string.IsNullOrWhiteSpace(view.BlockReason))
         {
             <div class="text-danger"><strong>Reden:</strong> @view.BlockReason</div>

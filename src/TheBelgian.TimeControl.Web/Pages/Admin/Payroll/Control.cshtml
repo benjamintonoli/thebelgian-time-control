@@ -168,6 +168,17 @@ else
                     }
                     else if (!center.Finalization.CanFinalize)
                     {
+                        <div class="small mb-2">
+                            Nog af te handelen: <strong>@center.Finalization.UnresolvedAdminCases dossiers</strong>
+                            · Te beoordelen: <strong>@center.Finalization.OpenAdminCases</strong>
+                            · Opvolging: <strong>@center.Finalization.FollowUpAdminCases</strong>
+                        </div>
+                        @if (center.Finalization.UnderlyingUnresolvedReviewCases > center.Finalization.UnresolvedAdminCases)
+                        {
+                            <p class="small text-muted mb-2">
+                                Deze @center.Finalization.UnresolvedAdminCases dossiers vertegenwoordigen @center.Finalization.UnderlyingUnresolvedReviewCases onderliggende controles.
+                            </p>
+                        }
                         <ul class="small mb-3">
                             @foreach (var blocker in center.Finalization.Blockers)
                             {

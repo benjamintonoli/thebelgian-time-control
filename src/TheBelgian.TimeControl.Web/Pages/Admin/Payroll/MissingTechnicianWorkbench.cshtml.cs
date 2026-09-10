@@ -184,6 +184,8 @@ public sealed class MissingTechnicianWorkbenchModel(
                 };
             }
 
+            // Record human decision after a successful Ready proposal so workflow metadata
+            // cannot race ahead of action creation. Decision itself is non-material for stale checks.
             await reviewQueueService.SetAdminDecisionAsync(
                 Year,
                 Month,

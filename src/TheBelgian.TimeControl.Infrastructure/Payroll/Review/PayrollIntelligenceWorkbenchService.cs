@@ -507,9 +507,9 @@ internal sealed class PayrollIntelligenceWorkbenchService(
             ?? $"missing-tech:{page.Detail.AdminCase.ResourceId}:{date:yyyyMMdd}";
         var actionKey = $"missing-create:{page.Detail.AdminCase.ResourceId}:{date:yyyyMMdd}:{findingKey}";
         var findingId = FirstFindingId(page.Detail.AdminCase);
-        var offset = TimeSpan.Zero;
-        var proposedStart = new DateTimeOffset(date.ToDateTime(start), offset);
-        var proposedEnd = new DateTimeOffset(date.ToDateTime(endTime), offset);
+        var offset = PayrollCreateProposalSemantics.BelgiumOffsetFor(date);
+        var proposedStart = PayrollCreateProposalSemantics.AtWallClock(date, start, offset);
+        var proposedEnd = PayrollCreateProposalSemantics.AtWallClock(date, endTime, offset);
         var hours = Math.Round((decimal)(proposedEnd - proposedStart).TotalHours, 2, MidpointRounding.AwayFromZero);
 
         var create = new PayrollActionCreateProposal(
@@ -549,7 +549,7 @@ internal sealed class PayrollIntelligenceWorkbenchService(
             PayrollProposedActionType.CreateMissingPerformance,
             evidence,
             create,
-            $"missing-create:{proposedStart:O}:{proposedEnd:O}:{missing.SuggestedMainTaskId}",
+            PayrollCreateProposalSemantics.ComputeFingerprint(create),
             reason.Trim(),
             actor,
             cancellationToken);
@@ -834,10 +834,13 @@ internal sealed class PayrollIntelligenceWorkbenchService(
             .FirstOrDefaultAsync(cancellationToken);
 
         var now = timeProvider.GetUtcNow();
+        // Stale/Applied/Failed/Cancelled stay immutable for audit — always mint a new ActionId.
         if (existing is null
             || existing.Status is PayrollProposedActionStatus.Applied
                 or PayrollProposedActionStatus.Cancelled
-                or PayrollProposedActionStatus.Failed)
+                or PayrollProposedActionStatus.Failed
+                or PayrollProposedActionStatus.Stale
+                or PayrollProposedActionStatus.Executing)
         {
             existing = new PayrollProposedActionRecord
             {

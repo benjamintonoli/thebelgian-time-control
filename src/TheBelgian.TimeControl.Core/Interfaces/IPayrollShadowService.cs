@@ -1,6 +1,7 @@
 using TheBelgian.TimeControl.Core.Models;
 using TheBelgian.TimeControl.Core.Payroll.Findings;
 using TheBelgian.TimeControl.Core.Payroll.Models;
+using TheBelgian.TimeControl.Core.Payroll.Review;
 
 namespace TheBelgian.TimeControl.Core.Interfaces;
 
@@ -285,7 +286,18 @@ public sealed record PayrollMonthFinalizationBlockers(
     PayrollMonthFinancialSummary FinancialSummary,
     string CalculationVersion,
     bool HasConfigurationSnapshot,
-    IReadOnlyList<string> SummaryLines);
+    IReadOnlyList<string> SummaryLines,
+    int OpenAdminCases = 0,
+    int FollowUpAdminCases = 0,
+    int UnresolvedAdminCases = 0,
+    int UnderlyingUnresolvedReviewCases = 0,
+    IReadOnlyList<PayrollFinalizationCategoryWorkload>? CategoryWorkloads = null);
+
+public sealed record PayrollFinalizationCategoryWorkload(
+    PayrollReviewCategory Category,
+    string DisplayName,
+    int AdminCases,
+    int UnderlyingReviewCases);
 
 public sealed record ApplyConfirmedRosterToMonthResult(
     int Year,

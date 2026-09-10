@@ -73,6 +73,132 @@ public sealed class PayrollActionServiceTests
     }
 
     [Fact]
+    public async Task Execute_Create_WallClockMatch_DespiteOffsetAndSeconds_RemainsExecutable()
+    {
+        await using var fx = await Fixture.CreateAsync(executionEnabled: true, useMockWrites: true);
+        var finding = await fx.SeedMissingTechFindingAsync(
+            "100",
+            new DateOnly(2026, 8, 14),
+            PayrollFindingSeverity.High,
+            nameof(MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps),
+            new DateTimeOffset(2026, 8, 14, 7, 55, 11, TimeSpan.FromHours(2)),
+            new DateTimeOffset(2026, 8, 14, 14, 46, 4, TimeSpan.FromHours(2)),
+            6.85m,
+            "40167",
+            "26501760",
+            evidence: "suggestedHfdTaakId=9; class=PlanningPlusPeerPlusGps");
+
+        // Bashi-like: workbench stored proposal used +00:00 minute truncation.
+        var stored = new PayrollActionCreateProposal(
+            "100",
+            new DateOnly(2026, 8, 14),
+            new DateTimeOffset(2026, 8, 14, 7, 55, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 8, 14, 14, 46, 0, TimeSpan.Zero),
+            6.85m,
+            "40167",
+            "26501760",
+            9,
+            PayrollIntervalSemantics.PayableWork);
+        var ready = await fx.SeedReadyCreateActionAsync(finding, stored);
+
+        // Workflow-only: finding already NeedsFollowUp + MISSING_TECH_CONFIRMED.
+        await using (var context = await fx.Factory.CreateDbContextAsync())
+        {
+            var row = await context.PayrollFindingRecords.SingleAsync(item => item.Id == finding.Id);
+            row.Status = PayrollFindingStatus.NeedsFollowUp;
+            row.DecisionCode = "MISSING_TECH_CONFIRMED";
+            row.DecisionLabel = "Missing tech confirmed";
+            row.ReviewComment = "vergeten prestatie hoofdtechnieker";
+            row.ReviewedAtUtc = DateTimeOffset.UtcNow;
+            row.ReviewedBy = "benjamin";
+            await context.SaveChangesAsync();
+        }
+
+        fx.CreateClient.ResponseFactory = cmd => new PlenionPerformanceCreateResponse(
+            "success",
+            "ok",
+            "ref-bashi",
+            cmd.IdempotencyKey,
+            9_000_661,
+            cmd.ResourceId,
+            cmd.Date,
+            cmd.Start,
+            cmd.End,
+            cmd.ProjectId,
+            cmd.BonNr,
+            cmd.MainTaskId);
+
+        var result = await fx.Service.ExecuteAsync(
+            ready.ActionId,
+            "vergeten prestatie hoofdtechnieker",
+            "tester",
+            default);
+        Assert.Equal(PayrollProposedActionStatus.Applied, result.Status);
+        Assert.Equal(9_000_661, result.ResultPerformanceId);
+    }
+
+    [Fact]
+    public async Task Execute_Create_VanTotMaterialChange_MarksStale()
+    {
+        await using var fx = await Fixture.CreateAsync(executionEnabled: true, useMockWrites: true);
+        var finding = await fx.SeedMissingTechFindingAsync(
+            "100",
+            new DateOnly(2026, 8, 10),
+            PayrollFindingSeverity.High,
+            nameof(MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps),
+            new DateTimeOffset(2026, 8, 10, 10, 0, 0, TimeSpan.FromHours(2)),
+            new DateTimeOffset(2026, 8, 10, 12, 0, 0, TimeSpan.FromHours(2)),
+            2m,
+            "65274",
+            "BON1",
+            evidence: "suggestedHfdTaakId=7");
+        var stored = new PayrollActionCreateProposal(
+            "100",
+            new DateOnly(2026, 8, 10),
+            new DateTimeOffset(2026, 8, 10, 9, 0, 0, TimeSpan.FromHours(2)),
+            new DateTimeOffset(2026, 8, 10, 12, 0, 0, TimeSpan.FromHours(2)),
+            3m,
+            "65274",
+            "BON1",
+            7,
+            PayrollIntervalSemantics.PayableWork);
+        var ready = await fx.SeedReadyCreateActionAsync(finding, stored);
+
+        var result = await fx.Service.ExecuteAsync(ready.ActionId, "reden", "tester", default);
+        Assert.Equal(PayrollProposedActionStatus.Stale, result.Status);
+        Assert.Contains("wijkt af", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, fx.CreateClient.Calls);
+    }
+
+    [Fact]
+    public async Task Execute_Create_AlreadyStale_RemainsNonExecutable()
+    {
+        await using var fx = await Fixture.CreateAsync(executionEnabled: true, useMockWrites: true);
+        var finding = await fx.SeedMissingTechFindingAsync(
+            "100",
+            new DateOnly(2026, 8, 10),
+            PayrollFindingSeverity.High,
+            nameof(MissingTechnicianEvidenceClass.PlanningPlusPeerPlusGps),
+            new DateTimeOffset(2026, 8, 10, 9, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 8, 10, 12, 0, 0, TimeSpan.Zero),
+            3m,
+            "65274",
+            "BON1");
+        var ready = await fx.SeedReadyCreateActionAsync(finding, mainTaskId: 7);
+        await using (var context = await fx.Factory.CreateDbContextAsync())
+        {
+            var row = await context.PayrollProposedActionRecords.SingleAsync(item => item.ActionId == ready.ActionId);
+            row.Status = PayrollProposedActionStatus.Stale;
+            row.BlockReason = "Oud voorstel";
+            await context.SaveChangesAsync();
+        }
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fx.Service.ExecuteAsync(ready.ActionId, "reden", "tester", default));
+        Assert.Equal(0, fx.CreateClient.Calls);
+    }
+
+    [Fact]
     public async Task Execute_Create_MockSuccess_Applied()
     {
         await using var fx = await Fixture.CreateAsync(executionEnabled: true, useMockWrites: true);
@@ -817,6 +943,29 @@ public sealed class PayrollActionServiceTests
                     ExistingPerformanceId: null,
                     IntervalSemanticsOverride: PayrollIntervalSemantics.PayableWork));
             Assert.Equal(PayrollProposedActionStatus.ReadyForApproval, eligibility.Status);
+            return await SeedReadyCreateActionAsync(finding, eligibility.CreateProposal!);
+        }
+
+        public async Task<PayrollProposedActionRecord> SeedReadyCreateActionAsync(
+            PayrollFindingRecord finding,
+            PayrollActionCreateProposal createProposal)
+        {
+            var evidence = new PayrollActionEvidenceSnapshot(
+                finding.FindingKey,
+                finding.FindingType,
+                finding.Severity,
+                finding.GpsClassification,
+                finding.Evidence,
+                finding.Title,
+                finding.Description,
+                [],
+                createProposal.Start,
+                createProposal.End,
+                createProposal.Hours,
+                createProposal.ProjectId,
+                createProposal.BonNr,
+                [finding.FindingKey],
+                [finding.Id]);
             await using var context = await Factory.CreateDbContextAsync();
             var monthId = await context.PayrollShadowMonths.Select(item => item.Id).SingleAsync();
             var action = new PayrollProposedActionRecord
@@ -828,9 +977,9 @@ public sealed class PayrollActionServiceTests
                 ResourceId = finding.ResourceId,
                 ActionType = PayrollProposedActionType.CreateMissingPerformance,
                 Status = PayrollProposedActionStatus.ReadyForApproval,
-                EvidenceSnapshotJson = JsonSerializer.Serialize(eligibility.EvidenceSnapshot),
-                ProposalSnapshotJson = JsonSerializer.Serialize(eligibility.CreateProposal),
-                SourceRevision = eligibility.SourceRevision,
+                EvidenceSnapshotJson = JsonSerializer.Serialize(evidence),
+                ProposalSnapshotJson = JsonSerializer.Serialize(createProposal),
+                SourceRevision = PayrollCreateProposalSemantics.ComputeFingerprint(createProposal),
                 CreatedAtUtc = DateTimeOffset.UtcNow,
                 CreatedBy = "seed",
             };
@@ -970,18 +1119,22 @@ public sealed class PayrollActionServiceTests
 
     private sealed class FakeCreateClient : IPlenionPerformanceCreateClient
     {
+        public int Calls { get; private set; }
         public Func<PlenionPerformanceCreateCommand, PlenionPerformanceCreateResponse>? ResponseFactory { get; set; }
 
         public Task<bool> IsAvailableAsync(CancellationToken cancellationToken) => Task.FromResult(true);
 
         public Task<PlenionPerformanceCreateResponse> CreateAsync(
             PlenionPerformanceCreateCommand command,
-            CancellationToken cancellationToken) =>
-            Task.FromResult(ResponseFactory?.Invoke(command)
+            CancellationToken cancellationToken)
+        {
+            Calls++;
+            return Task.FromResult(ResponseFactory?.Invoke(command)
                 ?? new PlenionPerformanceCreateResponse(
                     "success", "ok", "ref", command.IdempotencyKey, 1,
                     command.ResourceId, command.Date, command.Start, command.End,
                     command.ProjectId, command.BonNr, command.MainTaskId));
+        }
     }
 
     private sealed class FakeDeleteClient : IPlenionPerformanceDeleteClient

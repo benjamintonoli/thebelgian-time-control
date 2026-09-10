@@ -140,7 +140,7 @@ public sealed class PayrollFinalizationV2Tests
     }
 
     [Fact]
-    public void OpenCases_FriendlyMessage_IncludesCategoryBreakdown()
+    public void OpenCases_FriendlyMessage_IncludesAdminDossierBreakdown()
     {
         var blockers = Evaluate(
             [Included("1"), Included("2")],
@@ -150,8 +150,12 @@ public sealed class PayrollFinalizationV2Tests
                 Case("c", "1", PayrollFindingStatus.Open, PayrollReviewCategory.Standby),
             ]);
         var open = Assert.Single(blockers.Blockers, item => item.Code == PayrollFinalizationBlockerCodes.OpenReviewCases);
-        Assert.Contains("2 300 zonder planning", open.FriendlyMessage, StringComparison.Ordinal);
-        Assert.Contains("1 Wachtdienst", open.FriendlyMessage, StringComparison.Ordinal);
+        Assert.Contains("dossiers te beoordelen", open.FriendlyMessage, StringComparison.Ordinal);
+        Assert.Contains("onderliggende controles", open.FriendlyMessage, StringComparison.Ordinal);
+        Assert.Contains("300 zonder planning", open.FriendlyMessage, StringComparison.Ordinal);
+        Assert.Contains("Wachtdienst", open.FriendlyMessage, StringComparison.Ordinal);
+        Assert.Equal(3, blockers.OpenAdminCases);
+        Assert.Equal(3, blockers.OpenReviewCases);
         Assert.DoesNotContain("Pending", open.FriendlyMessage, StringComparison.OrdinalIgnoreCase);
     }
 

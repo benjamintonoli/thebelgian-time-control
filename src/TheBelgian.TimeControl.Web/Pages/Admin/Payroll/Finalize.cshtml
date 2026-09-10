@@ -31,16 +31,38 @@ else
 {
     <div class="card mb-3">
         <div class="card-body">
+            <h2 class="h5">Klaar voor finalisatie</h2>
+            <div class="fs-4 fw-semibold @(blockers.CanFinalize ? "text-success" : "text-danger")">
+                @(blockers.CanFinalize ? "JA" : "NEE")
+            </div>
+            @if (!blockers.CanFinalize)
+            {
+                <div class="row g-2 small mt-3">
+                    <div class="col-6 col-md-4">Nog af te handelen: <strong>@blockers.UnresolvedAdminCases dossiers</strong></div>
+                    <div class="col-6 col-md-4">Te beoordelen: <strong>@blockers.OpenAdminCases</strong></div>
+                    <div class="col-6 col-md-4">Opvolging: <strong>@blockers.FollowUpAdminCases</strong></div>
+                </div>
+                @if (blockers.UnderlyingUnresolvedReviewCases > blockers.UnresolvedAdminCases)
+                {
+                    <p class="small text-muted mb-0 mt-2">
+                        Deze @blockers.UnresolvedAdminCases dossiers vertegenwoordigen @blockers.UnderlyingUnresolvedReviewCases onderliggende controles.
+                    </p>
+                }
+            }
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body">
             <h2 class="h5">Samenvatting</h2>
             <div class="row g-2 small">
                 <div class="col-6 col-md-4">Medewerkers Included: <strong>@blockers.IncludedCount</strong></div>
                 <div class="col-6 col-md-4">Excluded: <strong>@blockers.ExcludedCount</strong></div>
-                <div class="col-6 col-md-4">Review cases: <strong>@blockers.ReviewCasesTotal</strong></div>
+                <div class="col-6 col-md-4">Dossiers (admin): <strong>@blockers.UnresolvedAdminCases</strong></div>
+                <div class="col-6 col-md-4">Onderliggende controles: <strong>@blockers.UnderlyingUnresolvedReviewCases</strong></div>
                 <div class="col-6 col-md-4">Gecontroleerd: <strong>@blockers.ReviewedReviewCases</strong></div>
                 <div class="col-6 col-md-4">Opgelost: <strong>@blockers.ResolvedReviewCases</strong></div>
                 <div class="col-6 col-md-4">N.v.t.: <strong>@blockers.DismissedReviewCases</strong></div>
-                <div class="col-6 col-md-4">Open: <strong>@blockers.OpenReviewCases</strong></div>
-                <div class="col-6 col-md-4">Opvolging nodig: <strong>@blockers.FollowUpReviewCases</strong></div>
                 <div class="col-6 col-md-4">Missing Acerta: <strong>@blockers.MissingAcertaIncluded</strong></div>
                 <div class="col-6 col-md-4">NeedsDecision: <strong>@blockers.NeedsDecision</strong></div>
                 <div class="col-6 col-md-4">Employee Pending (info): <strong>@blockers.PendingIncluded</strong></div>
@@ -48,6 +70,26 @@ else
             </div>
         </div>
     </div>
+
+    @if (blockers.CategoryWorkloads is { Count: > 0 })
+    {
+        <div class="card mb-3">
+            <div class="card-body">
+                <h2 class="h5">Nog open per categorie</h2>
+                <p class="small text-muted">Primair werkvolume = dossiers. Onderliggende controles blijven de veiligheidscheck.</p>
+                <ul class="mb-0">
+                    @foreach (var row in blockers.CategoryWorkloads)
+                    {
+                        <li>
+                            <strong>@row.DisplayName:</strong>
+                            @row.AdminCases dossiers
+                            · @row.UnderlyingReviewCases onderliggende controles
+                        </li>
+                    }
+                </ul>
+            </div>
+        </div>
+    }
 
     <div class="card mb-3">
         <div class="card-body">
