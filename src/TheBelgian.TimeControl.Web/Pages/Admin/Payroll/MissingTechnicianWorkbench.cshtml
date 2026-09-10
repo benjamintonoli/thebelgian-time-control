@@ -95,14 +95,21 @@ else
                                         var sourceBadge = item.FriendlyState switch
                                         {
                                             "Sterk bewijs" => ("EIGEN GPS", "tc-badge-gps"),
-                                            var s when s is not null && s.Contains("conflict", StringComparison.OrdinalIgnoreCase) => ("CONFLICT", "tc-badge-warn"),
                                             var s when s is not null && s.Contains("collega", StringComparison.OrdinalIgnoreCase) => ("COLLEGA", "tc-badge-peer"),
-                                            var s when s is not null && s.Contains("GPS", StringComparison.OrdinalIgnoreCase) => ("GPS + PLANNING", "tc-badge-gps"),
-                                            var s when s is not null && s.Contains("nazicht", StringComparison.OrdinalIgnoreCase) => ("NAZICHT", "tc-badge-warn"),
+                                            var s when s is not null && s.Contains("planning", StringComparison.OrdinalIgnoreCase) => ("PLANNING", "tc-badge-planning"),
+                                            var s when s is not null && s.Contains("GPS", StringComparison.OrdinalIgnoreCase) => ("EIGEN GPS", "tc-badge-gps"),
                                             _ => ("VOORSTEL", "tc-badge-ready"),
+                                        };
+                                        var statusBadge = item.FriendlyState switch
+                                        {
+                                            var s when s is not null && s.Contains("conflict", StringComparison.OrdinalIgnoreCase) => ("CONFLICT", "tc-badge-warn"),
+                                            var s when s is not null && s.Contains("nazicht", StringComparison.OrdinalIgnoreCase) => ("NAZICHT", "tc-badge-warn"),
+                                            var s when !PayrollReviewCategories.IsUnresolved(item.WorkflowStatus) => ("AFGEHANDELD", "tc-badge-done"),
+                                            _ => ("KLAAR", "tc-badge-ready"),
                                         };
                                     }
                                     <span class="tc-source-badge @sourceBadge.Item2">@sourceBadge.Item1</span>
+                                    <span class="tc-source-badge @statusBadge.Item2">@statusBadge.Item1</span>
                                     <span class="text-muted">@(item.KeyFact ?? item.IssueSummary)</span>
                                 </div>
                                 <div class="queue-case-bottom">
@@ -167,8 +174,14 @@ else
 .tc-source-badge { display:inline-block; font-size:.68rem; font-weight:600; letter-spacing:.02em; padding:.1rem .35rem; border-radius:.25rem; margin-right:.35rem; }
 .tc-badge-gps { background:#e8f1fb; color:#1d4f91; }
 .tc-badge-peer { background:#eeeaf6; color:#4b3f6b; }
+.tc-badge-planning { background:#e8eef3; color:#3d4f5f; }
 .tc-badge-warn { background:#f8f1e4; color:#8a5a12; }
 .tc-badge-ready { background:#e8f5ee; color:#1f6b45; }
+.tc-badge-done { background:#eceff1; color:#546e7a; }
+.src-own-gps { background:#e8f1fb; color:#1d4f91; }
+.src-peer { background:#eeeaf6; color:#4b3f6b; }
+.src-planning { background:#e8eef3; color:#3d4f5f; }
+.src-manual { background:#eceff1; color:#37474f; }
 .tc-mt-recommend { background: linear-gradient(180deg, #f7fafc 0%, #fff 100%); }
 </style>
 <script>

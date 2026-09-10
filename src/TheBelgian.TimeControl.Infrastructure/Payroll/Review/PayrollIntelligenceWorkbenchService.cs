@@ -503,25 +503,97 @@ internal sealed class PayrollIntelligenceWorkbenchService(
         }
 
         var date = page.Detail.AdminCase.Date;
+        var resourceId = page.Detail.AdminCase.ResourceId;
         var findingKey = FirstFindingKey(page.Detail.AdminCase)
-            ?? $"missing-tech:{page.Detail.AdminCase.ResourceId}:{date:yyyyMMdd}";
-        var actionKey = $"missing-create:{page.Detail.AdminCase.ResourceId}:{date:yyyyMMdd}:{findingKey}";
+            ?? $"missing-tech:{resourceId}:{date:yyyyMMdd}";
+        var actionKey = $"missing-create:{resourceId}:{date:yyyyMMdd}:{findingKey}";
         var findingId = FirstFindingId(page.Detail.AdminCase);
         var offset = PayrollCreateProposalSemantics.BelgiumOffsetFor(date);
         var proposedStart = PayrollCreateProposalSemantics.AtWallClock(date, start, offset);
         var proposedEnd = PayrollCreateProposalSemantics.AtWallClock(date, endTime, offset);
-        var hours = Math.Round((decimal)(proposedEnd - proposedStart).TotalHours, 2, MidpointRounding.AwayFromZero);
+
+        var dayRows = await LoadDayAsync(resourceId, date, cancellationToken);
+        var otherIntervals = dayRows
+            .Where(row => row.Start is not null && row.End is not null && row.End > row.Start)
+            .Select(row => new PayrollWriteOverlapSafety.Interval(
+                row.Start!.Value.TimeOfDay,
+                row.End!.Value.TimeOfDay,
+                row.SourceEntryId))
+            .ToList();
+
+        var overlap = PayrollWriteOverlapSafety.EvaluateCreateOrAdjust(
+            proposedStart.TimeOfDay,
+            proposedEnd.TimeOfDay,
+            otherIntervals);
+        if (overlap.RequiresBoundaryAlignment && overlap.SuggestedEnd is { } alignedEnd)
+        {
+            proposedEnd = PayrollCreateProposalSemantics.AtWallClock(
+                date,
+                TimeOnly.FromTimeSpan(alignedEnd),
+                offset);
+            overlap = PayrollWriteOverlapSafety.EvaluateCreateOrAdjust(
+                proposedStart.TimeOfDay,
+                proposedEnd.TimeOfDay,
+                otherIntervals);
+        }
+
+        if (overlap.BlocksWrite)
+        {
+            return new PayrollIntelligenceProposeResult(
+                false,
+                overlap.ExplanationNl,
+                null,
+                "WriteOverlap");
+        }
+
+        var otherPauseRows = dayRows
+            .Where(row => row.Start is not null && row.End is not null && row.End > row.Start)
+            .Select(row => new PayrollDailyPauseRules.DayPauseInput(
+                row.End!.Value - row.Start!.Value,
+                row.Pause.ExactMinutes is { } mins
+                    ? TimeSpan.FromMinutes((double)mins)
+                    : TimeSpan.Zero))
+            .ToList();
+
+        var gross = proposedEnd - proposedStart;
+        var pausePlan = PayrollDailyPauseRules.PlanForCreateOrAdjust(
+            otherPauseRows,
+            gross);
+        var pause = pausePlan.PauseToAssignOnTargetRow;
+        var netAtl = PayrollDailyPauseRules.DeriveNetAtl(
+            proposedStart.TimeOfDay,
+            proposedEnd.TimeOfDay,
+            pause);
+        var grossHours = Math.Round((decimal)gross.TotalHours, 4, MidpointRounding.AwayFromZero);
+
+        var primary = PayrollPrimaryTimingSourceLabels.Resolve(
+            missing.ProposalSource,
+            intervalCopiedFromPeer: string.Equals(missing.ProposalSource, "peer", StringComparison.OrdinalIgnoreCase)
+                || (missing.PeerStart is not null
+                    && missing.ProposalStart == missing.PeerStart
+                    && missing.ProposalEnd == missing.PeerEnd),
+            intervalFromOwnGps: string.Equals(missing.ProposalSource, "gpsSite", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(missing.ProposalSource, "gps", StringComparison.OrdinalIgnoreCase),
+            intervalFromPlanning: string.Equals(missing.ProposalSource, "planning", StringComparison.OrdinalIgnoreCase));
+
+        var supporting = BuildCreateSupportingEvidenceNl(missing);
 
         var create = new PayrollActionCreateProposal(
-            page.Detail.AdminCase.ResourceId,
+            resourceId,
             date,
             proposedStart,
             proposedEnd,
-            hours,
+            netAtl,
             missing.SuggestedProjectId.Trim(),
             string.IsNullOrWhiteSpace(missing.SuggestedBonNr) ? null : missing.SuggestedBonNr.Trim(),
             missing.SuggestedMainTaskId.Value,
-            PayrollIntervalSemantics.PayableWork);
+            PayrollIntervalSemantics.PayableWork,
+            pause,
+            grossHours,
+            primary,
+            supporting,
+            pausePlan.ExplanationNl,
+            overlap.ExplanationNl);
 
         var evidence = new PayrollActionEvidenceSnapshot(
             findingKey,
@@ -534,7 +606,7 @@ internal sealed class PayrollIntelligenceWorkbenchService(
             missing.PeerPerformanceId is > 0 ? [missing.PeerPerformanceId.Value] : [],
             proposedStart,
             proposedEnd,
-            hours,
+            netAtl,
             missing.SuggestedProjectId,
             missing.SuggestedBonNr,
             page.Detail.AdminCase.FindingKeys.ToArray(),
@@ -545,7 +617,7 @@ internal sealed class PayrollIntelligenceWorkbenchService(
             shadowMonth.Id,
             actionKey,
             findingId == 0 ? null : findingId,
-            page.Detail.AdminCase.ResourceId,
+            resourceId,
             PayrollProposedActionType.CreateMissingPerformance,
             evidence,
             create,
@@ -556,6 +628,183 @@ internal sealed class PayrollIntelligenceWorkbenchService(
 
         InvalidateQueueCache(year, month);
         return new PayrollIntelligenceProposeResult(true, "Create-voorstel opgeslagen (niet uitgevoerd).", actionId, null);
+    }
+
+    private static string BuildCreateSupportingEvidenceNl(PayrollMissingWorkbenchDetail missing)
+    {
+        var parts = new List<string>();
+        if (missing.ProposalStart is not null && missing.ProposalEnd is not null
+            && !string.Equals(missing.ProposalSource, "peer", StringComparison.OrdinalIgnoreCase))
+        {
+            // keep planning/gps as support when primary is peer
+        }
+
+        if (missing.PeerStart is not null && missing.PeerEnd is not null)
+        {
+            var peerName = string.IsNullOrWhiteSpace(missing.PeerDisplayName)
+                ? (missing.PeerResourceId ?? "collega")
+                : missing.PeerDisplayName;
+            parts.Add($"Collega {peerName} {missing.PeerStart:HH\\:mm}–{missing.PeerEnd:HH\\:mm}");
+        }
+
+        if (missing.GpsSiteStart is not null)
+        {
+            parts.Add(missing.GpsSiteEnd is not null
+                ? $"Eigen GPS {missing.GpsSiteStart:HH\\:mm}–{missing.GpsSiteEnd:HH\\:mm}"
+                : $"Eigen GPS aankomst ~{missing.GpsSiteStart:HH\\:mm}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(missing.ProposalSource)
+            && string.Equals(missing.ProposalSource, "planning", StringComparison.OrdinalIgnoreCase) is false)
+        {
+            parts.Insert(0, "Planning");
+        }
+        else if (parts.Count == 0)
+        {
+            parts.Add("Planning");
+        }
+
+        return string.Join(" · ", parts.Distinct(StringComparer.OrdinalIgnoreCase));
+    }
+
+    public async Task<PayrollIntelligenceProposeResult> ProposePauseBoundaryAdjustAsync(
+        int year,
+        int month,
+        string resourceId,
+        DateOnly workDate,
+        long performanceId,
+        TimeOnly? newStart,
+        TimeOnly newEnd,
+        TimeSpan newPause,
+        string reason,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        EnsureEnabled();
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            reason = "Pauze + grenscorrectie (daily pause / zero-overlap).";
+        }
+
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var shadowMonth = await RequireOpenShadowAsync(context, year, month, cancellationToken);
+        if (shadowMonth is null)
+        {
+            return new PayrollIntelligenceProposeResult(false, "Shadow-maand niet gevonden of afgesloten.", null, "MonthFinalized");
+        }
+
+        var dayRows = await LoadDayAsync(resourceId, workDate, cancellationToken);
+        var target = dayRows.FirstOrDefault(item => item.SourceEntryId == performanceId);
+        if (target?.Start is null || target.End is null)
+        {
+            return new PayrollIntelligenceProposeResult(false, $"Prestatie {performanceId} niet gevonden.", null, "NotFound");
+        }
+
+        var offset = PayrollCreateProposalSemantics.BelgiumOffsetFor(workDate);
+        var currentStart = target.Start.Value;
+        var currentEnd = target.End.Value;
+        var proposedStart = newStart is null
+            ? currentStart
+            : PayrollCreateProposalSemantics.AtWallClock(workDate, newStart.Value, offset);
+        var proposedEnd = PayrollCreateProposalSemantics.AtWallClock(workDate, newEnd, offset);
+
+        var otherIntervals = dayRows
+            .Where(row => row.SourceEntryId != performanceId
+                && row.Start is not null && row.End is not null && row.End > row.Start)
+            .Select(row => new PayrollWriteOverlapSafety.Interval(
+                row.Start!.Value.TimeOfDay,
+                row.End!.Value.TimeOfDay,
+                row.SourceEntryId))
+            .ToList();
+        var overlap = PayrollWriteOverlapSafety.EvaluateCreateOrAdjust(
+            proposedStart.TimeOfDay,
+            proposedEnd.TimeOfDay,
+            otherIntervals);
+        if (overlap.BlocksWrite)
+        {
+            return new PayrollIntelligenceProposeResult(false, overlap.ExplanationNl, null, "WriteOverlap");
+        }
+
+        var currentPause = target.Pause.ExactMinutes is { } mins
+            ? TimeSpan.FromMinutes((double)mins)
+            : TimeSpan.Zero;
+        var otherPauseRows = dayRows
+            .Where(row => row.SourceEntryId != performanceId
+                && row.Start is not null && row.End is not null && row.End > row.Start)
+            .Select(row => new PayrollDailyPauseRules.DayPauseInput(
+                row.End!.Value - row.Start!.Value,
+                row.Pause.ExactMinutes is { } m ? TimeSpan.FromMinutes((double)m) : TimeSpan.Zero))
+            .ToList();
+        var pausePlan = PayrollDailyPauseRules.PlanForCreateOrAdjust(
+            otherPauseRows,
+            proposedEnd - proposedStart,
+            currentPause);
+        var assignedPause = newPause > pausePlan.PauseToAssignOnTargetRow
+            ? newPause
+            : pausePlan.PauseToAssignOnTargetRow;
+        var proposedAtl = PayrollDailyPauseRules.DeriveNetAtl(
+            proposedStart.TimeOfDay,
+            proposedEnd.TimeOfDay,
+            assignedPause);
+        var currentAtl = target.AtlHoursRaw;
+
+        var expectedActivity = target.HfdTaakId switch
+        {
+            23 => "WaitingTime",
+            _ => "CustomerWork"
+        };
+
+        var adjust = new PayrollActionAdjustProposal(
+            performanceId,
+            currentStart,
+            currentEnd,
+            proposedStart,
+            proposedEnd,
+            expectedActivity,
+            target.HfdTaakId,
+            currentPause,
+            assignedPause,
+            currentAtl,
+            proposedAtl,
+            pausePlan.ExplanationNl,
+            overlap.ExplanationNl);
+
+        var findingKey = $"pause-boundary-adjust:{performanceId}:{workDate:yyyyMMdd}";
+        var evidence = new PayrollActionEvidenceSnapshot(
+            findingKey,
+            PayrollFindingType.MissingPlannedTechnicianPerformance,
+            PayrollFindingSeverity.High,
+            null,
+            $"performanceId={performanceId}; pause={assignedPause}; end={newEnd:HH\\:mm}",
+            "Prestatie aanpassen (pauze + grens)",
+            reason.Trim(),
+            [performanceId],
+            proposedStart,
+            proposedEnd,
+            proposedAtl,
+            target.ProjectId,
+            target.BonNr);
+
+        var actionId = await UpsertProposalAsync(
+            context,
+            shadowMonth.Id,
+            findingKey,
+            null,
+            target.ResourceId,
+            PayrollProposedActionType.AdjustExistingPerformanceTime,
+            evidence,
+            adjust,
+            $"pause-boundary:{performanceId}:{proposedStart:HH\\:mm}-{proposedEnd:HH\\:mm}:{assignedPause}",
+            reason.Trim(),
+            actor,
+            cancellationToken);
+
+        InvalidateQueueCache(year, month);
+        return new PayrollIntelligenceProposeResult(
+            true,
+            "Aanpassingsvoorstel opgeslagen (niet uitgevoerd).",
+            actionId,
+            null);
     }
 
     private async Task<PayrollIntelligenceCaseDetail> BuildOverlapCoreAsync(

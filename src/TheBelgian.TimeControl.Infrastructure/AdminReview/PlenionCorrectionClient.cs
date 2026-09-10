@@ -20,7 +20,9 @@ internal sealed record PlenionCorrectionItem(
     TimeSpan? NewStart,
     TimeSpan? NewEnd,
     string ExpectedActivityType,
-    long? ExpectedMainTaskExternalId);
+    long? ExpectedMainTaskExternalId,
+    TimeSpan? OriginalPause = null,
+    TimeSpan? NewPause = null);
 
 internal sealed record PlenionCorrectionResponse(
     string Status,

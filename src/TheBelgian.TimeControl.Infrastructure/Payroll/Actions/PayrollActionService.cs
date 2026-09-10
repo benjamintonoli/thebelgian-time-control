@@ -913,12 +913,16 @@ internal sealed class PayrollActionService(
                 "ACTIVITY_NOT_ALLOWED");
         }
 
-        var hours = Math.Round((decimal)(newEnd - newStart).TotalHours, 2, MidpointRounding.AwayFromZero);
+        var grossHours = Math.Round((decimal)(newEnd - newStart).TotalHours, 4, MidpointRounding.AwayFromZero);
+        var pause = existing.Pause;
+        var netAtl = PayrollDailyPauseRules.DeriveNetAtl(newStart.TimeOfDay, newEnd.TimeOfDay, pause);
         var updated = existing with
         {
             Start = newStart,
             End = newEnd,
-            Hours = hours,
+            Hours = netAtl,
+            GrossHours = grossHours,
+            Pause = pause,
             MainTaskId = resolvedMainTask,
         };
 
@@ -963,6 +967,7 @@ internal sealed class PayrollActionService(
             actor,
             action.FindingKey,
             action.ActionId.ToString("N"),
+            Pause: proposal.Pause,
             DryRun: false);
 
         var response = await createClient.CreateAsync(command, cancellationToken);
@@ -1047,7 +1052,9 @@ internal sealed class PayrollActionService(
                     proposal.ProposedStart.TimeOfDay,
                     proposal.ProposedEnd.TimeOfDay,
                     proposal.ExpectedActivityType ?? string.Empty,
-                    proposal.ExpectedMainTaskExternalId)
+                    proposal.ExpectedMainTaskExternalId,
+                    proposal.CurrentPause,
+                    proposal.ProposedPause)
             ],
             action.Comment ?? PayrollActionEligibility.DefaultComment(action.ActionType),
             actor,

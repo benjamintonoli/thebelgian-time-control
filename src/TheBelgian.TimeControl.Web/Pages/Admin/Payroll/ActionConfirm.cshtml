@@ -260,30 +260,60 @@ else
                 }
                 else if (view.CreateProposal is not null)
                 {
-                    <p class="mb-1 fs-5 fw-semibold">@view.CreateProposal.Start.ToString("HH:mm")–@view.CreateProposal.End.ToString("HH:mm")</p>
-                    <ul class="small mb-0">
-                        <li>Medewerker: @(view.DisplayName ?? view.CreateProposal.ResourceId)</li>
-                        <li>Datum: @PayrollDisplayFormatting.DateWithWeekday(view.CreateProposal.Date)</li>
-                        <li>Project: @view.CreateProposal.ProjectId</li>
-                        <li>BON: @(view.CreateProposal.BonNr ?? "—")</li>
-                        <li>Duur: @view.CreateProposal.Hours.ToString("0.##") u</li>
-                        <li>Taak: @view.CreateProposal.MainTaskId</li>
+                    var cp = view.CreateProposal;
+                    var gross = cp.GrossHours > 0
+                        ? cp.GrossHours
+                        : Math.Round((decimal)(cp.End - cp.Start).TotalHours, 4);
+                    <p class="mb-1 text-uppercase small text-muted fw-semibold">Aan te maken</p>
+                    <p class="mb-1 fs-5 fw-semibold">@cp.Start.ToString("HH:mm")–@cp.End.ToString("HH:mm")</p>
+                    <ul class="small mb-2">
+                        <li>Bruto uren: @gross.ToString("0.##") u</li>
+                        <li>Pauze: @((int)cp.Pause.TotalMinutes) min</li>
+                        <li>Netto ATL: @cp.Hours.ToString("0.####") u</li>
+                        <li>Project: @cp.ProjectId</li>
+                        <li>BON: @(cp.BonNr ?? "—")</li>
+                        <li>Taak: @cp.MainTaskId</li>
                     </ul>
+                    <div class="small mb-1">
+                        <span class="tc-source-badge @PayrollPrimaryTimingSourceLabels.Css(cp.PrimaryTimingSource)">
+                            @PayrollPrimaryTimingSourceLabels.Nl(cp.PrimaryTimingSource)
+                        </span>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(cp.SupportingEvidenceNl))
+                    {
+                        <div class="small text-muted mb-2">Ondersteund door: @cp.SupportingEvidenceNl</div>
+                    }
+                    <div class="small border-top pt-2">
+                        <div><strong>Pauzecontrole:</strong> @(cp.PauseExplanationNl ?? "—")</div>
+                        <div><strong>Overlapcontrole:</strong> @(cp.OverlapExplanationNl ?? "—")</div>
+                    </div>
                 }
                 else if (view.AdjustProposal is not null)
                 {
-                    var currentMinutes = (view.AdjustProposal.CurrentEnd - view.AdjustProposal.CurrentStart).TotalMinutes;
-                    var proposedMinutes = (view.AdjustProposal.ProposedEnd - view.AdjustProposal.ProposedStart).TotalMinutes;
-                    var deltaMinutes = proposedMinutes - currentMinutes;
-                    <p class="mb-1"><strong>Tijdscorrectie bestaande prestatie</strong></p>
-                    <ul class="small mb-0">
-                        <li>Datum: @PayrollDisplayFormatting.DateWithWeekday(view.AdjustProposal.CurrentStart)</li>
-                        <li>Prestatie #@view.AdjustProposal.PerformanceId</li>
-                        <li>Activiteit: @(view.AdjustProposal.ExpectedActivityType ?? "—")@(view.AdjustProposal.ExpectedMainTaskExternalId is long hfd ? $" · IDHFDTAAK {hfd}" : "")</li>
-                        <li>Huidige uren: @view.AdjustProposal.CurrentStart.ToString("HH:mm")–@view.AdjustProposal.CurrentEnd.ToString("HH:mm")</li>
-                        <li>Nieuwe uren: @view.AdjustProposal.ProposedStart.ToString("HH:mm")–@view.AdjustProposal.ProposedEnd.ToString("HH:mm")</li>
-                        <li>Verschil: @(deltaMinutes >= 0 ? "+" : "")@deltaMinutes.ToString("0") min</li>
+                    var ap = view.AdjustProposal;
+                    <p class="mb-1 text-uppercase small text-muted fw-semibold">Prestatie aanpassen</p>
+                    <ul class="small mb-2">
+                        <li>Prestatie #@ap.PerformanceId</li>
+                        <li>Huidig: @ap.CurrentStart.ToString("HH:mm")–@ap.CurrentEnd.ToString("HH:mm")
+                            · Pauze @(ap.CurrentPause is { } cpz ? $"{(int)cpz.TotalMinutes} min" : "—")
+                            · ATL @(ap.CurrentAtl?.ToString("0.####") ?? "—")</li>
+                        <li>Voorstel: @ap.ProposedStart.ToString("HH:mm")–@ap.ProposedEnd.ToString("HH:mm")
+                            · Pauze @(ap.ProposedPause is { } pp ? $"{(int)pp.TotalMinutes} min" : "—")
+                            · ATL @(ap.ProposedAtl?.ToString("0.####") ?? "—")</li>
                     </ul>
+                    @if (!string.IsNullOrWhiteSpace(ap.PauseExplanationNl) || !string.IsNullOrWhiteSpace(ap.OverlapExplanationNl))
+                    {
+                        <div class="small border-top pt-2">
+                            @if (!string.IsNullOrWhiteSpace(ap.PauseExplanationNl))
+                            {
+                                <div><strong>Pauzecontrole:</strong> @ap.PauseExplanationNl</div>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(ap.OverlapExplanationNl))
+                            {
+                                <div><strong>Overlapcontrole:</strong> @ap.OverlapExplanationNl</div>
+                            }
+                        </div>
+                    }
                 }
                 else
                 {

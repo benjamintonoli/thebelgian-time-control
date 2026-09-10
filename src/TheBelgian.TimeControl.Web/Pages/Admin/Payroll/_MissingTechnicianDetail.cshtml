@@ -1,3 +1,4 @@
+@using TheBelgian.TimeControl.Core.Payroll.Actions
 @model TheBelgian.TimeControl.Web.Pages.Admin.Payroll.MissingTechnicianWorkbenchModel
 @using System.Globalization
 @using TheBelgian.TimeControl.Core.Payroll.Findings
@@ -30,6 +31,27 @@
     var taskLabel = missing?.SuggestedMainTaskId is int taskId && taskId > 0
         ? $"{taskId} — Werkuren Onderhoudstechnicus"
         : (expl?.ProposalTaskLabel ?? "—");
+    var primarySource = PayrollPrimaryTimingSourceLabels.Resolve(
+        missing?.ProposalSource,
+        intervalCopiedFromPeer: missing is not null
+            && (string.Equals(missing.ProposalSource, "peer", StringComparison.OrdinalIgnoreCase)
+                || (missing.PeerStart is not null
+                    && missing.ProposalStart == missing.PeerStart
+                    && missing.ProposalEnd == missing.PeerEnd)),
+        intervalFromOwnGps: missing is not null
+            && (string.Equals(missing.ProposalSource, "gpsSite", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(missing.ProposalSource, "gps", StringComparison.OrdinalIgnoreCase)),
+        intervalFromPlanning: missing is not null
+            && string.Equals(missing.ProposalSource, "planning", StringComparison.OrdinalIgnoreCase));
+    var primaryBadge = PayrollPrimaryTimingSourceLabels.Nl(primarySource);
+    var primaryCss = PayrollPrimaryTimingSourceLabels.Css(primarySource);
+    TimeSpan previewGross = TimeSpan.Zero;
+    if (missing?.ProposalStart is { } ps && missing.ProposalEnd is { } pe && pe > ps)
+        previewGross = pe - ps;
+    var previewPause = PayrollDailyPauseRules.PlanForCreateOrAdjust([], previewGross);
+    var previewNet = previewGross > TimeSpan.Zero
+        ? PayrollDailyPauseRules.DeriveNetAtl(TimeSpan.Zero, previewGross, previewPause.PauseToAssignOnTargetRow)
+        : (decimal?)null;
 }
 
 @if (detail is null || selected is null || missing is null || expl is null)
@@ -62,12 +84,19 @@ else
         <section class="border rounded p-3 mb-3 tc-mt-recommend">
             <div class="text-uppercase small text-muted fw-semibold mb-2">Voorgestelde prestatie</div>
             <div class="fs-3 fw-semibold">@(expl.ProposalInterval ?? $"{FmtTime(missing.ProposalStart)}–{FmtTime(missing.ProposalEnd)}")</div>
-            <div class="fs-5 mb-2">@FmtHours(missing.ProposalHours)</div>
-            <div class="small fw-semibold text-primary">TIJD OP BASIS VAN · @(expl.TimingSourcePrimary?.ToUpperInvariant() ?? "EIGEN TRACK & TRACE")</div>
+            <div class="row g-2 small mt-2 mb-2">
+                <div class="col-auto"><span class="text-muted">BRUTO</span> <strong>@(previewGross > TimeSpan.Zero ? PayrollDailyPauseRules.Format(previewGross) : "—")</strong></div>
+                <div class="col-auto"><span class="text-muted">PAUZE</span> <strong>@(previewPause.PauseToAssignOnTargetRow > TimeSpan.Zero ? $"{(int)previewPause.PauseToAssignOnTargetRow.TotalMinutes} min" : "0")</strong></div>
+                <div class="col-auto"><span class="text-muted">NETTO</span> <strong>@FmtHours(previewNet ?? missing.ProposalHours)</strong></div>
+            </div>
+            <div class="mb-1">
+                <span class="tc-source-badge @primaryCss">@primaryBadge</span>
+            </div>
             @if (!string.IsNullOrWhiteSpace(expl.TimingSourceSupporting))
             {
                 <div class="small text-muted">Ondersteund door: @expl.TimingSourceSupporting</div>
             }
+            <div class="small text-muted mt-1">@previewPause.ExplanationNl</div>
             <div class="row g-2 small mt-2">
                 <div class="col-md-6">Planning: @(expl.PlanningInterval ?? "—")</div>
                 <div class="col-md-6">

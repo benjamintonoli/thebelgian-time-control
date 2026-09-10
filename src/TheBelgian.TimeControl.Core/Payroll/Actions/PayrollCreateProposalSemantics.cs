@@ -20,7 +20,8 @@ public static class PayrollCreateProposalSemantics
         && string.Equals(NormalizeProject(stored.ProjectId), NormalizeProject(current.ProjectId), StringComparison.Ordinal)
         && string.Equals(NormalizeBon(stored.BonNr), NormalizeBon(current.BonNr), StringComparison.Ordinal)
         && WallClockMinute(stored.Start) == WallClockMinute(current.Start)
-        && WallClockMinute(stored.End) == WallClockMinute(current.End);
+        && WallClockMinute(stored.End) == WallClockMinute(current.End)
+        && stored.Pause == current.Pause;
 
     /// <summary>
     /// Canonical fingerprint of the executable create mutation contract (no volatile display/workflow fields).
@@ -33,6 +34,7 @@ public static class PayrollCreateProposalSemantics
             proposal.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             WallClockMinute(proposal.Start).ToString("HH:mm", CultureInfo.InvariantCulture),
             WallClockMinute(proposal.End).ToString("HH:mm", CultureInfo.InvariantCulture),
+            proposal.Pause.ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture),
             NormalizeProject(proposal.ProjectId),
             NormalizeBon(proposal.BonNr) ?? string.Empty,
             proposal.MainTaskId.ToString(CultureInfo.InvariantCulture),

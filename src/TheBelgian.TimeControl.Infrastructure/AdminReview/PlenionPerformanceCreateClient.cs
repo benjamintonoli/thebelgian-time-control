@@ -20,6 +20,7 @@ internal sealed record PlenionPerformanceCreateCommand(
     string ReviewedBy,
     string ReviewCaseId,
     string IdempotencyKey,
+    TimeSpan? Pause = null,
     bool DryRun = false);
 
 internal sealed record PlenionPerformanceCreateResponse(
@@ -108,6 +109,7 @@ internal sealed class HttpPlenionPerformanceCreateClient(
             command.Date,
             command.Start,
             command.End,
+            Pause = command.Pause ?? TimeSpan.Zero,
             ProjectId = projectId,
             BonNr = bonNr,
             MainTaskId = (long)command.MainTaskId,

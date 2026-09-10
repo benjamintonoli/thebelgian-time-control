@@ -61,6 +61,19 @@ public interface IPayrollIntelligenceWorkbenchService
         string actor,
         CancellationToken cancellationToken);
 
+    Task<PayrollIntelligenceProposeResult> ProposePauseBoundaryAdjustAsync(
+        int year,
+        int month,
+        string resourceId,
+        DateOnly workDate,
+        long performanceId,
+        TimeOnly? newStart,
+        TimeOnly newEnd,
+        TimeSpan newPause,
+        string reason,
+        string actor,
+        CancellationToken cancellationToken);
+
     PayrollIntelligenceGpsCacheHint GetGpsCacheHint(string resourceId, DateOnly workDate);
 
     void InvalidateQueueCache(int year, int month);

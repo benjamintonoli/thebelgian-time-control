@@ -48,7 +48,13 @@ public sealed record PayrollActionCreateProposal(
     string ProjectId,
     string? BonNr,
     int MainTaskId,
-    PayrollIntervalSemantics IntervalSemantics);
+    PayrollIntervalSemantics IntervalSemantics,
+    TimeSpan Pause = default,
+    decimal GrossHours = 0m,
+    PayrollPrimaryTimingSource PrimaryTimingSource = PayrollPrimaryTimingSource.Manual,
+    string? SupportingEvidenceNl = null,
+    string? PauseExplanationNl = null,
+    string? OverlapExplanationNl = null);
 
 public sealed record PayrollActionAdjustProposal(
     long PerformanceId,
@@ -57,7 +63,13 @@ public sealed record PayrollActionAdjustProposal(
     DateTimeOffset ProposedStart,
     DateTimeOffset ProposedEnd,
     string? ExpectedActivityType,
-    long? ExpectedMainTaskExternalId);
+    long? ExpectedMainTaskExternalId,
+    TimeSpan? CurrentPause = null,
+    TimeSpan? ProposedPause = null,
+    decimal? CurrentAtl = null,
+    decimal? ProposedAtl = null,
+    string? PauseExplanationNl = null,
+    string? OverlapExplanationNl = null);
 
 public sealed record PayrollActionDeleteProposal(
     long PerformanceId,
@@ -130,6 +142,12 @@ public sealed class PayrollActionCreateProposalDto
     public string? BonNr { get; set; }
     public int MainTaskId { get; set; }
     public PayrollIntervalSemantics IntervalSemantics { get; set; }
+    public TimeSpan Pause { get; set; }
+    public decimal GrossHours { get; set; }
+    public PayrollPrimaryTimingSource PrimaryTimingSource { get; set; }
+    public string? SupportingEvidenceNl { get; set; }
+    public string? PauseExplanationNl { get; set; }
+    public string? OverlapExplanationNl { get; set; }
 }
 
 public sealed class PayrollActionAdjustProposalDto
@@ -141,6 +159,12 @@ public sealed class PayrollActionAdjustProposalDto
     public DateTimeOffset ProposedEnd { get; set; }
     public string? ExpectedActivityType { get; set; }
     public long? ExpectedMainTaskExternalId { get; set; }
+    public TimeSpan? CurrentPause { get; set; }
+    public TimeSpan? ProposedPause { get; set; }
+    public decimal? CurrentAtl { get; set; }
+    public decimal? ProposedAtl { get; set; }
+    public string? PauseExplanationNl { get; set; }
+    public string? OverlapExplanationNl { get; set; }
 }
 
 public sealed class PayrollActionDeleteProposalDto
